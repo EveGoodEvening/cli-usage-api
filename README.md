@@ -70,9 +70,9 @@ currently claimed as working or accepted.
 
 ## Exercised offline acceptance
 
-The orchestrator's final offline acceptance recorded:
+The orchestrator's post-fix offline acceptance for correction `d653397` recorded:
 
-- `uv sync --locked --group dev` succeeded; **849 tests passed in 27.81 seconds**.
+- `uv sync --locked --group dev` succeeded; **851 tests passed in 28.90 seconds**.
 - Ruff lint passed, the formatting check passed for **43 files**, and all **17
   source files** had clean language-server diagnostics.
 - The installed `usage --help` succeeded. The installed executable rendered
@@ -81,6 +81,12 @@ The orchestrator's final offline acceptance recorded:
 - Separate installed-CLI real-PTY acceptance passed local account CRUD,
   cancellation, non-TTY mutation refusal without writes, and the empty live
   dashboard/account-manager flow, including Back, `q`, and Ctrl-C.
+- An additional installed-CLI real-PTY check displayed the extra Grok product
+  `Other10` with selectable provenance; refresh removed the extra while retaining
+  required rows, and the application exited cleanly.
+
+The earlier C14 run passed 849 tests in 27.81 seconds; that historical evidence
+predates `d653397` and is not the post-fix result above.
 
 These results establish usable offline rendering, terminal lifecycle, and local
 account workflows—not authenticated metric retrieval or real secret persistence.
@@ -90,7 +96,7 @@ compatibility still needs authenticated comparison with the user's eligible
 account. Ordinary ChatGPT additionally lacks the upstream request/authentication
 and metric contract, so credentials alone cannot unblock it.
 
-### Final split review correction — verification pending
+### Final split review correction — verified offline
 
 The subsequent final split review completed four independent slices: three clean
 and one finding. The Grok adapter emitted an additional product metric that the
@@ -99,13 +105,12 @@ evidence with a synthetic extra snapshot emitted four Grok metrics while the
 overall visible row count stayed **10 → 10**; this is offline UI evidence, not an
 authenticated-provider observation.
 
-The bounded correction retains every required metric row first, then appends
-deduplicated snapshot extras in emission order. Additional Grok products must be
+Correction `d653397` retains every required metric row first, then appends
+deduplicated snapshot extras in emission order. Additional Grok products are
 visible and selectable through the existing details/provenance surface, without
 inventing independent remaining allowances; refresh adds/removes extras while
-preserving selected metric identity and account filtering. Separate post-fix
-verification and independent rereview, then final gate/accounting commit, remain
-pending. The C14 results above predate this correction and do not verify it.
+preserving selected metric identity and account filtering. The post-fix offline
+checks above passed, and both independent rereviews were clean.
 All 13 blocked acceptance tasks in PLAN.md retain their original scope and exact
 prerequisites; neither this correction nor offline acceptance completes the full
 original goal.
