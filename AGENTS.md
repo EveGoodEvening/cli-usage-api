@@ -29,3 +29,11 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   fixes. Record existing exact commit hashes and replace completed next assignments;
   keep fix verification, independent rereview, and closure explicitly pending until
   the orchestrator records their own evidence.
+- Keep an advisory config lock on a stable sibling file, not the config inode that
+  atomic replacement discards. Read-modify-write callbacks must reread while holding
+  that lock; individually locked load/save calls still permit stale lost updates.
+- A keyring backend's name or positive priority does not establish encrypted
+  persistence. Use the supported exact backend type policy; reject chained,
+  alternative/plaintext, unknown, and subclassed backends rather than silently
+  accepting a weaker backend or falling back. Session-only storage is an explicit
+  separate choice and must not probe the OS keyring.

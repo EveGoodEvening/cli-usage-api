@@ -1,11 +1,11 @@
 # Usage TUI
 
-A planned local terminal dashboard for subscription usage and Claude Platform credit
-balances. **The current C01 implementation is a Python package/domain library, not a
-working dashboard or live integration.** There is no usable `usage` CLI, TUI, offline
-demo, account manager, provider fetch, or credential backend yet. The console entry
-point declared in package metadata targets a later implementation; do not invoke it
-at this stage.
+A local terminal dashboard project for subscription usage and Claude Platform credit
+balances. **The current implementation provides Python domain and local storage
+libraries, not a working dashboard or live integration.** There is no usable `usage`
+CLI, TUI, offline demo, interactive account manager, credential importer, or provider
+fetch yet. The console entry point declared in package metadata targets a later
+implementation; do not invoke it at this stage.
 
 ## Original goal and scope
 
@@ -33,12 +33,12 @@ Decimal exponent from −1,000 through +1,000. Unsupported representations raise
 scientific-notation value from requesting enormous decimal expansion; a JSON byte
 limit alone is insufficient. Supported percentages remain exact, including values
 above 100%; remaining is exactly `max(0, 100 - used)`, not a rounded or capped used
-value. The green C01 baseline predates this correction; review-fix verification and
-closure remain pending in PLAN.md.
+value. C01 verification and closure are recorded in PLAN.md.
 
-Storage, credential import, fixed-origin HTTP transport, provider adapters, polling,
-offline demo, account management, terminal UI, and CLI integration belong to later
-chunks. Their requirements below are **planned, not current support**:
+C02 adds library-level account/config persistence and credential storage; see the
+local-storage section below. Credential import, fixed-origin HTTP transport,
+provider adapters, polling, offline demo, interactive account management, terminal
+UI, and CLI integration remain **planned, not current support**:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
@@ -55,7 +55,7 @@ spend is not credit balance; API usage is not subscription allowance. WHAM/Codex
 not a fallback for ordinary ChatGPT weekly chat usage. No requested live metric is
 currently claimed as working or accepted.
 
-## Development setup (domain library only)
+## Development setup (domain and storage libraries)
 
 Requirements: Python 3.11+ and [uv](https://docs.astral.sh/uv/). The initial target for
 the eventual application is Linux/POSIX; cross-platform credential import has not
@@ -69,14 +69,59 @@ uv sync --locked --group dev
 ```
 
 This is an environment setup command, not a claim that the full verification gate
-has passed. Import library code from `usage_tui.domain`; do not run the
-future console entry point. Dependency declarations for Textual, HTTP, and keyring
-alone do not implement UI, network access, or secure secret persistence.
+has passed. Import library code from `usage_tui.domain` and `usage_tui.storage`;
+do not run the future console entry point. Dependency declarations for Textual and
+HTTP alone do not implement UI or network access.
+
+## Local storage library (C02)
+
+`AccountStore(path=None)` uses
+`$XDG_CONFIG_HOME/usage-tui/accounts.json`, falling back to
+`~/.config/usage-tui/accounts.json`. An explicit path supports isolated callers.
+Schema version `1` contains account metadata and opaque credential references,
+never credential values. `load()` returns accounts; `save(accounts)` replaces a
+validated complete set. For read-modify-write changes use `mutate(change)`, which
+locks and rereads before applying the callback, rather than a stale `load`/`save`
+pair. A callback exception leaves the stored configuration unchanged.
+
+Manual-secret references must use the store's opaque reference format; inline
+manual credentials and persisted references bound to another account are rejected.
+External first-party file references are preserved without opening those files;
+their read-time permission validation belongs to the later credential resolver.
+
+On supported POSIX/Linux systems the store uses a private `0700` directory,
+`0600` config/lock files, a separate advisory lock, and atomic same-directory
+replacement. Config reads are limited to 1 MiB. Unsafe file ownership/permissions,
+symlinks, hardlinks, malformed data, and unsupported schema versions raise a safe
+`ConfigError`; an existing invalid configuration is not overwritten. These are
+cooperating-writer locks, not protection against hostile code running as your user.
+
+A failure after atomic replacement (such as a directory-sync failure) can report
+an error after the new config is already visible; atomic visibility is not a
+guarantee that every failed save left the previous version in place.
+
+`CredentialStore().put(account_id, secret, persist=False)` explicitly selects
+instance-local memory and returns an opaque `session:` reference. It does not
+access the OS keyring and cannot survive the store instance/process. With
+`persist=True`, the store lazily uses only the supported Linux Secret Service
+backend, returning a nonsecret `keyring:` reference. Null, fail, plaintext,
+chained, unrecognized, and subclassed backends are rejected; unavailable or locked
+keyring operations raise `CredentialError`, never silently fall back to memory
+or plaintext. `get(ref)` retrieves and `delete(ref)` removes this tool's stored
+credential; neither operates on external Claude/Grok login files or revokes a
+remote session. Deleting account metadata and deleting its local secret are
+separate library operations, not an interactive account-removal workflow yet.
+
+No real-keyring acceptance or C02 check outcome is claimed here. Python cannot
+guarantee memory zeroization, and a reference is not itself a secret-management
+permission boundary. Credential import, masked prompts, account-removal
+confirmation, and cancellation of in-flight provider work are later integrations.
 
 ## Authentication and private-contract boundaries
 
-No account setup or key-management command works at C01. Do not paste credentials
-into chat, issues, shell arguments, documentation, or fixtures.
+No account setup or key-management command works at this stage. Storage is available
+only through the Python library. Do not paste credentials into chat, issues, shell
+arguments, documentation, or fixtures.
 
 The planned Claude subscription integration uses an existing eligible Claude Code
 login or an explicit bearer; inference-only setup tokens and API keys are not
@@ -88,7 +133,7 @@ tool; browser credential extraction is out of scope.
 The planned Platform integration uses the user's own high-sensitivity `sessionKey`
 for `platform.claude.com` and an explicitly selected organization with billing-read
 rights. That session must never go to Claude subscription endpoints. No passwords,
-arbitrary Cookie headers, or HAR imports are part of the design. Future local API-key
+arbitrary Cookie headers, or HAR imports are part of the design. Local API-key
 storage does not enable subscription metrics or Console balance retrieval.
 
 Private HTTP routes and product fields are version-sensitive, not official public

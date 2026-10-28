@@ -2,7 +2,7 @@
 
 ## 0. Status, purpose, and scheduling authority
 
-Planning baseline: 2026-10-28. The repository was empty when scoped; research sources were read without browser automation or account credentials, and no tests, lint, formatters, gates, or commits were run as part of planning. Planning commit `6f731df57990b6512387ec481ccb693a214d1617`, green C01 draft `4d082d72f37a1ceb6d5e1e9cc68bcad7c7d62baa`, and separately verified review-fix commit `650a8a5` exist. C01 package/domain implementation, initial lock, bounded documentation, and review corrections passed the orchestrator's final checks and actual component smoke below; both independent rereviews were clean. C01 is closed in this bookkeeping update. C02 is the next runnable chunk after the orchestrator commits this close. No live account checks have been exercised.
+Planning baseline: 2026-10-28. The repository was empty when scoped; research sources were read without browser automation or account credentials, and no tests, lint, formatters, gates, or commits were run as part of planning. Planning commit `6f731df57990b6512387ec481ccb693a214d1617`, green C01 draft `4d082d72f37a1ceb6d5e1e9cc68bcad7c7d62baa`, separately verified review-fix commit `650a8a5`, and C01 closure commit `2347f1f` exist. C01 package/domain implementation, initial lock, bounded documentation, and review corrections passed the orchestrator's final checks and actual component smoke below; both independent rereviews were clean. C01 is closed. C02 implementation and bounded documentation have landed; the orchestrator's full green gate and actual storage/session smoke passed as recorded below. C02 is checked as implemented and verified before review, not closed; its draft/review/fix/close lifecycle remains pending. C03 remains gated on C02 closure. No live account checks have been exercised.
 
 Original goal: **终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。**
 
@@ -21,17 +21,19 @@ A checked chunk heading records implementation/documentation landed and orchestr
 | Planning | Reviewed and committed baseline; C01 implementation/documentation, final gates/smoke, review fixes, and independent rereviews complete; C01 closed |
 | Planning commit | `6f731df57990b6512387ec481ccb693a214d1617` — `docs(plan): record reviewed usage implementation plan` |
 | Last closed implementation chunk | C01 — package and frozen domain contract |
-| Next runnable action | C02 — local account config and secure key management; dispatch after the orchestrator commits this C01 close bookkeeping |
-| Implementation / docs / Lessons | C01-A package/domain and C01-B initial `uv.lock` landed; D(C01) completed `README.md`, `CHANGELOG.md`, `SECURITY.md`, and repo-root `AGENTS.md`; review follow-on completed bounded percentage security documentation, tracking, and reusable Lessons |
+| Next runnable action | C02 green draft commit → independent review → separately verified fixes if needed → closure; C03 remains gated on C02 closure |
+| Implementation / docs / Lessons | C01-A package/domain and C01-B initial `uv.lock` landed; D(C01) completed `README.md`, `CHANGELOG.md`, `SECURITY.md`, and repo-root `AGENTS.md`; review follow-on completed bounded percentage security documentation, tracking, and reusable Lessons. C02 implementation and bounded documentation landed; this bookkeeping does not independently verify C02 Lessons or acceptance |
 | Orchestrator checks | Baseline `uv sync --locked --group dev` succeeded. Final review-fix gate: `uv run pytest -q`: 101 passed in 0.13s; `uv run ruff check .`: all checks passed; `uv run ruff format --check .`: 8 files already formatted; domain LSP diagnostics OK |
+| C02 orchestrator full green gate | `uv run pytest -q`: 167 passed in 0.55s; `uv run ruff check .`: all checks passed; `uv run ruff format --check .`: 11 files already formatted. C02 implementation and verification are checked before review; draft/review/fix/close accounting remains pending |
 | Actual component smoke | Baseline `uv run --locked python -c` assertions passed for exact Account/Snapshot round-trips, Decimal overage, UTC timestamps, money, and invalid-input rejection. Final actual `uv run --locked python -c` smoke passed hostile exponent rejection and exact normal remainder/overage; metadata-only proof demonstrated the old precision risk without expanding hostile exponents. This is domain-library evidence, not CLI/TUI or live-provider acceptance |
-| Green draft commit | `4d082d72f37a1ceb6d5e1e9cc68bcad7c7d62baa` — green C01 baseline, before review fixes |
-| Review outcome | Initial independent reviews found percentage exponent/precision resource-exhaustion risk and stale planning/draft/next-action tracking; fixes resolved these findings. Independent rereviews `agent://c01-rereview-1` and `agent://c01-rereview-2` were both clean |
+| C02 actual component smoke | Actual `uv run --locked python -c` storage/session smoke passed: private temporary config directory `0700` and config file `0600`; AccountStore save/reload/mutate/delete; no serialized synthetic secret; session-only CredentialStore put/get/delete. No real keyring was contacted; persistent OS-keyring and live-provider acceptance remain separate and unexercised |
+| Green draft commit | `4d082d72f37a1ceb6d5e1e9cc68bcad7c7d62baa` — green C01 baseline, before review fixes. C02 green draft commit pending |
+| Review outcome | Initial C01 independent reviews found percentage exponent/precision resource-exhaustion risk and stale planning/draft/next-action tracking; fixes resolved these findings. Independent rereviews `agent://c01-rereview-1` and `agent://c01-rereview-2` were both clean. C02 independent review pending |
 | Review-fix commits / verification | `650a8a5` — separately verified C01 review fixes; final orchestrator gate and actual component smoke above passed, and both independent rereviews were clean |
-| Clean close | C01 closed: implementation, bounded docs/Lessons, final gates/smoke, independent rereviews, and separate review-fix commit accounting complete. Commit this close bookkeeping before dispatching C02; no close commit hash is claimed here |
+| Clean close | C01 closed: implementation, bounded docs/Lessons, final gates/smoke, independent rereviews, and separate review-fix commit accounting complete; closure commit `2347f1f` exists. C02 is not closed |
 | Live checks exercised | None; credentials unavailable |
 | Upstream research blocker | Ordinary ChatGPT chat-model weekly remaining/usage contract |
-| Next scheduling action | Orchestrator commits this C01 close bookkeeping → C02; C03…C14 remain sequentially gated by their predecessors' closure |
+| Next scheduling action | C02 green draft commit → independent review → separately verified fixes if needed → closure; C03…C14 remain sequentially gated by their predecessors' closure |
 
 ## 1. Scope and truthfulness matrix
 
@@ -280,9 +282,9 @@ Two sequential bounded assignments:
 
 Then D(C01) owns only the four documentation paths above. Exit: domain signatures and IDs match the plan, initial lock exists, and the orchestrator installs the locked environment and exercises domain round-trip/validation smoke before draft/review/closure. Suggested draft subject: `feat(domain): draft C01 package and frozen contracts`.
 
-Closed: final gates and actual domain smoke passed, both independent rereviews were clean, and separate review-fix commit `650a8a5` is recorded in the ledger. C02 becomes runnable after the orchestrator commits this close bookkeeping.
+Closed: final gates and actual domain smoke passed, both independent rereviews were clean, separate review-fix commit `650a8a5` is recorded in the ledger, and closure commit `2347f1f` exists. C02 is implemented and verified before review; its draft/review/fix/close lifecycle remains pending.
 
-### [ ] C02 — local account config and secure key management
+### [x] C02 — local account config and secure key management
 
 One worker; target paths: `src/usage_tui/storage.py`, `tests/test_storage.py`, `tests/test_secret_store.py`.
 
@@ -290,9 +292,11 @@ Implement AccountStore/CredentialStore, locking/atomic private config, secure-ba
 
 Exit: no serialized secret, no insecure automatic persistence fallback, no external credential mutation.
 
+Current evidence: C02 implementation and bounded documentation landed. The orchestrator's full green gate passed: `uv run pytest -q`: 167 passed in 0.55s; `uv run ruff check .`: all checks passed; `uv run ruff format --check .`: 11 files already formatted. Actual `uv run --locked python -c` storage/session smoke passed private temporary config directory/file modes `0700`/`0600`, AccountStore save/reload/mutate/delete, no serialized synthetic secret, and session-only CredentialStore put/get/delete without contacting a real keyring. This heading checks implementation and verification before review only; green draft commit, independent review, separately verified fixes if needed, and closure remain pending. Persistent OS-keyring/live acceptance remains unexercised; C03 stays gated on C02 closure.
+
 ### [ ] C03 — transport and credential resolution
 
-Two independent worker units after C01/C02:
+Two independent worker units only after C01 and C02 close; C01 is closed, but C02 closure is pending, so C03 remains gated:
 
 - **C03-A**, owned paths: `src/usage_tui/transport.py`, `tests/test_transport.py`, `tests/test_security.py`. Implement §4 fixed origins/path guards/auth-header mapping, streaming response bound, deadlines, no redirects/proxy inheritance, structured safe failures and Retry-After parsing. Test allowlisted origins/paths, attempted redirect exfiltration, credentials in exception bodies, cross-provider credential rejection, oversized/error/non-JSON bodies.
 - **C03-B**, owned paths: `src/usage_tui/credentials.py`, `tests/test_credentials.py`, `tests/fixtures/credentials.json`. Implement read-only first-party reference resolution, profile selection, import permission checks, expiry/scope parsing and manual-secret references. Fixture is synthetic and clearly labeled. No actual home-directory reads in tests.
@@ -505,6 +509,6 @@ Scheduling order: planning Conventional Commit → C01-A → C01-B → D(C01) �
 
 ### Next exact bounded assignment
 
-After the orchestrator commits this C01 close bookkeeping, assign **C02 — local account config and secure key management** to one worker, owned paths only `src/usage_tui/storage.py`, `tests/test_storage.py`, and `tests/test_secret_store.py`. Implement the §3.2/§5 AccountStore and CredentialStore contracts: locked/atomic private config, secure-backend validation, session-only references, CRUD, and cancellation-safe mutation. Write injected-backend and private-filesystem tests for malformed/newer config, permissions, symlinks, atomic write failure, concurrent mutation locking, and encrypted/insecure/locked backends; do not contact a real keyring. Do not run tests, lint, formatters, gates, or commits. Return the §8 worker evidence and an exact actual-component smoke snippet. C01 is closed; do not repeat planning, C01 implementation, or its resolved review fixes. Follow C02 implementation with its bounded D(C02) documentation task and full orchestrator gate/smoke/draft/review/fix/close lifecycle. Keep all live/authenticated acceptance and the ordinary ChatGPT upstream contract blocker open.
+Complete **C02 green draft/review/fix/close lifecycle**: record the green draft commit, obtain independent review, separately verify any review fixes, and close C02 before scheduling C03-A/C03-B. C02 implementation and bounded documentation landed, and the orchestrator's full green gate passed (`uv run pytest -q`: 167 passed in 0.55s; `uv run ruff check .`: all checks passed; `uv run ruff format --check .`: 11 files already formatted). Actual `uv run --locked python -c` storage/session smoke passed private `0700`/`0600` config save/reload/mutate/delete, no serialized synthetic secret, and session-only secret put/get/delete without a real keyring. C02 is checked only as implemented and verified before review, not closed. Workers must not run tests, lint, formatters, gates, smoke, or commits. C01 closure commit `2347f1f` exists; do not repeat C01 or redispatch C02 implementation/gate fixes. Keep persistent OS-keyring/live/authenticated acceptance and the ordinary ChatGPT upstream contract blocker open.
 
 Resource rule for any later browser-capable or >2 GiB command: browser remains forbidden for this assignment. If an authorized later task changes that restriction, use `~/.omp/bin/heavy-gate`, inspect `free -m` and gate status before fan-out, width ≤2, finite gated commands async with timeout 0, and close owned processes. Ordinary Python unit tests and this stdlib PTY harness do not require a browser launch or heavyweight gate.
