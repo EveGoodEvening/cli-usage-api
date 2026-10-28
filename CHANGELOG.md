@@ -156,10 +156,32 @@
   ordinary ChatGPT weekly quota is not complete. No CLI, worker-executed checks,
   smoke, live requests, or authenticated acceptance are claimed by this task.
 
+### Added — C08 polling and freshness library
+
+- Async scheduler lifecycle with injectable UTC/monotonic clock, sleep, RNG, and
+  loop-local snapshot publication. Initial polls, jittered per-account intervals,
+  one in-flight fetch per account, global two-account concurrency, and five-second
+  same-origin fetch-start spacing; no per-metric request duplication or polling-time
+  Console discovery.
+- Coalesced explicit refresh/reconnect, auth/permission/unconfigured suspension,
+  bounded exponential backoff, and preservation of longer server retry deadlines.
+  Account generations cancel obsolete work and reject late results; replacing an
+  account does not erase its same-provider retry embargo. Unresolved ChatGPT
+  publishes once per generation without credential resolution or periodic/manual
+  polling.
+- Last-good metrics/grants survive fetch failures with their original success time
+  and new attempt/error metadata. Compatible new observations, including partial
+  ones, replace fields rather than silently retaining disappeared metrics.
+  Freshness exposes stale age, passed-reset, and last-known status without changing
+  raw metric states or resetting quota on a timer.
+- Bounded README/security/Lessons documentation. No documentation-worker checks,
+  smoke, CLI/TUI integration, live requests, or authenticated acceptance are claimed;
+  exercised verification remains separate in PLAN.md.
+
 ### Not yet implemented / not verified
 
 - No CLI, terminal dashboard, interactive account/key management, ordinary ChatGPT
-  quota adapter, polling, or offline demo is delivered by the current libraries.
+  quota adapter, or offline demo is delivered by the current libraries.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.

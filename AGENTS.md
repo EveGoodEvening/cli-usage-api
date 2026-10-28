@@ -117,3 +117,18 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 - Direct Grok proxy JSON preserves private product evidence that typed ACP may
   discard. Do not silently substitute a subprocess, infer included quota from
   on-demand spend, or guess client-version/auth headers to hide incompatibility.
+- Keep scheduling deadlines monotonic and observation timestamps UTC. Convert an
+  upstream wall-clock retry deadline into a monotonic embargo when received;
+  periodic scheduling must not drift with wall-clock adjustments. A local backoff
+  cap cannot shorten a server embargo, and account replacement must preserve it
+  for the same provider rather than becoming an accidental rate-limit bypass.
+- Cancellation and generation identity are separate controls: an adapter can
+  finish after cancellation. C08 checks the active account-state identity before
+  publishing. Capture the resolved credential once per attempt; explicit account
+  updates must invalidate even unchanged references when their secret was replaced.
+  Do not claim background first-party-file monitoring or remote revocation.
+- Treat partial compatible responses as new observations, not fetch failures.
+  C08 replaces their current fields and fills missing required rows as unknown;
+  only failed fetches retain prior metrics/grants with the old successful timestamp.
+  Freshness and passed-reset status stay separate from raw metric state, so a local
+  timer cannot manufacture a new allowance or make failed polling look fresh.

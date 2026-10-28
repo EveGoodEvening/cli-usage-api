@@ -4,10 +4,10 @@
 
 This repository supplies package/domain, local storage, credential-resolution,
 fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Grok
-billing, and explicit provider-registry libraries, with an unresolved ChatGPT
-capability. It does not implement ordinary ChatGPT quota retrieval, polling,
-interactive account management, a CLI, or a TUI. A declared future console entry
-point does not provide these features.
+billing, explicit provider-registry, and polling/freshness libraries, with an
+unresolved ChatGPT capability. It does not implement ordinary ChatGPT quota
+retrieval, interactive account management, a CLI, or a TUI. A declared future
+console entry point does not provide these features.
 No authenticated provider or real OS-keyring check was exercised by this
 documentation task; implementation evidence and orchestrator verification remain
 separate in [PLAN.md](PLAN.md).
@@ -124,8 +124,8 @@ exposed, revoke or replace it through the relevant first-party service.
 - `TransportError` contains only fixed safe code/fetch state, optional status and
   retry time. Upstream bodies, credential paths, secrets, and arbitrary exceptions
   never become its diagnostic text. A valid 429 `Retry-After` has at least a
-  60-second delay and is not shortened to a scheduler cap. Transport does not poll
-  or implement the future scheduler's retry loop.
+  60-second delay and is not shortened to a scheduler cap. Transport does not poll;
+  retry scheduling is implemented separately by the C08 scheduler.
 
 ## Implemented C04 Claude provider boundary
 
@@ -228,7 +228,8 @@ exposed, revoke or replace it through the relevant first-party service.
   `currentPeriod.end`, falling back to `billingPeriodEnd` only if end is absent;
   invalid/reversed bounds cannot invent a reset. Valid usage survives invalid reset
   metadata. No hardcoded renewal, reset-coupon lookup, legacy cap estimate, ACP/gRPC
-  substitution, raw-response persistence, polling, or retries are implemented.
+  substitution, or raw-response persistence is implemented. Polling/retries belong
+  to the separate C08 scheduler, not this adapter.
 - Synthetic responses do not establish live subscription eligibility, credential
   acceptance, or private-proxy compatibility. No live or CLI/TUI acceptance follows
   from this library or documentation.
@@ -241,8 +242,8 @@ exposed, revoke or replace it through the relevant first-party service.
 - The ordinary ChatGPT capability keeps its required weekly row visible with
   `upstream_contract_missing` and unresolved provenance. It declares
   `requires_credential=False` and does not invoke credential resolution or
-  transport. Future orchestration must publish that blocked result without reading
-  a saved secret, even if the local account has an optional credential reference.
+  transport. The C08 scheduler publishes that blocked result without reading a
+  saved secret, even if the local account has an optional credential reference.
 - A labeled ChatGPT profile needs no credential. Optional user-provided bearer or
   API-key storage does not establish an authentication contract or enable weekly
   retrieval. Do not solicit ChatGPT cookies/passwords, extract browser sessions,
@@ -253,6 +254,41 @@ exposed, revoke or replace it through the relevant first-party service.
   requests or authenticated metric acceptance follow from the blocked capability.
   The exact unresolved read/authentication/metric prerequisite remains in PLAN.md
   §§4.4, 7, and 9; a finished error result is not completion of the requested quota.
+
+## Implemented C08 scheduler boundary
+
+- Each live attempt captures one immutable resolved credential. Account updates
+  invalidate previous work even when an opaque credential reference is reused;
+  removed/disabled/replaced account work is cancelled and obsolete late results
+  cannot publish as the current generation. External credential-file changes are
+  read on the next attempt, not monitored in the background. Call `update_accounts`
+  when replacing a credential during a fetch. Cancellation is not remote revocation
+  and does not delete first-party login files.
+- At most two accounts fetch concurrently, one per account, with at least five
+  seconds between fetch starts sharing an origin. Manual refresh coalesces and is
+  an explicit reconnect attempt; it does not bypass origin spacing or retry
+  embargoes. Authentication/permission/unconfigured failures suspend automatic
+  polling; only explicit refresh or account update resumes it.
+- Retry deadlines use monotonic time. Longer server `Retry-After` deadlines are
+  not truncated by the local exponential-backoff cap, and same-provider account
+  updates do not erase an embargo. Retries remain read-only provider fetches,
+  never token refreshes, login subprocesses, purchases, or reset actions.
+- Credential-free unresolved ChatGPT profiles publish the blocked result once per
+  generation without resolver/transport access; neither periodic polling nor
+  manual refresh reads their optional stored secret.
+- Error snapshots retain last-good values with their old success time and new
+  safe error/attempt metadata. Compatible responses (including partial ones)
+  replace current fields; absence cannot masquerade as current old usage. Stale
+  and passed-reset information is separate from raw metric state; timers never
+  synthesize fresh quota or reset values to zero.
+- `stop()` cancels scheduler-owned tasks and discards obsolete results. Injected
+  providers/transports are borrowed; their owner must close resources they own.
+  The current Transport already closes its client per request. There is no new
+  daemon, logging, raw-response persistence, CLI, or TUI integration.
+
+These are library controls, not authenticated polling or end-to-end application
+acceptance. This documentation task ran no checks or requests; exercised evidence
+remains the orchestrator's separate PLAN.md record.
 
 ## Planned integration controls — not end-to-end guarantees
 
@@ -268,9 +304,10 @@ chunks must connect them without bypassing their boundaries:
 - Never accept secrets as command arguments or documented secret-bearing
   environment variables. Use masked interactive inputs without history, saved-value
   prefill, or reveal/copy controls, and refuse secret input without a TTY.
-- Cancel obsolete in-flight account work. Account removal must not delete external
-  login files or claim remote revocation. Keep logs off by default and restrict
-  any logs to safe codes/local opaque account IDs, never raw responses or identity.
+- Connect account-management removal/replacement actions to scheduler cancellation.
+  Removal must not delete external login files or claim remote revocation. Keep
+  logs off by default and restrict any logs to safe codes/local opaque account IDs,
+  never raw responses or identity.
 
 No live metric or credential-safety acceptance follows from fixtures, installation,
 or a future offline demo. Private provider contracts can change without notice.

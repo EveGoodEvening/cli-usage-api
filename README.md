@@ -3,8 +3,8 @@
 A local terminal dashboard project for subscription usage and Claude Platform credit
 balances. **The current implementation provides Python domain, local storage,
 credential-resolution, fixed-origin HTTP transport, Claude subscription, Console
-balance/organization-discovery, Grok billing, and explicit provider-registry libraries,
-plus an unresolved ChatGPT capability, not a working dashboard.** There is no
+balance/organization-discovery, Grok billing, explicit provider-registry, and polling/
+freshness libraries, plus an unresolved ChatGPT capability, not a working dashboard.** There is no
 usable `usage` CLI, TUI, offline demo, interactive account manager, or
 authenticated/live metric acceptance yet.
 The console entry point declared in package metadata targets a later implementation;
@@ -43,8 +43,9 @@ read-only Linux credential-file resolution and guarded HTTP transport. C04 adds 
 Claude subscription adapter; C05 adds Console balances and organization discovery;
 C06 adds the Grok billing adapter described below. C07 adds the explicit provider
 registry and a truthful blocked ChatGPT capability, **not** an ordinary-chat quota
-adapter. Polling, offline demo, interactive account management, terminal UI, and
-CLI integration remain **planned, not current support**:
+adapter. C08 adds the library-level scheduler and freshness state described below.
+Offline demo, interactive account management, terminal UI, and CLI integration remain
+**planned, not current support**:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
@@ -122,9 +123,10 @@ If no valid scoped entry is available, legacy aliases are considered in order: `
 not substitutes. Fable is a model-scoped subset of weekly capacity, not an additive
 allowance; absence establishes neither eligibility nor a fixed half-week quota.
 
-The adapter does not poll, retry, preserve last-known values, render bars, or connect
-accounts. Those remain later scheduler/UI integrations. No live request or CLI
-smoke is claimed here; exercised component verification belongs in PLAN.md.
+The adapter itself does not poll, retry, preserve last-known values, render bars, or
+connect accounts. Polling and last-known state belong to the C08 scheduler library;
+rendering and interactive connections remain later UI integrations. No live request
+or CLI smoke is claimed here; exercised component verification belongs in PLAN.md.
 
 ## Claude Platform Console library (C05)
 
@@ -275,8 +277,9 @@ required `chatgpt.subscription.weekly` row and returns the structured
 `upstream_contract_missing` result with unresolved provenance
 (`SourceRef(kind="unresolved")`) and a safe Chinese/English explanation. Its
 `requires_credential` is false: it does not resolve saved credentials, access
-transport, or make a request. Future polling must honor that flag rather than
-opening a saved secret before publishing the blocked result.
+transport, or make a request. The C08 scheduler honors that flag rather than
+opening a saved secret before publishing the blocked result, and does not
+periodically poll the unresolved capability.
 
 The blocker is a defensible ordinary-chat read-only request/authentication and
 model/window/reset contract, not merely a missing token. Static research and its
@@ -291,6 +294,69 @@ user-provided bearer/API-key storage does **not** enable weekly retrieval; there
 is no working ChatGPT connection/setup command yet. Do not supply a cookie or
 password, extract browser sessions, or invent an OAuth client to unblock it.
 No ordinary ChatGPT live quota integration or authenticated acceptance is claimed.
+
+## Polling and freshness library (C08)
+
+`usage_tui.scheduler.Scheduler(accounts, providers, resolver, *, clock, rng,
+publish)` coordinates the provider libraries; it is not a dashboard or background
+daemon. Its async lifecycle is `start()`, `refresh(account_id=None)`,
+`update_accounts(accounts)`, and `stop()`. `publish(snapshot)` is a synchronous
+callback on the application event loop. The injected clock supplies UTC `now()`,
+`monotonic()`, and async `sleep(seconds)`; `SystemClock` is the real-clock
+implementation, and the RNG supplies `uniform(a, b)`.
+
+- Enabled accounts fetch immediately on start. Normal polling uses each account's
+  validated integer interval (default 60 seconds, configurable 30–3600), with ±10%
+  jitter and no interval below 30 seconds. Deadlines use monotonic time, not
+  wall-clock subtraction between polls.
+- Only one fetch per account and at most two accounts fetch concurrently. Fetch
+  starts sharing a provider origin are separated by at least five seconds. A fetch
+  retrieves the provider's complete snapshot, not one request per metric. Console
+  organization discovery is still an explicit connection operation, not a poll.
+- `refresh()` is a library-level explicit reconnect attempt, not an implemented
+  `r` key binding. Repeated requests coalesce, do not overlap in-flight work, and
+  cannot bypass origin spacing or retry deadlines. Authentication, permission, and
+  unconfigured failures suspend automatic polling until explicit refresh or account
+  update; external login files are not monitored during suspension.
+- Rate-limit, network, provider, and schema failures use exponential retry delays
+  starting at 60, 120, 240 seconds, capped at 15 minutes plus bounded jitter. A valid
+  server `Retry-After` has at least a 60-second delay and is never shortened to that
+  cap. Compatible successful fetches reset failure backoff.
+- Credential-free unresolved ChatGPT accounts publish their blocked capability once
+  per account generation, without resolving a saved secret or making a request.
+  They are not periodically polled, and manual refresh does not poll them.
+- Account updates invalidate prior in-flight generations, including updates using
+  the same credential reference. Removal, disabling, replacement, and shutdown
+  cancel obsolete work; a late result from an obsolete generation is not published.
+  Account updates cannot erase an existing same-provider retry embargo. Each live
+  attempt captures its credential once; replacing a secret during an attempt must
+  be accompanied by `update_accounts`, even if its opaque reference is unchanged.
+  Otherwise external file changes are discovered on the next attempt. `stop()`
+  cancels scheduler tasks; injected providers/transports are borrowed and their
+  owner remains responsible for their resources.
+
+Fetch errors retain last-good metrics/grants and their original successful
+`fetched_at`, while publishing the new fetch state, `attempted_at`, retry time, and
+safe diagnostic. Failed attempts therefore do not make observations fresh. A new
+compatible response (including `partial`) replaces the current fields: a missing
+Fable/product value is unknown, not an old value silently carried into the new
+observation.
+
+`freshness(snapshot, now, poll_interval_seconds=60, *, metric=None)` returns
+`Freshness(age_seconds, attempted_age_seconds, stale, reset_passed, last_known)`.
+Attempt age is separate from successful-observation age. Successful observation
+age is stale after `max(2 * poll_interval_seconds, 120)` seconds, or when a known
+reset crosses after the observation without a new observation. A reset already
+passed at observation time does not alone imply a missed later observation.
+Without any successful observation, age is unknown and stale is true. Passing
+`metric` scopes the reset check to that row; stale/last-known information does not
+change its raw metric state. Reaching reset never zeroes usage or fabricates a new
+period: presentation must say it is awaiting refresh. Computing freshness does not
+issue requests.
+
+No CLI/TUI controls, countdown display, offline source, live authenticated polling,
+or new verification outcome are claimed here. Exact exercised component evidence
+and remaining live prerequisites belong separately in PLAN.md.
 
 ## Local storage library (C02)
 
@@ -333,8 +399,8 @@ separate library operations, not an interactive account-removal workflow yet.
 
 No real-keyring acceptance or C02 check outcome is claimed here. Python cannot
 guarantee memory zeroization, and a reference is not itself a secret-management
-permission boundary. Masked prompts, account-removal confirmation, and cancellation
-of in-flight provider work are later integrations.
+permission boundary. Masked prompts and account-removal confirmation are later UI
+integrations; C08 supplies cancellation of obsolete in-flight provider work.
 
 ## Credential resolution and transport libraries (C03)
 
@@ -403,8 +469,8 @@ overall request deadline and a streamed 1 MiB response limit. JSON shape validat
 and metric interpretation belong to provider adapters. Safe `TransportError` values
 carry only fetch state, fixed code, optional HTTP status and retry time, never a
 response body, secret, credential path, or arbitrary exception text. A valid 429
-`Retry-After` is preserved with a minimum 60-second deadline; scheduler retry/backoff
-is a later integration, not part of this library's polling behavior.
+`Retry-After` is preserved with a minimum 60-second deadline; the C08 scheduler
+implements retry/backoff outside this transport boundary.
 
 No account setup or key-management command works at this stage. Do not paste
 credentials into chat, issues, shell arguments, documentation, or fixtures. No
