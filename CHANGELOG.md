@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Added — C12 production CLI and entry-point harness
+
+- Wired `usage` and `python -m usage_tui` to live dashboard composition, with
+  empty-account setup guidance, shared account/credential services and scheduler
+  lifecycle. `--demo` and `--demo --scenario errors` select offline synthetic
+  scenarios without constructing live dependencies.
+- Interactive `accounts list/add/edit/remove` and `accounts key set/delete`, with
+  explicit provider spellings, masked secret entry, TTY refusal, confirmation,
+  external-reference/organization/scope selection and first-party reconnect
+  guidance. API-key storage remains local-only, not subscription support.
+- Exit codes 0 for success/normal quit, 2 for usage/config/secret-input errors,
+  and 3 for credential/backend/provider-connection failures; per-account polling
+  errors remain in the dashboard. Persistent CLI secrets require the supported
+  encrypted keyring; session-only manual secrets are an explicit TUI choice.
+- Production-entry POSIX PTY harness for healthy/errors demo rendering, help,
+  read-only accounts, refresh, resize, quit/Ctrl-C and bounded terminal cleanup,
+  with isolated HOME/XDG state. README/security/installation guidance and reusable
+  repository Lessons document actual entry-point and secret-storage boundaries.
+- No documentation-worker checks or harness execution are claimed. C12 review,
+  exercised gate/smoke and closure remain separate in `PLAN.md`. Ordinary ChatGPT
+  weekly retrieval remains contract-blocked; no live or real-keyring acceptance
+  is implied by the CLI or demo.
+
 ### Added — C11 terminal dashboard and help
 
 - Dependency-injected `UsageApp` with LIVE/DEMO distinction, Chinese metric labels,
@@ -19,11 +42,11 @@
   stores, resolver or clients; demo accounts are read-only and synthetic ChatGPT
   samples are explicitly not ordinary-chat support.
 - API/startup, lifecycle, security/freshness and repository-Lessons documentation.
-  The usable `usage` CLI remains C12 work. No documentation-worker checks, terminal
-  smoke, live metric or real-keyring acceptance are claimed; exercised evidence
-  remains separate in `PLAN.md`.
+  C12 subsequently supplies the usable CLI below these component boundaries.
+  Exercised evidence remains separate in `PLAN.md`; documentation is not a
+  live-metric or real-keyring acceptance claim.
 
-### Fixed — C11 independent-review findings; verification pending
+### Fixed — C11 independent-review findings
 
 - Keep printable `q` nonpriority so focused account-form inputs can accept it;
   retain unconditional priority Ctrl-C exit. The defect was identified by static
@@ -32,8 +55,8 @@
   preserving saturated retry deadlines and scheduler embargoes. The supplied
   `TZ=Asia/Shanghai` reproduction raised `OverflowError` for UTC `datetime.max`.
 - Earlier 779-test/24.82s and four real-PTY results are pre-review baselines only.
-  Separate fix verification and independent rereview remain pending; C11 is not
-  closed and C12 remains gated. No new checks or smoke are claimed here.
+  Separate fix verification and clean independent rereviews are recorded in
+  `PLAN.md`; the temporary C11 host is not production-entry CLI evidence.
 
 ### Added — C10 Textual account-management scope
 
@@ -71,7 +94,7 @@
 ### Added — C01 package/domain scope
 
 - Python 3.11+ `src/` package metadata and runtime/development dependency declarations.
-  The declared future `usage` entry point is not a runnable CLI at this stage.
+  C12 subsequently implements the declared `usage` entry point.
 - Frozen domain types for providers, accounts, credential kinds/bindings, money, quotas,
   metrics, grants, provenance, diagnostics, snapshots, and transport-safe errors.
 - Numeric and aware-timestamp validation, exact money arithmetic, stable metric IDs,
@@ -101,8 +124,8 @@
   and lazy persistent operations restricted to the exact supported Linux Secret
   Service backend. Unsupported or locked backends raise safe errors without an
   automatic plaintext/memory fallback. No real OS-keyring acceptance is claimed.
-- Storage test source and fixed safe config/credential errors. Interactive
-  account/key management remains unimplemented; C03 adds read-only import below.
+- Storage test source and fixed safe config/credential errors. C10 subsequently
+  adds interactive account/key screens; C12 adds CLI integration.
 - Bounded documentation of local persistence and session-only security boundaries;
   implementation evidence is separate from orchestrator verification in `PLAN.md`.
 
@@ -279,9 +302,9 @@
 
 ### Not yet implemented / not verified
 
-- No usable CLI or ordinary ChatGPT quota adapter is delivered. The dashboard
-  and read-only offline demonstration are available through the Python API;
-  `usage --demo` and production-entry composition remain C12 work.
+- Ordinary ChatGPT quota retrieval is not delivered: its required row remains
+  blocked on an upstream contract. The production CLI and offline demo do not
+  resolve that prerequisite.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.

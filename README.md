@@ -1,13 +1,12 @@
 # Usage TUI
 
 A local terminal dashboard for subscription usage and Claude Platform credit
-balances. **C11 adds the dependency-injected Textual dashboard and help to the
-provider, storage, scheduler, offline-source, and account-management components.
-There is not yet a usable `usage` CLI.** No authenticated/live metric acceptance
-is claimed, and ordinary ChatGPT weekly retrieval remains contract-blocked.
-The console entry point declared in package metadata targets C12 integration;
-do not invoke it at this stage. Python dashboard startup and live dependency
-injection are described below. This is a terminal TUI, not a web application.
+balances. C12 wires the `usage` CLI to the live dashboard, offline demo, and
+interactive account/key management. **Ordinary ChatGPT weekly retrieval remains
+blocked by an unresolved upstream contract; saving a credential does not enable
+it. No authenticated/live metric or real OS-keyring acceptance is claimed.**
+This is a terminal TUI, not a web application. Exercised verification and chunk
+closure are recorded separately in [PLAN.md](PLAN.md).
 
 ## Original goal and scope
 
@@ -45,8 +44,8 @@ registry and a truthful blocked ChatGPT capability, **not** an ordinary-chat quo
 adapter. C08 adds the library-level scheduler and freshness state described below.
 C09 adds the deterministic offline source; C10 adds the reusable Textual account
 manager. C11 connects terminal rendering, help, account-management callbacks, and
-source lifecycle through `UsageApp`. CLI argument handling and production entry
-point composition remain C12 work:
+source lifecycle through `UsageApp`. C12 composes those components behind the
+installed `usage` entry point and matching account/key prompts:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
@@ -63,23 +62,102 @@ spend is not credit balance; API usage is not subscription allowance. WHAM/Codex
 not a fallback for ordinary ChatGPT weekly chat usage. No requested live metric is
 currently claimed as working or accepted.
 
-## Development setup (Python libraries)
+## Install and run
 
-Requirements: Python 3.11+ and [uv](https://docs.astral.sh/uv/). The initial target for
-the libraries is Linux/POSIX; cross-platform credential import is not supported.
-
-The repository includes `uv.lock`. Install the locked development environment from
-the repository root:
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and an interactive
+terminal for the dashboard and account prompts. Linux/POSIX is the supported
+credential-import and persistence target. Run from the repository root:
 
 ```sh
-uv sync --locked --group dev
+uv sync --locked
+uv run usage --help
+uv run usage --demo
+uv run usage --demo --scenario errors
+uv run usage
 ```
 
-This is an environment setup command, not a claim that the full verification gate
-has passed. Library modules include `usage_tui.domain`, `usage_tui.storage`,
-`usage_tui.credentials`, `usage_tui.transport`, `usage_tui.providers.claude`,
-`usage_tui.providers.console`, and `usage_tui.providers.grok`; do not run the future console entry point.
-Transport alone does not normalize metrics.
+`usage` is the installed console entry point; `uv run python -m usage_tui` is the
+module equivalent. The default command opens the **live** dashboard, loading local
+account metadata. With no accounts it shows setup guidance; press `a` to connect
+one. `--scenario` requires `--demo`; demo cannot be combined with account commands.
+It selects a deterministic scenario, not a live error fallback. Demo constructs
+no live stores, resolver, providers or HTTP clients and does not read account
+configuration or credentials. Its account screen is
+read-only. Synthetic ChatGPT samples do not demonstrate live ChatGPT support.
+
+For development dependencies use `uv sync --locked --group dev`. Installation
+and the commands above are usage instructions, not claims of exercised acceptance.
+
+### Account and key commands
+
+```sh
+uv run usage accounts list
+uv run usage accounts add --provider claude-subscription
+uv run usage accounts add --provider claude-platform
+uv run usage accounts add --provider chatgpt-subscription
+uv run usage accounts add --provider grok-subscription
+uv run usage accounts edit ACCOUNT_ID
+uv run usage accounts remove ACCOUNT_ID
+uv run usage accounts key set ACCOUNT_ID
+uv run usage accounts key delete ACCOUNT_ID
+```
+
+Use the opaque account ID from `accounts list`, not a secret, for `ACCOUNT_ID`.
+List is safe without a TTY and prints nonsecret metadata, not credential values.
+Every mutating command requires both stdin and stdout to be TTYs. Add/edit asks
+for a label, integer polling interval (30…3600 seconds), and enabled `yes`/`no`.
+Choose a numbered credential source or **No credential / local profile**; edit
+can retain the existing source or explicitly change its organization/scope.
+`key set` uses the same source selection, including external references; it is
+not limited to API keys. Provider-specific sources are described below. CLI file
+references must be `default` or an absolute path. Grok scope selection is explicit;
+Console requires consent to read-only organization discovery and a numbered
+choice even for one result. The final save confirms any changed reference/key;
+removal and key deletion have separate confirmations. External references are
+first-party credential files, not login commands; those files are never modified
+or deleted. Reconnect guidance directs renewal to
+the first-party tool; the TUI reconnect action requests a scheduler-controlled
+refresh, not a token refresh or rate-limit bypass.
+
+Never pass a token, cookie, API key or password in arguments, shell history,
+environment variables, or account labels. Manual secrets use masked `getpass`
+input in the CLI and masked inputs in the TUI. Noninteractive input is refused.
+In CLI line prompts, Escape **then Enter**, Ctrl-C, or EOF cancels with exit 0
+without committing pending changes; the TUI uses Escape directly. Local API-key
+storage does **not** enable subscription metrics or Console balances.
+
+CLI manual-secret storage requires the supported encrypted Linux Secret Service
+keyring, unlocked in the current desktop/session. Unsupported, unavailable or
+locked backends produce an error; do not install `keyrings.alt` or choose a
+plaintext backend as a workaround. If persistent storage is unavailable, launch
+`uv run usage`, press `a`, and explicitly choose **session only** for a new manual
+secret. That credential is shared with this dashboard's resolver but disappears
+when the process exits; a saved profile does not make it durable. Python cannot
+promise memory zeroization. See [SECURITY.md](SECURITY.md) for the threat boundary.
+
+Exit codes: **0** success or normal dashboard quit; **2** usage, configuration or
+secret-input error; **3** credential, secure-backend or provider-connection failure.
+Per-account polling errors remain visible in the dashboard rather than turning
+every failed observation into a process exit.
+
+### Production-entry terminal harness
+
+The maintained POSIX harness launches the installed `usage` executable beside
+the current Python interpreter, not a Python-only app host:
+
+```sh
+uv run python scripts/tui_smoke.py --scenario healthy
+uv run python scripts/tui_smoke.py --scenario errors
+```
+
+Omitting `--scenario` or using `--scenario all` selects both. Each scenario has
+separate normal-quit and Ctrl-C runs with isolated temporary HOME/XDG state.
+The harness waits for rendered metrics/details/help/read-only account screens,
+requests refresh, resizes 80×24 to 40×12, and checks terminal restoration with
+bounded waits and child kill/reap cleanup. Captures stay bounded in memory and
+are neither printed nor persisted. These are verification commands for the
+orchestrator, not a claim that this documentation task ran them or that any live
+provider/keyring was exercised.
 
 ## Textual dashboard API (C11)
 
@@ -93,19 +171,12 @@ UsageApp(
 ```
 
 `mode` is `"demo"` or `"live"`; scenarios are `"healthy"` and `"errors"`.
-Open the actual offline dashboard in a terminal after environment setup:
-
-```sh
-uv run python -c 'from usage_tui.app import UsageApp; UsageApp(mode="demo", scenario="healthy").run()'
-```
-
-Change the scenario to `"errors"` for synthetic failure/last-known views. This is
-the Python component API, **not** an installed `usage --demo` command or exercised
-verification claim. Demo constructs `DemoSource` directly and ignores injected
-live accounts/factories/stores. It never reads real account configuration or
-credentials and opens account management read-only. Its clock starts from the
-fixture time and advances one second per UI tick, not from the machine date.
-The DEMO banner and synthetic ChatGPT explanation distinguish samples from support.
+Prefer `uv run usage --demo` for normal offline startup; the equivalent Python
+component API is `UsageApp(mode="demo", scenario="healthy").run()`.
+Demo constructs `DemoSource` directly and ignores injected live
+accounts/factories/stores. Its clock starts from the fixture time and advances
+one second per UI tick, not from the machine date. The DEMO banner and synthetic
+ChatGPT explanation distinguish samples from support.
 
 Live startup is explicit. An empty `UsageApp(mode="live").run()` shows the
 no-account guidance without implicit configuration reads; it cannot edit accounts.
@@ -161,7 +232,7 @@ to `refresh(account_id)`. Teardown stops the source, then invokes the live
 factory's optional `aclose()` (awaiting an awaitable result), even if stop fails.
 This hook closes factory-owned clients; borrowed resources remain their owner's
 responsibility. The example `Transport` closes its fresh HTTP client per request
-and needs no shared-client close hook. Production CLI composition remains C12 work.
+and needs no shared-client close hook. The production CLI supplies this composition.
 
 ### Dashboard keys and truthful presentation
 
@@ -760,9 +831,9 @@ response body, secret, credential path, or arbitrary exception text. A valid 429
 `Retry-After` is preserved with a minimum 60-second deadline; the C08 scheduler
 implements retry/backoff outside this transport boundary.
 
-No account setup or key-management CLI command works at this stage. Use the Textual
-account screen, not shell arguments, for interactive secrets. Do not paste
-credentials into chat, issues, documentation, or fixtures. No
+Account setup and key-management commands above use interactive masked prompts;
+the Textual account screen additionally supports explicit session-only storage.
+Do not paste credentials into chat, issues, documentation, or fixtures. No
 browser extraction, token refresh protocol, live-provider acceptance, or real
 OS-keyring acceptance is claimed. Private HTTP routes and product fields remain
 version-sensitive, not official public API guarantees. Researched sources and

@@ -5,10 +5,23 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 
 ## Lessons
 
-- Keep dashboard composition distinct from a production CLI: a reusable `UsageApp`
-  and a Python demo launcher do not make the declared `usage` entry point runnable.
-  Document the actual constructor, factory callback and cleanup ownership, and keep
-  CLI acceptance separate until its composition exists.
+- Compose the production entry point from the existing account services, provider
+  registry and scheduler; do not duplicate account mutation or transport policy in
+  CLI branches. Share the credential store with the resolver so explicit TUI
+  session-only credentials work for the lifetime of that app.
+- Branch demo before constructing live stores, resolvers, providers or clients.
+  Installed-entry PTY evidence and Python component-host evidence are different;
+  a runnable CLI, harness source or synthetic ChatGPT sample proves no live quota
+  compatibility. Keep exercised acceptance in PLAN.md.
+- Secrets belong in masked interactive prompts, never command arguments or
+  environment-variable examples. Refuse non-TTY secret operations; persistent CLI
+  key storage must fail honestly when the secure backend is unavailable, rather
+  than create session memory that disappears when the CLI process exits. Direct
+  users to the explicit TUI session-only choice instead.
+- A real-entry PTY harness must launch the installed console executable in the same
+  environment, isolate HOME/XDG, wait for meaningful rendered tokens, and bound
+  every wait. Always kill/reap owned children and restore terminal state; a
+  traceback-free startup alone does not cover modal return, resize or shutdown.
 - UI countdown ticks are presentation only. Use the source's clock for demo time,
   show last-success and last-attempt separately, and retain numeric overage, unknown
   fields and last-known errors without resetting quota when a deadline passes.

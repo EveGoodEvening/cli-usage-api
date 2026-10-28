@@ -1,16 +1,15 @@
 # Security boundaries
 
-## Current implementation: libraries and a terminal dashboard
+## Current implementation: terminal dashboard and production CLI
 
 This repository supplies package/domain, local storage, credential-resolution,
 fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Grok
-billing, explicit provider-registry, polling/freshness, and deterministic offline-source
-libraries, an unresolved ChatGPT capability, a reusable Textual account-management
-screen, and the C11 dependency-injected Textual dashboard. It does not implement
-ordinary ChatGPT quota retrieval or a usable CLI. The declared future console
-entry point awaits C12 composition; Python dashboard startup is documented in
-README.md. No authenticated provider or real OS-keyring check was exercised by
-this documentation task; verification remains separate in [PLAN.md](PLAN.md).
+billing, provider-registry, polling/freshness and offline-source libraries, a
+Textual account manager/dashboard, and the C12 production `usage` CLI. **Ordinary
+ChatGPT weekly quota retrieval remains blocked by the missing upstream contract.**
+Saving credentials or displaying synthetic ChatGPT demo values does not unblock
+it. No authenticated provider or real OS-keyring acceptance is claimed by this
+documentation task; exact exercised verification remains in [PLAN.md](PLAN.md).
 
 Domain records are not a secure storage service. A credential value excluded from a
 representation is not encrypted or erased from process memory. Do not serialize
@@ -24,12 +23,48 @@ reports should describe the affected component and reproduction with synthetic d
 remove authentication and identity information before sharing. If a credential is
 exposed, revoke or replace it through the relevant first-party service.
 
+## Implemented C12 entry and CLI secret boundary
+
+- `usage` and `python -m usage_tui` compose the live dashboard with one shared
+  account store, credential store, resolver and provider/scheduler factory. The
+  factory exposes the canonical bound async Console discovery callable; app
+  teardown stops its source before awaiting factory cleanup, which stops any
+  created schedulers. Transport HTTP clients are request-scoped, not leaked
+  shared clients. Config load failures do not replace the existing file. Dashboard
+  per-account failures stay in the UI; they are not a reason to substitute demo
+  data. `--demo` branches before live dependency construction and reads only the
+  packaged synthetic scenario, never real accounts, keyring or credential files.
+- Account/key commands accept opaque account IDs and nonsecret provider selection,
+  not secret arguments or secret-bearing environment-variable configuration.
+  CLI manual entry uses `getpass` and refuses echoed-input fallback. Every mutating
+  account command requires TTY stdin and stdout; list remains noninteractive-safe.
+  Replacement/deletion is confirmed. Ctrl-C, EOF or Escape then Enter cancels CLI
+  prompts with status 0 and no pending writes; the TUI handles Escape directly.
+  Do not pipe secrets, enable shell tracing or record the terminal session.
+- CLI key persistence requires the exact supported encrypted Linux Secret Service
+  backend; a locked/unsupported backend returns actionable guidance, not plaintext
+  or ephemeral storage presented as durable. Explicit session-only entry is a TUI
+  choice and shares the running app's credential store/resolver. It is lost on
+  exit, regardless of whether nonsecret account metadata remains.
+- API-key storage is local-only and does not authorize subscription or Console
+  requests. Console `sessionKey` entry remains a high-sensitivity account-session
+  operation, never a password, full Cookie header, HAR import or limited API key.
+  Imported first-party files are read-only; local removal does not revoke remote
+  sessions or delete those files.
+- Exit status 0 denotes success/normal dashboard quit, 2 usage/config/secret-input
+  errors, and 3 credential/backend/provider-connection failures. Errors must remain
+  fixed safe messages, not raw exceptions, file contents or upstream bodies.
+- The production-entry PTY harness uses isolated temporary HOME/XDG state and
+  synthetic demo scenarios. It does not establish live metric, real-keyring or
+  authenticated acceptance. Its captures must be sanitized and its child process
+  bounded, killed/reaped on failure, and terminal settings restored.
+
 ## Implemented C11 dashboard boundary
 
 - `UsageApp` is a terminal UI, not a web service or a new HTTP/authentication
   implementation. Live access is supplied explicitly through an injected source
   factory; the dashboard must not infer credentials from account labels or bypass
-  the provider/transport restrictions above. C12 owns production CLI composition.
+  the provider/transport restrictions above. The CLI supplies production composition.
 - Demo mode constructs the packaged offline source, not live stores, credential
   resolution, transport, or clients. Its account screen is read-only. The DEMO
   banner and synthetic ChatGPT warning distinguish examples from live support;
