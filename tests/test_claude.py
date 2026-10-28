@@ -228,6 +228,54 @@ async def test_scoped_bad_reset_keeps_preferred_percentage(payload):
     assert snapshot.metrics[2].reset_at is None
 
 
+@pytest.mark.parametrize("malformed_first", [False, True])
+async def test_duplicate_bad_reset_preserves_equal_quota_and_siblings(payload, malformed_first):
+    valid = copy.deepcopy(payload["limits"][0])
+    malformed = copy.deepcopy(valid)
+    malformed.update(percent="23.750", resets_at="bad")
+    payload["limits"] = [malformed, valid] if malformed_first else [valid, malformed]
+    payload["fable_weekly"] = {"utilization": 4}
+    provider, requests = provider_for(payload)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert_rows(snapshot)
+    assert len(requests) == 1
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.diagnostic.code == "partial_data"
+    assert snapshot.fetched_at == NOW
+    fable = snapshot.metrics[2]
+    assert fable.state == MetricState.READY
+    assert fable.quota.used_percent == Decimal("23.75")
+    assert fable.reset_at is None
+    assert "invalid" in fable.detail
+    assert [row.quota.used_percent for row in snapshot.metrics[:2]] == [
+        Decimal("12.5"),
+        Decimal("110.25"),
+    ]
+    assert all(row.state == MetricState.READY for row in snapshot.metrics[:2])
+    assert all(row.reset_at is not None and row.detail is None for row in snapshot.metrics[:2])
+
+
+@pytest.mark.parametrize("malformed_first", [False, True])
+@pytest.mark.parametrize("change", [{"percent": 5}, {"resets_at": "2026-11-02T12:00:00Z"}])
+async def test_bad_reset_does_not_hide_conflicting_duplicates(payload, malformed_first, change):
+    valid = copy.deepcopy(payload["limits"][0])
+    conflicting = copy.deepcopy(valid)
+    conflicting.update(change)
+    malformed = copy.deepcopy(valid)
+    malformed["resets_at"] = "bad"
+    payload["limits"] = (
+        [malformed, valid, conflicting] if malformed_first else [valid, conflicting, malformed]
+    )
+    payload["fable_weekly"] = {"utilization": 4}
+    provider, _ = provider_for(payload)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.metrics[2].state == MetricState.UNKNOWN
+    assert snapshot.metrics[2].quota is None
+    assert "Conflicting" in snapshot.metrics[2].detail
+    assert all(row.state == MetricState.READY for row in snapshot.metrics[:2])
+
+
 @pytest.mark.parametrize("change", [{"percent": 5}, {"resets_at": "2026-11-02T12:00:00Z"}])
 async def test_conflicting_valid_scoped_duplicates_reject_fable_not_siblings(payload, change):
     duplicate = copy.deepcopy(payload["limits"][0])

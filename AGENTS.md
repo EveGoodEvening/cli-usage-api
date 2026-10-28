@@ -61,6 +61,11 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   activity-flag shortcut: match the weekly scope and normalized model display name,
   retain inactive-but-valid meters, and reject conflicting valid duplicates before
   considering any arbitrary choice. Keep legacy fallback ordering explicit.
+- Compare duplicate quota evidence independently from reset validity. Equal-percent
+  scoped Fable duplicates with an invalid reset must preserve quota, leave reset
+  unknown, and flag partial, not become an unknown quota through tuple inequality.
+  C04 review's orchestrator reproduction initially lost quota (Fable UNKNOWN,
+  quota None); its bounded fix remains pending reverify, not established green.
 - Keep numeric timestamp heuristics provider-local. Claude's positive seconds and
   `>= 10^11` millisecond normalization does not justify weakening the domain's
   timezone-aware timestamp contract or applying the heuristic to other providers.

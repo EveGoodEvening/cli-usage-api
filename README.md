@@ -107,8 +107,12 @@ Claude adapter. This is not a global timestamp heuristic.
 Fable first uses valid `limits[]` entries with `kind == "weekly_scoped"` and
 `scope.model.display_name.strip().casefold() == "fable"`, reading `percent` and
 `resets_at` even when `is_active` is false. Conflicting valid duplicate scoped
-entries make that row unknown rather than selecting one arbitrarily. If no valid
-scoped entry is available, legacy aliases are considered in order: `fable_weekly`,
+entries make that row unknown rather than selecting one arbitrarily. Equal-percent
+duplicates with an invalid reset must instead retain quota, leave reset unknown,
+and produce a partial snapshot; invalid reset metadata alone is not a quota conflict.
+Review reproduced an initial violation returning Fable UNKNOWN with quota None;
+the bounded review fix is pending reverify, not claimed green or closed.
+If no valid scoped entry is available, legacy aliases are considered in order: `fable_weekly`,
 `fable_seven_day`, `seven_day_fable`. Opus/Sonnet fields and extra-usage balances are
 not substitutes. Fable is a model-scoped subset of weekly capacity, not an additive
 allowance; absence establishes neither eligibility nor a fixed half-week quota.

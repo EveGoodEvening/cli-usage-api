@@ -77,6 +77,12 @@
 - Documentation of the library contract and private-API/unknown-window boundaries.
   No authenticated response, live acceptance, or documentation-worker check is
   claimed; verification remains separately recorded in `PLAN.md`.
+- C04 review finding: equal-percent scoped Fable duplicates with a malformed reset
+  initially returned Fable UNKNOWN with quota None in the orchestrator reproduction.
+  The required behavior retains quota, leaves reset unknown, and flags partial;
+  malformed reset metadata alone must not be treated as a quota conflict. The bounded
+  review fix is pending reverify; initial green checks do not establish fix verification
+  or C04 closure.
 
 ### Not yet implemented / not verified
 

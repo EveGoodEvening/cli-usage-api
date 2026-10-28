@@ -86,9 +86,15 @@ def _fable(payload: dict) -> tuple[tuple[QuotaValue, datetime | None, bool] | No
                 candidates.append(parsed)
     if candidates:
         first = candidates[0]
-        if any(candidate[:2] != first[:2] for candidate in candidates[1:]):
+        if any(candidate[0] != first[0] for candidate in candidates[1:]):
             return None, True
-        return (first[0], first[1], any(candidate[2] for candidate in candidates)), False
+        valid_resets = [candidate[1] for candidate in candidates if not candidate[2]]
+        if valid_resets and any(reset != valid_resets[0] for reset in valid_resets[1:]):
+            return None, True
+        invalid_reset = any(candidate[2] for candidate in candidates)
+        # Malformed resets cannot contradict valid usage, but leave the reset unknown.
+        reset = None if invalid_reset else first[1]
+        return (first[0], reset, invalid_reset), False
     for alias in ("fable_weekly", "fable_seven_day", "seven_day_fable"):
         parsed = _window(payload.get(alias))
         if parsed is not None:
