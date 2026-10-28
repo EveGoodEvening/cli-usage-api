@@ -1,6 +1,9 @@
 """Pilot drives production screens with isolated stores, never live services."""
 
 import json
+import os
+import stat
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -145,7 +148,12 @@ async def test_console_discovery_explicit_selection_and_temporary_cleanup(manage
             return (OrganizationChoice("org-one", "First"), OrganizationChoice("org-two", "Second"))
 
     discovery = Discovery()
-    manager.console_discovery = discovery
+    manager = AccountManagerScreen(
+        manager.account_store,
+        manager.credential_store,
+        manager.resolver,
+        console_discovery=discovery.discover_organizations,
+    )
     async with Host(manager).run_test() as pilot:
         form = await open_form(pilot.app, pilot)
         await set_source(form, pilot, ProviderId.CLAUDE_PLATFORM, CredentialKind.CONSOLE_SESSION)
@@ -170,7 +178,7 @@ async def test_console_discovery_failure_redacted_and_cancel_no_orphan(manager):
         async def discover_organizations(self, _credential):
             raise RuntimeError("synthetic-SECRET error body")
 
-    manager.console_discovery = Discovery()
+    manager.console_discovery = Discovery().discover_organizations
     async with Host(manager).run_test() as pilot:
         form = await open_form(pilot.app, pilot)
         await set_source(form, pilot, ProviderId.CLAUDE_PLATFORM, CredentialKind.CONSOLE_SESSION)
@@ -313,6 +321,7 @@ async def test_service_failure_clears_input_and_redacts_error(manager, monkeypat
         assert field.value == ""
         assert "synthetic-SECRET" not in str(form.query_one("#form-status", Static).render())
         assert not manager.credential_store._session
+        assert manager.accounts == ()
 
 
 @pytest.mark.parametrize("provider", list(ProviderId))
@@ -321,7 +330,7 @@ async def test_api_key_storage_never_discovers_or_implies_reads(manager, provide
         async def discover_organizations(self, _credential):
             raise AssertionError("Local API key must not trigger discovery")
 
-    manager.console_discovery = ForbiddenDiscovery()
+    manager.console_discovery = ForbiddenDiscovery().discover_organizations
     async with Host(manager).run_test() as pilot:
         form = await open_form(pilot.app, pilot)
         await set_source(form, pilot, provider, CredentialKind.API_KEY)
@@ -381,3 +390,129 @@ async def test_encrypted_backend_failure_requires_explicit_session_retry(manager
         await form.save()
         await pilot.pause()
         assert manager.accounts[0].credential_ref.startswith("session:")
+
+
+@pytest.mark.parametrize("size", [(80, 24), (40, 12)])
+async def test_console_session_warning_visible_before_secret_entry(manager, size):
+    async with Host(manager).run_test(size=size) as pilot:
+        form = await open_form(pilot.app, pilot)
+        warning = form.query_one("#session-warning", Static)
+        assert not warning.display
+        await set_source(form, pilot, ProviderId.CLAUDE_PLATFORM, CredentialKind.CONSOLE_SESSION)
+        assert form.query_one("#secret", Input).value == ""
+        assert warning.display and warning.visible
+        warning.scroll_visible(animate=False)
+        await pilot.pause()
+        assert warning.region.overlaps(form.region)
+        text = str(warning.render())
+        for required in (
+            "High-sensitivity",
+            "only the sessionKey value",
+            "password",
+            "Cookie",
+            "HAR",
+        ):
+            assert required in text
+        await set_source(form, pilot, ProviderId.CLAUDE_PLATFORM, CredentialKind.API_KEY)
+        assert not warning.display
+
+
+@pytest.mark.parametrize("operation", ["add", "replace", "remove", "detach"])
+async def test_committed_directory_sync_failure_notifies_host_once(manager, monkeypatch, operation):
+    draft = Account(
+        str(uuid4()),
+        ProviderId.CLAUDE_SUBSCRIPTION,
+        "Synthetic account",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref=f"session:{uuid4()}",
+    )
+    original = None
+    if operation != "add":
+        original = manager.service.save(draft, secret="synthetic-old")[0]
+    changes = []
+    manager.on_changed = changes.append
+    fsync = os.fsync
+
+    def fail_directory(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("synthetic-sensitive-directory-error")
+        fsync(fd)
+
+    async with Host(manager).run_test() as pilot:
+        monkeypatch.setattr(os, "fsync", fail_directory)
+        if operation == "add":
+            form = await open_form(pilot.app, pilot)
+            await set_source(
+                form, pilot, ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.MANUAL_BEARER
+            )
+            form.query_one("#secret", Input).value = "synthetic-new"
+            await form.save()
+        elif operation == "replace":
+            await pilot.press("e")
+            await pilot.pause()
+            form = pilot.app.screen
+            form.query_one("#secret", Input).value = "synthetic-new"
+            await form.save()
+            await pilot.pause()
+            await pilot.click("#confirm")
+        elif operation == "remove":
+            await manager._change(lambda: manager.service.remove(original))
+        else:
+            await manager._change(
+                lambda: manager.service.save(
+                    replace(original, credential_kind=None, credential_ref=None), original=original
+                )
+            )
+        await pilot.pause()
+        committed = AccountStore(manager.account_store.path).load()
+        assert changes == [committed]
+        assert manager.accounts == committed
+        assert pilot.app.screen is manager
+        assert "crash durability" in str(manager.query_one("#account-status", Static).render())
+        if operation in {"add", "replace"}:
+            assert manager.resolver.resolve(committed[0]).secret == "synthetic-new"
+        if original is not None:
+            assert manager.credential_store.get(original.credential_ref) == "synthetic-old"
+
+
+async def test_rejected_mutation_does_not_notify_host(manager, monkeypatch):
+    changes = []
+    manager.on_changed = changes.append
+
+    def fail(_change):
+        raise RuntimeError("synthetic-sensitive-rejection")
+
+    async with Host(manager).run_test() as pilot:
+        form = await open_form(pilot.app, pilot)
+        monkeypatch.setattr(manager.account_store, "mutate", fail)
+        await form.save()
+        await manager._change(lambda: manager.service.save(form._draft()))
+        assert changes == []
+        assert manager.account_store.load() == ()
+
+
+async def test_committed_cleanup_failure_notifies_host_once(manager, monkeypatch):
+    draft = Account(
+        str(uuid4()),
+        ProviderId.CLAUDE_SUBSCRIPTION,
+        "Synthetic account",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref=f"session:{uuid4()}",
+    )
+    saved = manager.service.save(draft, secret="synthetic-old")[0]
+    changes = []
+    manager.on_changed = changes.append
+
+    def fail_delete(_ref):
+        raise RuntimeError("synthetic-sensitive-cleanup-error")
+
+    async with Host(manager).run_test() as pilot:
+        monkeypatch.setattr(manager.credential_store, "delete", fail_delete)
+        await manager._change(lambda: manager.service.remove(saved))
+        assert changes == [()]
+        assert manager.accounts == ()
+        assert pilot.app.screen is manager
+        assert "old credential cleanup failed" in str(
+            manager.query_one("#account-status", Static).render()
+        )
+        assert manager.credential_store.get(saved.credential_ref) == "synthetic-old"

@@ -107,17 +107,29 @@ app.push_screen(screen)
 `on_reconnect(account_id)` receives the local opaque account ID after local
 credential resolution succeeds. Either callback may return an awaitable. ChatGPT
 reconnect only shows its blocked-contract guidance and does not resolve its key.
-`console_discovery` accepts a resolved Console credential and asynchronously returns
-the provider's `OrganizationChoice` candidates.
+`console_discovery` is an async callable, not a provider object:
+`Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]]`.
+Pass the bound `console_provider.discover_organizations` method as above; the screen
+awaits the callable directly with the resolved Console credential.
 
 For local non-UI callers, `AccountService(account_store, credential_store)` exposes
 `save(account, *, original=None, secret=None, persist=False)` and `remove(account)`,
 both returning the resulting account tuple. Pass the previously loaded `original`
 when editing; updates check for conflicts inside `AccountStore.mutate`. A new manual
 secret gets a new opaque reference, and the old tool-owned secret is cleaned up
-after config commit. Cleanup errors explicitly distinguish already-saved config
-from failed credential cleanup; neither method promises atomicity across both
-stores. Key deletion is a confirmed screen action, not a separate service method.
+after a successful config commit. `AccountFlowError.updated`, when present, carries
+the committed account tuple for a post-commit durability or cleanup warning;
+the screen forwards that tuple to `on_changed` even though it displays the warning.
+`ConfigCommittedError` distinguishes replacement already accepted by `AccountStore`
+from rejected writes: directory-sync failure leaves the new config visible but its
+crash durability uncertain. In this case the service preserves both the newly
+referenced credential and the previous credential (or the removed account's old
+credential), since crash recovery may restore the old config. It does not report
+rollback or attempt old-key cleanup. Rejected writes still roll back newly created
+credentials and do not notify `on_changed`. Cleanup errors after successful durability
+also distinguish already-saved config from failed credential cleanup. Neither method
+promises atomicity across both stores. Key deletion is a confirmed screen action,
+not a separate service method.
 
 Supply the same `CredentialStore` to the screen and resolver so session-only
 credentials remain resolvable within that process. The host owns scheduler

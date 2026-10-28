@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from usage_tui.domain import Account, CredentialKind, ProviderId, new_account_id
-from usage_tui.storage import MAX_FILE_BYTES, AccountStore, ConfigError
+from usage_tui.storage import MAX_FILE_BYTES, AccountStore, ConfigCommittedError, ConfigError
 
 ACCOUNT_ID = "00000000-0000-4000-8000-000000000001"
 
@@ -214,6 +214,35 @@ def test_atomic_failure_keeps_old_config_and_cleans_temporary(store, monkeypatch
         store.save((account(label="Changed"),))
     assert "synthetic-sensitive" not in str(error.value)
     assert store.path.read_bytes() == before
+    assert sorted(path.name for path in store.path.parent.iterdir()) == [
+        ".accounts.json.lock",
+        "accounts.json",
+    ]
+
+
+@pytest.mark.parametrize("operation", ["save", "mutate"])
+def test_directory_sync_failure_reports_committed_replacement(store, monkeypatch, operation):
+    store.save((account(),))
+    updated = (account(label="Changed"),)
+    fsync = os.fsync
+    directory_syncs = []
+
+    def fail_directory(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            directory_syncs.append(fd)
+            raise OSError("synthetic-sensitive-directory-error")
+        fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_directory)
+    with pytest.raises(ConfigCommittedError) as error:
+        if operation == "save":
+            store.save(updated)
+        else:
+            store.mutate(lambda _: updated)
+    assert directory_syncs
+    assert error.value.accounts == updated
+    assert AccountStore(store.path).load() == updated
+    assert "synthetic-sensitive" not in str(error.value)
     assert sorted(path.name for path in store.path.parent.iterdir()) == [
         ".accounts.json.lock",
         "accounts.json",

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -27,9 +27,11 @@ from usage_tui.domain import (
     Account,
     CredentialKind,
     ProviderId,
+    ResolvedCredential,
     sanitize_text,
 )
-from usage_tui.storage import AccountStore, ConfigError, CredentialStore
+from usage_tui.providers.console import OrganizationChoice
+from usage_tui.storage import AccountStore, ConfigCommittedError, ConfigError, CredentialStore
 
 FILE_KINDS = {CredentialKind.CLAUDE_CODE_FILE, CredentialKind.GROK_AUTH_FILE}
 PROVIDERS = {
@@ -64,9 +66,18 @@ GUIDANCE = {
     ),
 }
 
+CONSOLE_SESSION_WARNING = (
+    "High-sensitivity account session: enter only the sessionKey value. "
+    "Do not enter your password, a full Cookie header, or a HAR file."
+)
+
 
 class AccountFlowError(ValueError):
     """Curated UI failure; never includes backend exception text."""
+
+    def __init__(self, message: str, *, updated: tuple[Account, ...] | None = None) -> None:
+        super().__init__(message)
+        self.updated = updated
 
 
 class AccountService:
@@ -99,6 +110,12 @@ class AccountService:
                 return tuple(account if item.id == account.id else item for item in current)
 
             updated = self.accounts.mutate(change)
+        except ConfigCommittedError as error:
+            raise AccountFlowError(
+                "Config saved, but crash durability could not be confirmed. Credentials were "
+                "retained; reopen the account manager and save again before removing obsolete secrets.",
+                updated=error.accounts,
+            ) from None
         except Exception:  # noqa: BLE001 - Injected stores may expose secrets; rollback new refs.
             if new_ref is not None:
                 try:
@@ -112,17 +129,18 @@ class AccountService:
                 "or explicitly choose session only. No config change was accepted."
             ) from None
         if original and original.credential_ref != account.credential_ref:
-            self._delete_owned(original)
+            self._delete_owned(original, updated)
         return updated
 
-    def _delete_owned(self, account: Account) -> None:
+    def _delete_owned(self, account: Account, updated: tuple[Account, ...]) -> None:
         if account.credential_kind not in FILE_KINDS and account.credential_ref:
             try:
                 self.credentials.delete(account.credential_ref)
             except Exception:  # noqa: BLE001 - Redact injected credential cleanup errors.
                 raise AccountFlowError(
                     "Config saved, but old credential cleanup failed. Unlock the secure store "
-                    "and remove the obsolete usage-tui entry there. External files were not touched."
+                    "and remove the obsolete usage-tui entry there. External files were not touched.",
+                    updated=updated,
                 ) from None
 
     def remove(self, account: Account) -> tuple[Account, ...]:
@@ -133,9 +151,15 @@ class AccountService:
 
         try:
             updated = self.accounts.mutate(change)
+        except ConfigCommittedError as error:
+            raise AccountFlowError(
+                "Account removed, but crash durability could not be confirmed. Its credential "
+                "was retained; reopen the manager before removing the obsolete secret.",
+                updated=error.accounts,
+            ) from None
         except Exception:  # noqa: BLE001 - Redact injected account-store errors.
             raise AccountFlowError("Cannot remove account; config was not changed.") from None
-        self._delete_owned(account)
+        self._delete_owned(account, updated)
         return updated
 
 
@@ -215,6 +239,7 @@ class AccountForm(ModalScreen[bool]):
                 max_length=4096,
                 id="reference",
             )
+            yield Static(CONSOLE_SESSION_WARNING, id="session-warning", markup=False)
             yield Input(
                 "",
                 password=True,
@@ -288,6 +313,7 @@ class AccountForm(ModalScreen[bool]):
         self.query_one("#reference").display = kind in FILE_KINDS
         self.query_one("#secret").display = kind != "none" and kind not in FILE_KINDS
         self.query_one("#persist").display = kind != "none" and kind not in FILE_KINDS
+        self.query_one("#session-warning").display = kind == CredentialKind.CONSOLE_SESSION
         provider = self.query_one("#provider", Select).value
         self.query_one("#organization").display = provider == ProviderId.CLAUDE_PLATFORM
         self.query_one("#scope").display = kind == CredentialKind.GROK_AUTH_FILE
@@ -375,7 +401,7 @@ class AccountForm(ModalScreen[bool]):
                     temporary = self.manager.credential_store.put(draft.id, secret, persist=False)
                     draft = replace(draft, credential_ref=temporary)
                 credential = self.manager.resolver.resolve(draft)
-                choices = await self.manager.console_discovery.discover_organizations(credential)
+                choices = await self.manager.console_discovery(credential)
                 self.organizations = {choice.id for choice in choices}
                 self.query_one("#organization", Select).set_options(
                     [(sanitize_text(choice.label, max_length=120), choice.id) for choice in choices]
@@ -464,9 +490,12 @@ class AccountForm(ModalScreen[bool]):
             )
             await self.manager.changed(updated)
         except AccountFlowError as error:
-            await self.manager.reload()
-            await self.manager.changed(self.manager.accounts)
-            self._status(str(error))
+            if error.updated is not None:
+                await self.manager.changed(error.updated)
+                self.manager.status(str(error))
+                self.dismiss(True)
+            else:
+                self._status(str(error))
         else:
             self.dismiss(True)
         finally:
@@ -511,7 +540,8 @@ class AccountManagerScreen(Screen[None]):
         account_store: AccountStore | None = None,
         credential_store: CredentialStore | None = None,
         resolver: CredentialResolver | None = None,
-        console_discovery: object | None = None,
+        console_discovery: Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]]
+        | None = None,
         *,
         on_changed: Callable | None = None,
         on_reconnect: Callable | None = None,
@@ -623,9 +653,8 @@ class AccountManagerScreen(Screen[None]):
         try:
             await self.changed(change())
         except AccountFlowError as error:
-            await self.reload()
-            # A post-commit cleanup error still needs to notify the scheduler.
-            await self.changed(self.accounts)
+            if error.updated is not None:
+                await self.changed(error.updated)
             self.status(str(error))
 
     def action_remove(self) -> None:

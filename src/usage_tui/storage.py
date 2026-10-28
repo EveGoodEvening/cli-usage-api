@@ -33,6 +33,16 @@ class ConfigError(ValueError):
     """A safe configuration failure, without paths or file contents."""
 
 
+class ConfigCommittedError(ConfigError):
+    """Replacement committed, but crash durability could not be confirmed."""
+
+    def __init__(self, accounts: tuple[Account, ...]) -> None:
+        super().__init__(
+            "Account configuration changed, but crash durability could not be confirmed."
+        )
+        self.accounts = accounts
+
+
 class CredentialError(ValueError):
     """A safe credential failure, without secrets or backend exception text."""
 
@@ -107,8 +117,9 @@ class AccountStore:
     """Version-one account config; mutate is the read/modify/write transaction.
 
     A stable sibling lock inode is held across reread and same-directory replace.
-    Callbacks must be synchronous and return a tuple; exceptions/cancellation leave
-    configuration unchanged. save also refuses to overwrite an invalid config.
+    Callbacks must be synchronous and return a tuple; callback exceptions leave
+    configuration unchanged. ConfigCommittedError reports replacement with uncertain
+    crash durability. save also refuses to overwrite an invalid config.
     """
 
     def __init__(self, path: str | Path | None = None) -> None:
@@ -227,7 +238,10 @@ class AccountStore:
                 target.flush()
                 os.fsync(fd)
             os.replace(temporary, self.path.name, src_dir_fd=directory, dst_dir_fd=directory)
-            os.fsync(directory)
+            try:
+                os.fsync(directory)
+            except OSError:
+                raise ConfigCommittedError(accounts) from None
         finally:
             os.close(fd)
             try:

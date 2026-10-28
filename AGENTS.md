@@ -160,3 +160,15 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   durable references and explicit process-only secrets. Notify the scheduler after
   committed account changes so obsolete generations cannot publish; do not equate
   local removal with remote revocation or treat credential storage as live support.
+- Distinguish rejected writes from replacement already accepted with failed directory
+  fsync. Carry the committed account tuple through storage/service errors and notify
+  the host once; never delete a credential referenced by the accepted config. On
+  uncertain crash durability, retain the previous credential too, since recovery may
+  restore old metadata. Only rejected writes may roll back the newly created secret.
+- Exercise documented injected APIs in their actual shape: an async callable such as
+  a bound discovery method is not a provider object. Keep the canonical callable
+  contract and invocation aligned with embedding examples.
+- Generic masked-entry or session-memory guidance is not a sensitivity warning.
+  Display the Console `sessionKey` high-sensitivity account-session warning before
+  its secret input, including value-only guidance excluding passwords, full Cookie
+  headers, and HAR files; cover visibility for the specific provider/kind.

@@ -21,6 +21,20 @@
   No dashboard/CLI, authenticated provider, real-keyring, or documentation-worker
   verification claim; exercised evidence belongs separately in `PLAN.md`.
 
+### Fixed — C10 independent-review findings (verification pending)
+
+- Preserve credentials referenced by config accepted before directory-sync failure;
+  retain previous credentials too while crash durability is uncertain. Storage and
+  account-flow errors carry the committed accounts, and the screen notifies the
+  host while presenting the durability warning rather than claiming rollback.
+- Invoke `console_discovery` as the documented async callable, including a bound
+  `ConsoleProvider.discover_organizations` method, rather than as a provider object.
+- Display an explicit high-sensitivity Console `sessionKey` warning before masked
+  entry, accepting only its value, not a password, full Cookie header, or HAR file.
+- These three review corrections and their regression source await separate
+  orchestrator verification; the earlier green gate does not verify them. C10 is
+  not closed and C11 remains gated.
+
 ### Added — C01 package/domain scope
 
 - Python 3.11+ `src/` package metadata and runtime/development dependency declarations.

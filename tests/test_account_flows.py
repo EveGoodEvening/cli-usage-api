@@ -1,11 +1,14 @@
 """Account transactions use actual isolated config and session credentials."""
 
+import os
+import stat
 from dataclasses import replace
 from uuid import uuid4
 
 import pytest
 
 from usage_tui.accounts import AccountFlowError, AccountService
+from usage_tui.credentials import CredentialResolver
 from usage_tui.domain import Account, CredentialKind, ProviderId
 from usage_tui.storage import AccountStore, CredentialError, CredentialStore
 
@@ -142,8 +145,9 @@ def test_cleanup_failure_reports_committed_config(services):
             raise RuntimeError("secret error")
 
     service.credentials = FailingDelete()
-    with pytest.raises(AccountFlowError, match="Config saved"):
+    with pytest.raises(AccountFlowError, match="Config saved") as error:
         service.remove(saved)
+    assert error.value.updated == ()
     assert store.load() == ()
     assert credentials.get(saved.credential_ref) == "synthetic-old"
 
@@ -173,3 +177,45 @@ def test_explicit_persistence_forwarded_and_old_reference_deleted(services):
     assert fake.modes == [True, True]
     assert first.credential_ref not in fake.entries
     assert fake.entries == {second.credential_ref: "synthetic-second"}
+
+
+@pytest.mark.parametrize("operation", ["add", "replace", "remove", "detach"])
+def test_directory_sync_failure_preserves_committed_credentials(services, monkeypatch, operation):
+    store, credentials, service = services
+    draft = account(
+        credential_kind=CredentialKind.MANUAL_BEARER, credential_ref=f"session:{uuid4()}"
+    )
+    original = None if operation == "add" else service.save(draft, secret="synthetic-old")[0]
+    fsync = os.fsync
+    directories = []
+
+    def fail_directory(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            directories.append(fd)
+            raise OSError("synthetic-sensitive-directory-error")
+        fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_directory)
+    with pytest.raises(AccountFlowError, match="crash durability") as error:
+        if operation == "remove":
+            service.remove(original)
+        elif operation == "detach":
+            service.save(
+                replace(original, credential_kind=None, credential_ref=None), original=original
+            )
+        else:
+            service.save(original or draft, original=original, secret="synthetic-new")
+    committed = AccountStore(store.path).load()
+    assert directories
+    assert error.value.updated == committed
+    assert "synthetic-sensitive" not in str(error.value)
+    if operation == "remove":
+        assert committed == ()
+    elif operation == "detach":
+        assert committed[0].credential_ref is None
+    else:
+        assert CredentialResolver(credentials).resolve(committed[0]).secret == "synthetic-new"
+    if original is not None:
+        assert credentials.get(original.credential_ref) == "synthetic-old"
+    assert "synthetic-new" not in store.path.read_text()
+    assert "synthetic-old" not in store.path.read_text()

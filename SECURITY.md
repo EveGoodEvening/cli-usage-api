@@ -40,9 +40,10 @@ exposed, revoke or replace it through the relevant first-party service.
   or plaintext. A session-only value lasts only in its owning `CredentialStore`
   instance/process; a saved nonsecret profile does not preserve that credential
   across exit. Share that store instance with the resolver in the embedding app.
-- Console input warns that `sessionKey` is a high-sensitivity account session.
-  Accept only the value, not a password, full Cookie header, HAR, or browser
-  extraction. Discovery runs only when requested; users explicitly choose an
+- Before the masked Console-session input, the form displays: "High-sensitivity
+  account session: enter only the sessionKey value. Do not enter your password,
+  a full Cookie header, or a HAR file." No browser extraction is supplied.
+  Discovery runs only when requested, using the injected async callable; users explicitly choose an
   eligible organization even for a singleton. Console session replacement requires
   newly discovered explicit selection rather than fallback to the previous scope.
   Grok scope choices use numbered display labels, not arbitrary auth-file key names,
@@ -55,8 +56,16 @@ exposed, revoke or replace it through the relevant first-party service.
   secret. Key deletion can retain the local account for reconnect. External
   Claude/Grok login files are never removed, and no action revokes remote sessions.
   Config and keyring are separate stores, not an atomic transaction; errors must
-  remain visible. The host must forward committed account updates to the scheduler
-  to cancel obsolete fetch generations; a screen alone does not own live polling.
+  remain visible. A post-replacement directory-sync failure raises
+  `ConfigCommittedError` with the committed accounts, not a rejection or rollback.
+  The service preserves both new and previous credentials on this durability warning
+  (and preserves removed accounts' old credentials): new config is visible, but crash
+  recovery may restore old config. It skips destructive cleanup and reports the
+  committed accounts through `AccountFlowError.updated`; the screen forwards them
+  to the host even while showing the warning. A rejected write instead rolls back
+  its newly created credential and sends no account-change notification.
+  The host must forward committed account updates to the scheduler to cancel obsolete
+  fetch generations; a screen alone does not own live polling.
 - Read-only demo viewing takes injected accounts and must not touch account files,
   imported credentials, or keyring. No actual account credential, live-provider,
   real-keyring, or terminal acceptance is claimed by this documentation task.
@@ -79,8 +88,10 @@ exposed, revoke or replace it through the relevant first-party service.
   writes only after its callback succeeds. Callers must use it for read-modify-write
   changes: separate `load` and `save` calls do not form one transaction. Locks
   coordinate cooperating writers, not malicious same-user processes.
-  An error after replacement (for example directory-sync failure) may leave the
-  new config visible; atomic replacement does not make every save failure a rollback.
+  An error after replacement (for example directory-sync failure) leaves the new
+  config visible but crash durability uncertain. `ConfigCommittedError`, a
+  `ConfigError` subtype, carries that committed account tuple; atomic replacement
+  does not make every save failure a rollback.
 - Persistent credential operations lazily accept only the exact supported Linux
   `keyring.backends.SecretService.Keyring` backend type. Plaintext/alternative,
   null/fail, chained, unknown, and subclassed backends are not accepted based on
