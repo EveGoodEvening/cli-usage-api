@@ -127,6 +127,18 @@
   No documentation-worker checks, CLI/TUI integration, live requests, or authenticated
   acceptance claimed; exercised evidence belongs separately in `PLAN.md`.
 
+### C06 review correction — numeric wire precision; verification pending
+
+- Independent review reproduced an out-of-tolerance raw JSON numeric share
+  (`43.500000000000000000000000000001` against aggregate `42.5`, with Chat `0`)
+  incorrectly accepted as READY after HTTP decoding rounded it to binary float.
+- Require HTTP JSON numeric tokens to decode directly as `Decimal` before exact
+  same-payload reconciliation, not `Decimal` conversion after a float roundtrip.
+  Regression coverage must exercise raw JSON numbers at the tolerance boundary,
+  not only string-valued percentages. Fix verification and independent rereview
+  remain pending; no new gates, smoke, live acceptance, or closure are claimed.
+
+
 ### Not yet implemented / not verified
 
 - No CLI, terminal dashboard, interactive account/key management, ChatGPT adapter,

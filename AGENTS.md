@@ -96,6 +96,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   within one percentage point, and preserve sanitized unknown-product IDs. Missing
   Build/Chat is unknown even when other shares reconcile; only an explicit entry
   proves zero. An invalid breakdown must not erase independent aggregate evidence.
+- Exact arithmetic starts at the HTTP JSON boundary. Decode decimal numeric tokens
+  directly as `Decimal`; stringifying a binary float cannot recover lost wire
+  precision. C06 review reproduced raw numeric `43.500000000000000000000000000001`
+  against aggregate `42.5` with Chat `0` incorrectly passing the one-point tolerance
+  after float rounding. Boundary regressions must send actual raw JSON numbers
+  through Transport and the provider, not only decimal strings or decoded objects.
+  Record reproduction separately from pending fix verification and rereview.
 - Period fallback is an absence rule, not an error-recovery shortcut. A malformed
   `currentPeriod.end` must not be replaced by `billingPeriodEnd`; reversed bounds
   cannot establish reset. Preserve valid usage independently and derive period

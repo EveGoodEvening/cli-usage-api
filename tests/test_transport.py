@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from email.utils import format_datetime
 
 import httpx
@@ -101,6 +102,26 @@ async def test_json_container_roots(payload):
     )
 
 
+async def test_json_numbers_preserve_wire_precision_and_integer_types():
+    body = (
+        b'{"fraction":43.500000000000000000000000000001,'
+        b'"tiny":1e-1001,"large":1e1001,"integer":42,"boolean":true}'
+    )
+    transport = Transport(
+        http_transport=httpx.MockTransport(lambda _: httpx.Response(200, content=body))
+    )
+    result = await transport.get_json(
+        ProviderId.CLAUDE_SUBSCRIPTION, "/api/oauth/usage", credential=credential()
+    )
+    assert type(result["fraction"]) is Decimal
+    assert result["fraction"] == Decimal("43.500000000000000000000000000001")
+    assert result["tiny"] == Decimal("1e-1001")
+    assert result["large"] == Decimal("1e1001")
+    assert type(result["integer"]) is int
+    assert result["integer"] == 42
+    assert result["boolean"] is True
+
+
 @pytest.mark.parametrize(
     ("status", "state", "code"),
     [
@@ -183,6 +204,8 @@ async def test_retry_after_preserves_long_server_deadlines(header, expected):
         b'"a"',
         b'{"a":NaN}',
         b'{"a":Infinity}',
+        b'{"a":-Infinity}',
+        b'{"a":1e9999999999999999999999999999999999999999}',
         b"\xff",
         b"[" * 2000,
     ],

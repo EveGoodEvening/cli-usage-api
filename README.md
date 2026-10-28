@@ -229,6 +229,15 @@ billing is proven, Build/Chat reference the common pool for “剩余/重置：�
 otherwise product remaining/reset are unavailable. No cross-request or
 cross-account enrichment is used.
 
+Reconciliation requires exact decimal values from the HTTP JSON decoder: numeric
+tokens must be decoded directly as `Decimal`, never via a binary-float roundtrip.
+Converting a rounded float back to a decimal cannot recover the wire value. C06
+review reproduced aggregate `42.5` with raw numeric Build share
+`43.500000000000000000000000000001` and Chat `0` incorrectly accepted as READY,
+although the discrepancy exceeds one percentage point. The decoding correction
+and raw-numeric boundary regression coverage are pending separate verification;
+the earlier green component smoke does not verify this case.
+
 In the normalized API, product consumption is carried in `Metric.detail`, with
 `quota=None`: `QuotaValue` would imply an independent remaining allowance.
 Validated additional products use stable `grok.product.other.<SHA-256>` metric

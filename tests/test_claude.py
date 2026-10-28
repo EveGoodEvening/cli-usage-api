@@ -51,7 +51,8 @@ def provider_for(payload, *, status=200, headers=None):
         assert str(request.url) == "https://api.anthropic.com/api/oauth/usage"
         assert request.headers["authorization"] == "Bearer synthetic-secret"
         assert request.headers["anthropic-beta"] == "oauth-2025-04-20"
-        return httpx.Response(status, json=payload, headers=headers)
+        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        return httpx.Response(status, content=body, headers=headers)
 
     return ClaudeProvider(Transport(http_transport=httpx.MockTransport(handler))), requests
 
@@ -153,6 +154,29 @@ async def test_timestamp_formats(payload, raw):
     expected = NOW + timedelta(microseconds=500000) if raw == 1793188800.5 else NOW
     assert snapshot.metrics[0].reset_at == expected
     assert snapshot.fetch_state == FetchState.OK
+
+
+@pytest.mark.parametrize("raw", ["1793188800.5", "1793188800500.0"])
+async def test_raw_fractional_numeric_reset_seconds_and_milliseconds(payload, raw):
+    payload["five_hour"]["resets_at"] = "WIRE_RESET"
+    body = json.dumps(payload).encode().replace(b'"WIRE_RESET"', raw.encode())
+    provider, _ = provider_for(body)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.metrics[0].reset_at == NOW + timedelta(microseconds=500000)
+    assert snapshot.metrics[0].quota.used_percent == Decimal("12.5")
+
+
+@pytest.mark.parametrize("raw", ["true", "false", "-0.5", "1e1000000"])
+async def test_raw_invalid_numeric_reset_preserves_quota(payload, raw):
+    payload["five_hour"]["resets_at"] = "WIRE_RESET"
+    body = json.dumps(payload).encode().replace(b'"WIRE_RESET"', raw.encode())
+    provider, _ = provider_for(body)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.metrics[0].state == MetricState.READY
+    assert snapshot.metrics[0].quota.used_percent == Decimal("12.5")
+    assert snapshot.metrics[0].reset_at is None
 
 
 @pytest.mark.parametrize(

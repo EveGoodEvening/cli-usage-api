@@ -1,7 +1,7 @@
 """Version-sensitive, read-only Claude subscription usage normalization."""
 
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 
 from usage_tui.domain import (
     REQUIRED_METRIC_IDS,
@@ -36,7 +36,7 @@ def _reset(value: object) -> datetime | None:
         return None
     if isinstance(value, str):
         return parse_timestamp(value)
-    if type(value) not in (int, float):
+    if type(value) not in (Decimal, int, float):
         raise DomainError("Invalid reset timestamp.")
     try:
         number = Decimal(str(value))
@@ -45,7 +45,7 @@ def _reset(value: object) -> datetime | None:
         if number >= 100_000_000_000:
             number /= 1000
         return datetime.fromtimestamp(float(number), UTC)
-    except (ValueError, OverflowError, OSError):
+    except (ValueError, OverflowError, OSError, DecimalException):
         raise DomainError("Invalid reset timestamp.") from None
 
 
@@ -58,8 +58,7 @@ def _window(
     if not scoped and raw is None:
         raw = value.get("used_percentage")
     try:
-        # JSON decoding produces binary floats; their decimal string, not their
-        # binary expansion, is the wire-facing precision supported here.
+        # Transport preserves fractional JSON numbers as exact Decimals.
         used = percent(str(raw) if type(raw) is float else raw)
     except DomainError:
         return None

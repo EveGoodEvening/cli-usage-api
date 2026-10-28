@@ -58,7 +58,8 @@ def provider_for(payload, *, status=200, headers=None, credential=CREDENTIAL):
             assert "x-userid" not in request.headers
         else:
             assert request.headers["x-userid"] == credential.user_id
-        return httpx.Response(status, content=json.dumps(payload).encode(), headers=headers)
+        body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        return httpx.Response(status, content=body, headers=headers)
 
     return GrokProvider(Transport(http_transport=httpx.MockTransport(handler))), requests
 
@@ -159,6 +160,18 @@ async def test_invalid_or_missing_aggregate_no_products_or_inference(payload, va
     assert all(row.quota is None and row.reset_at is None for row in snapshot.metrics)
 
 
+@pytest.mark.parametrize("value", ["1e1001", "1e-1001", "1." + "1" * 1024])
+async def test_raw_numeric_aggregate_percent_bounds(payload, value):
+    payload["config"]["creditUsagePercent"] = "WIRE_PERCENT"
+    body = json.dumps(payload).encode().replace(b'"WIRE_PERCENT"', value.encode())
+    provider, _ = provider_for(body)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
+    assert snapshot.fetched_at is None
+    assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics)
+    assert all(row.quota is None and row.reset_at is None for row in snapshot.metrics)
+
+
 @pytest.mark.parametrize("value", [False, None, 1, "true", [], {}])
 async def test_only_boolean_true_proves_unified_semantics(payload, value):
     payload["config"]["isUnifiedBillingUser"] = value
@@ -240,6 +253,44 @@ async def test_reconciliation_tolerance_exact_boundary(payload, share, valid):
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert (snapshot.metrics[1].state == MetricState.READY) is valid
     assert snapshot.metrics[0].state == MetricState.READY
+
+
+@pytest.mark.parametrize(
+    ("share", "valid"),
+    [
+        ("41.5", True),
+        ("43.5", True),
+        ("41.499999999999999999999999999999", False),
+        ("43.500000000000000000000000000001", False),
+    ],
+)
+async def test_raw_numeric_reconciliation_tolerance_exact_boundary(payload, share, valid):
+    payload["config"]["productUsage"] = [
+        {"product": "GrokBuild", "usagePercent": "WIRE_SHARE"},
+        {"product": "GrokChat", "usagePercent": 0},
+    ]
+    body = json.dumps(payload).encode().replace(b'"WIRE_SHARE"', share.encode())
+    provider, _ = provider_for(body)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == (FetchState.OK if valid else FetchState.PARTIAL)
+    assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
+    assert snapshot.metrics[0].state == MetricState.READY
+    expected = MetricState.READY if valid else MetricState.UNKNOWN
+    assert all(row.state == expected for row in snapshot.metrics[1:])
+
+
+@pytest.mark.parametrize("share", ["1e1001", "1e-1001", "1." + "1" * 1024])
+async def test_raw_numeric_product_percent_bounds_preserve_aggregate(payload, share):
+    payload["config"]["productUsage"] = [
+        {"product": "GrokBuild", "usagePercent": "WIRE_SHARE"},
+        {"product": "GrokChat", "usagePercent": 0},
+    ]
+    body = json.dumps(payload).encode().replace(b'"WIRE_SHARE"', share.encode())
+    provider, _ = provider_for(body)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
+    assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics[1:])
 
 
 async def test_unknown_products_retained_sanitized_and_reconciled(payload):

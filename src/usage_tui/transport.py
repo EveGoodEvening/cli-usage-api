@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
 from importlib.metadata import PackageNotFoundError, version
 
@@ -212,8 +213,8 @@ class Transport:
     def _decode(body: bytearray, status: int) -> dict | list:
         result = None
         try:
-            result = json.loads(body, parse_constant=_reject_json_constant)
-        except (ValueError, UnicodeError, RecursionError):
+            result = json.loads(body, parse_float=Decimal, parse_constant=_reject_json_constant)
+        except (ValueError, UnicodeError, RecursionError, InvalidOperation):
             pass
         if not isinstance(result, (dict, list)):
             raise TransportError(FetchState.SCHEMA_ERROR, "schema_error", status=status)
