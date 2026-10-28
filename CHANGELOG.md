@@ -139,10 +139,27 @@
   remain pending; no new gates, smoke, live acceptance, or closure are claimed.
 
 
+### Added — C07 explicit registry and unresolved ChatGPT capability
+
+- Explicit `build_providers(transport, resolver)` registry for the implemented
+  Claude subscription, Console, and Grok adapters plus the unresolved ChatGPT
+  capability; required metric enumeration and credential-requirement metadata.
+  Imports/construction perform no credential reads, environment probing, or I/O.
+- Retain the ordinary `chatgpt.subscription.weekly` row with structured
+  `upstream_contract_missing`, unresolved provenance, and safe Chinese/English
+  explanation. The capability requires no credential and does not resolve saved
+  secrets, access transport, or fall back to WHAM/Codex or API consumption.
+- Bounded README/security/Lessons documentation distinguishes a blocked capability
+  from a working ordinary-chat adapter. Optional bearer/API-key storage does not
+  enable retrieval, and no cookie/password solicitation is an appropriate remedy.
+  Static research and the missing upstream prerequisite remain tracked in PLAN.md;
+  ordinary ChatGPT weekly quota is not complete. No CLI, worker-executed checks,
+  smoke, live requests, or authenticated acceptance are claimed by this task.
+
 ### Not yet implemented / not verified
 
-- No CLI, terminal dashboard, interactive account/key management, ChatGPT adapter,
-  polling, or offline demo is delivered by the current libraries.
+- No CLI, terminal dashboard, interactive account/key management, ordinary ChatGPT
+  quota adapter, polling, or offline demo is delivered by the current libraries.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.

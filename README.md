@@ -3,7 +3,8 @@
 A local terminal dashboard project for subscription usage and Claude Platform credit
 balances. **The current implementation provides Python domain, local storage,
 credential-resolution, fixed-origin HTTP transport, Claude subscription, Console
-balance/organization-discovery, and Grok billing libraries, not a working dashboard.** There is no
+balance/organization-discovery, Grok billing, and explicit provider-registry libraries,
+plus an unresolved ChatGPT capability, not a working dashboard.** There is no
 usable `usage` CLI, TUI, offline demo, interactive account manager, or
 authenticated/live metric acceptance yet.
 The console entry point declared in package metadata targets a later implementation;
@@ -40,15 +41,17 @@ value. C01 verification and closure are recorded in PLAN.md.
 C02 adds library-level account/config persistence and credential storage. C03 adds
 read-only Linux credential-file resolution and guarded HTTP transport. C04 adds the
 Claude subscription adapter; C05 adds Console balances and organization discovery;
-C06 adds the Grok billing adapter described below. The ChatGPT adapter, polling,
-offline demo, interactive account management, terminal UI, and CLI integration remain **planned, not current support**:
+C06 adds the Grok billing adapter described below. C07 adds the explicit provider
+registry and a truthful blocked ChatGPT capability, **not** an ordinary-chat quota
+adapter. Polling, offline demo, interactive account management, terminal UI, and
+CLI integration remain **planned, not current support**:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
 | Claude 5h / weekly | Subscription used/remaining percentages and server reset from private OAuth usage | Library adapter implemented; no authenticated acceptance |
 | Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Library parser implemented; availability is plan/response dependent, no authenticated acceptance |
 | Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Console library adapter implemented; private version-sensitive contract, no authenticated acceptance |
-| Ordinary ChatGPT weekly | Actual chat-model subscription usage/remaining/reset | **Upstream contract unresolved**, not just missing credentials |
+| Ordinary ChatGPT weekly | Actual chat-model subscription usage/remaining/reset | Required row retained by blocked capability; **upstream contract unresolved**, not just missing credentials |
 | Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Library adapter implemented; private version-sensitive contract, no authenticated acceptance |
 
 Grok product shares must not become independent `100 - share` allowances. Remaining
@@ -258,6 +261,36 @@ The adapter does not invoke Grok/ACP subprocesses, infer included usage from
 accounts. Typed ACP responses may omit product breakdown and are not a fallback.
 No CLI/TUI behavior, live request, or authenticated Grok acceptance is claimed;
 exercised verification remains separately recorded in PLAN.md.
+
+## Provider registry and unresolved ChatGPT capability (C07)
+
+`build_providers(transport, resolver)` explicitly constructs the registry for
+`claude_subscription`, `claude_platform`, `grok_subscription`, and
+`chatgpt_subscription`. Provider construction/imports do not fetch data, probe the
+environment, or read secrets. Each provider enumerates its required metric IDs;
+the live Claude, Console, and Grok adapters require credentials.
+
+The ChatGPT entry is a capability object, not a network adapter. It retains the
+required `chatgpt.subscription.weekly` row and returns the structured
+`upstream_contract_missing` result with unresolved provenance
+(`SourceRef(kind="unresolved")`) and a safe Chinese/English explanation. Its
+`requires_credential` is false: it does not resolve saved credentials, access
+transport, or make a request. Future polling must honor that flag rather than
+opening a saved secret before publishing the blocked result.
+
+The blocker is a defensible ordinary-chat read-only request/authentication and
+model/window/reset contract, not merely a missing token. Static research and its
+remaining prerequisites are recorded in [PLAN.md](PLAN.md) §§4.4 and 7. A
+`conversation/init` feature-limit field alone does not establish ordinary GPT
+weekly quota or authorize a potentially state-changing POST. WHAM/Codex quotas,
+OpenAI API consumption, local message counts, and user-entered caps are not
+fallbacks. Returning this blocked state does not complete the requested metric.
+
+A local labeled ChatGPT account profile may exist without a credential. Optional
+user-provided bearer/API-key storage does **not** enable weekly retrieval; there
+is no working ChatGPT connection/setup command yet. Do not supply a cookie or
+password, extract browser sessions, or invent an OAuth client to unblock it.
+No ordinary ChatGPT live quota integration or authenticated acceptance is claimed.
 
 ## Local storage library (C02)
 

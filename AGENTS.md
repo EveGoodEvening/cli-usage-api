@@ -16,6 +16,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 - WHAM/Codex allowance evidence does not prove ordinary ChatGPT chat-model weekly
   usage. A local message counter or custom cap is not a remote quota contract. Leave
   the ordinary ChatGPT metric unresolved until request/auth/model/window evidence exists.
+- Model an unresolved metric as a visible capability result, not a fabricated
+  network adapter: retain required rows and unresolved provenance, use a fixed
+  upstream-contract diagnostic, and explicitly declare no credential requirement.
+  Registry membership is not live support. Orchestration must skip secret resolution
+  for that capability even when an account holds an optional credential reference.
+  Credential storage cannot repair absent read/auth/model/window/reset semantics;
+  never solicit cookies/passwords or substitute Codex to make the row appear ready.
 - Fable is a model-scoped weekly subset, not an additional weekly allowance. GrokBuild
   and GrokChat product shares are not independent quotas: shared remaining/reset needs
   positive same-payload shared-pool evidence. Missing data is unknown, not zero.

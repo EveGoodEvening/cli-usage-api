@@ -3,8 +3,9 @@
 ## Current implementation: Python libraries, not a live application
 
 This repository supplies package/domain, local storage, credential-resolution,
-fixed-origin HTTP transport, Claude subscription, Console balance/discovery, and
-Grok billing provider libraries. It does not implement a ChatGPT adapter, polling,
+fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Grok
+billing, and explicit provider-registry libraries, with an unresolved ChatGPT
+capability. It does not implement ordinary ChatGPT quota retrieval, polling,
 interactive account management, a CLI, or a TUI. A declared future console entry
 point does not provide these features.
 No authenticated provider or real OS-keyring check was exercised by this
@@ -231,6 +232,27 @@ exposed, revoke or replace it through the relevant first-party service.
 - Synthetic responses do not establish live subscription eligibility, credential
   acceptance, or private-proxy compatibility. No live or CLI/TUI acceptance follows
   from this library or documentation.
+
+## Implemented C07 registry and unresolved-capability boundary
+
+- `build_providers(transport, resolver)` explicitly constructs the four provider
+  entries; construction/imports do not read credentials, probe the environment, or
+  issue network requests. Registry membership is not evidence of live support.
+- The ordinary ChatGPT capability keeps its required weekly row visible with
+  `upstream_contract_missing` and unresolved provenance. It declares
+  `requires_credential=False` and does not invoke credential resolution or
+  transport. Future orchestration must publish that blocked result without reading
+  a saved secret, even if the local account has an optional credential reference.
+- A labeled ChatGPT profile needs no credential. Optional user-provided bearer or
+  API-key storage does not establish an authentication contract or enable weekly
+  retrieval. Do not solicit ChatGPT cookies/passwords, extract browser sessions,
+  or invent a third-party OAuth client as a remedy for missing upstream semantics.
+- WHAM/Codex OAuth and API consumption cannot substitute for ordinary chat-model
+  weekly usage. Static `conversation/init` feature-limit evidence does not prove
+  model/window semantics or authorize a potentially state-changing POST. No live
+  requests or authenticated metric acceptance follow from the blocked capability.
+  The exact unresolved read/authentication/metric prerequisite remains in PLAN.md
+  §§4.4, 7, and 9; a finished error result is not completion of the requested quota.
 
 ## Planned integration controls — not end-to-end guarantees
 
