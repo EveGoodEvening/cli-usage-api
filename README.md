@@ -14,11 +14,11 @@ closure are recorded separately in [PLAN.md](PLAN.md).
 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与
 重置时间；支持连接账号或管理密钥。不做网页或 statusline。
 
-The intended application is read-only and local: one terminal dashboard, not a web
+The application is read-only and local: one terminal dashboard, not a web
 server, statusline, inference client, or spending dashboard. Near-real-time means
 bounded periodic observations, not provider push or an availability guarantee.
 
-## What exists versus what is planned
+## Implemented capabilities and live limitations
 
 C01 provides `src/` package metadata, declared runtime/development dependencies, and
 frozen domain contracts: provider/account identities, credential kinds and resolved
@@ -67,6 +67,19 @@ currently claimed as working or accepted.
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and an interactive
 terminal for the dashboard and account prompts. Linux/POSIX is the supported
 credential-import and persistence target. Run from the repository root:
+
+### 中文快速开始（仅终端 TUI）
+
+先执行 `uv sync --locked`，再运行 `uv run usage --demo` 查看离线演示；
+这不是网页，也不会启动浏览器或 Web 服务。演示中的 GPT 数值是虚构样例，
+**真实 GPT / ChatGPT 每周用量仍因上游接口契约缺失而阻塞**。
+运行 `uv run usage` 打开实时模式，按 `a` 管理账号、按 `r` 请求刷新、按 `?`
+查看帮助、按 `q` 退出。无账号时先显示配置引导；连接步骤见下方说明。
+Claude/Grok 须先在官方工具登录；Console 只手动输入自己的 `sessionKey` 值并
+明确选择组织。不要把密钥、Cookie 或密码写进命令行。实时指标及真实系统密钥环
+尚未完成认证验收；离线演示和已通过的本地检查不代表服务端读取成功。
+
+### Repository commands
 
 ```sh
 uv sync --locked
@@ -267,9 +280,9 @@ missing upstream contract, not merely a missing credential.
 
 ## Textual account management (C10)
 
-The account manager is a reusable terminal screen, not a web page, shell-based
-setup substitute, or dashboard. There is no `usage accounts …` command or installed
-dashboard launch workflow yet. A host Textual application can embed it with:
+The account manager is a reusable terminal screen embedded in the live dashboard;
+press `a` after `uv run usage`, or use the `usage accounts …` commands above.
+A host Textual application can also embed it with:
 
 ```python
 from usage_tui.accounts import AccountManagerScreen
@@ -347,25 +360,31 @@ metadata exists; after exit/restart reconnect or supply a new secret. Python can
 guarantee memory zeroization. The persistence backend is the supported Linux Secret
 Service only; plaintext, alternative/chained, and null backends are rejected.
 
-- **Claude subscription:** sign in through official Claude Code outside this app.
-  Select the default credential-file reference or a specific private file; a
-  supported manual bearer is also available. Imports remain references, not copies
-  of refresh tokens. Reconnect guidance covers expiry and missing `user:profile`;
-  inference-only setup tokens/API keys do not enable subscription reads.
-- **Claude Platform:** a warning identifies `sessionKey` as a high-sensitivity
-  session before masked entry. Supply only its value, never a password, Cookie
-  header, HAR, or browser-store import. Use **Discover** to list eligible API
-  organizations, then explicitly select the desired organization before saving,
+- **Claude subscription:** run official `claude`, then `/login`, outside this app.
+  Add a `claude-subscription` account and choose **External Claude Code file**.
+  Enter `default` for `$CLAUDE_CONFIG_DIR/.credentials.json`, otherwise
+  `~/.claude/.credentials.json`, or select a private file (absolute path in CLI).
+  A supported manual bearer is also available. Imports remain references, not
+  copies of refresh tokens. Expiry or missing `user:profile` requires first-party
+  login again; inference-only setup tokens/API keys do not enable subscription reads.
+- **Claude Platform:** sign in to the first-party Console outside this app, add a
+  `claude-platform` account and choose **Console session (not an API key)**.
+  A high-sensitivity warning appears before masked entry. Supply only your own
+  `sessionKey` value, never a password, Cookie header, HAR, or browser-store import.
+  Use **Discover** in the TUI (or consent to the CLI read-only discovery prompt)
+  to list eligible API organizations, then explicitly select one before saving,
   including when only one is available. Discovery is an explicit read, not automatic
   polling or permission to silently switch organizations. Missing/inaccessible
   selection requires reselection or billing-permission guidance. Replacing an existing
   Console session requires newly discovered, explicitly selected organization scope;
   the previous organization's selection is not an automatic fallback.
-- **Grok:** run official `grok login` outside this app; select the default/private
-  auth-file reference or a supported manual bearer. Discover scopes and explicitly
-  select the intended identity when necessary; the saved nonsecret selector binds
-  future reads. The tool never runs login, refreshes credentials, changes file
-  permissions, or deletes the external login file.
+- **Grok:** run official `grok login` outside this app, add a `grok-subscription`
+  account and choose **External Grok auth file**. Enter `default` for
+  `$GROK_HOME/auth.json`, otherwise `~/.grok/auth.json`, or choose a private file
+  (absolute path in CLI). Discover scopes and explicitly select the intended
+  identity; the saved nonsecret selector binds future reads. A supported manual
+  bearer is also available. The tool never runs login, refreshes credentials,
+  changes file permissions, or deletes the external login file.
 - **ChatGPT:** a labeled local profile may have no credential, or an optional
   bearer/API key for local management only. It remains blocked by the missing
   ordinary-chat weekly contract; storage does not enable retrieval. No sensitive
@@ -637,9 +656,8 @@ Error scenarios are not actual service failures. Domain test/source assertions
 and this library documentation do not establish exercised verification; the
 orchestrator records component smoke and checks separately in PLAN.md.
 
-The C11 dashboard can render this source through its Python API below. The
-`usage --demo` / `--scenario` CLI remains C12 work; do not invoke the declared
-future entry point as though the offline source itself delivered a CLI.
+The dashboard renders this source through `uv run usage --demo` or
+`uv run usage --demo --scenario errors`; the Python API is described above.
 
 ## Polling and freshness library (C08)
 
@@ -840,6 +858,6 @@ version-sensitive, not official public API guarantees. Researched sources and
 exact contracts are in PLAN.md §§4 and 7; ordinary ChatGPT weekly quota still needs
 a defensible read-only request/authentication and metric contract.
 
-See [SECURITY.md](SECURITY.md) for current limitations and planned controls,
+See [SECURITY.md](SECURITY.md) for implemented controls and current limitations,
 [CHANGELOG.md](CHANGELOG.md) for delivered changes, and PLAN.md for the only progress
 tracker and the separate code/live acceptance matrix.

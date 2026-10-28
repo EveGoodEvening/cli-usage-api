@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Changed — C13 operator documentation reconciliation
+
+- Added a Chinese terminal-only quickstart and clarified locked `uv` installation,
+  offline/demo versus live startup, and the existing account/key commands.
+- Reconciled first-party Claude Code (`claude`, then `/login`) and Grok
+  (`grok login`) setup, default credential-file references, Console manual
+  `sessionKey`-value-only entry and explicit organization/scope selection.
+- Removed obsolete pending-CLI wording from README/security guidance. Existing
+  encrypted-keyring versus explicit TUI session-only storage, refresh/stale/reset,
+  purchased/promotional grant sums and blocked ordinary ChatGPT semantics remain
+  unchanged. No authenticated provider, real-keyring or new verification result
+  is claimed; exercised evidence remains in `PLAN.md`.
+
+Entries below describe each chunk's delivered scope at that time; the current
+application includes the C12 CLI/dashboard composition.
+
 ### Added — C12 production CLI and entry-point harness
 
 - Wired `usage` and `python -m usage_tui` to live dashboard composition, with

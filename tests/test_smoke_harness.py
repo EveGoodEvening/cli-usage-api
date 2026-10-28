@@ -1,7 +1,6 @@
 """Stdlib harness contracts; these tests never launch a live usage session."""
 
 import importlib.util
-import json
 import os
 import sys
 import termios
@@ -128,23 +127,6 @@ def test_restoration_requires_final_cursor_screen_and_original_termios():
             terminal.assert_restored()
 
 
-@pytest.mark.parametrize("scenario", ["healthy", "errors", "all"])
-def test_main_runs_both_quit_paths_without_transcripts(scenario, monkeypatch, capsys):
-    calls = []
-
-    def run(selected, quit_key):
-        calls.append((selected, quit_key))
-        return {"scenario": selected, "quit": quit_key, "terminal_restored": True}
-
-    monkeypatch.setattr(smoke, "scenario_run", run)
-    assert smoke.main(["--scenario", scenario]) == 0
-    scenarios = ("healthy", "errors") if scenario == "all" else (scenario,)
-    assert calls == [(selected, key) for selected in scenarios for key in ("q", "ctrl+c")]
-    lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == len(calls)
-    assert all(json.loads(line)["terminal_restored"] for line in lines)
-
-
 def test_main_failure_suppresses_exception_and_capture(monkeypatch, capsys):
     def fail(*_args):
         raise smoke.SmokeFailure("PRIVATE TRANSCRIPT")
@@ -154,75 +136,3 @@ def test_main_failure_suppresses_exception_and_capture(monkeypatch, capsys):
     output = capsys.readouterr()
     assert "PRIVATE" not in output.out + output.err
     assert "capture withheld" in output.err
-
-
-@pytest.mark.parametrize("scenario", ["healthy", "errors"])
-@pytest.mark.parametrize("quit_key", ["q", "ctrl+c"])
-def test_scenario_drives_installed_entry_and_required_terminal_surface(
-    scenario, quit_key, monkeypatch
-):
-    events = []
-
-    class Terminal:
-        capture = b"synthetic terminal capture"
-
-        def __init__(self, command):
-            events.append(("command", command))
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_exc):
-            events.append(("closed",))
-
-        def expect(self, token):
-            events.append(("expect", token))
-
-        def send(self, value):
-            events.append(("send", value))
-
-        def resize(self, width, height):
-            events.append(("resize", width, height))
-
-        def wait_exit(self):
-            events.append(("wait",))
-
-        def assert_restored(self):
-            events.append(("restored",))
-
-    monkeypatch.setattr(smoke, "installed_command", lambda selected: ["installed", selected])
-    monkeypatch.setattr(smoke, "PtySession", Terminal)
-    result = smoke.scenario_run(scenario, quit_key)
-    assert events[0] == ("command", ["installed", scenario])
-    expected_tokens = (
-        "DEMO",
-        "Claude 5h",
-        "Claude 每周",
-        "Fable",
-        "Claude Platform",
-        "购买余额",
-        "赠送余额",
-        "ChatGPT",
-        "GrokBuild",
-        "GrokChat",
-        "Details",
-        "provenance",
-        "Help",
-        "read only",
-        "refresh pending",
-        "窗口较小",
-    )
-    assert all(("expect", token) in events for token in expected_tokens)
-    if scenario == "healthy":
-        assert ("expect", "USD") in events
-    else:
-        assert all(("expect", token) in events for token in ("STALE", "LAST KNOWN", "retry"))
-    assert ("resize", 40, 12) in events
-    sends = [event[1] for event in events if event[0] == "send"]
-    assert sends[:35] == [b"\x1b[B"] * 35
-    assert sends[35:42] == [b"\r", b"\x1b", b"?", b"\x1b", b"a", b"\x1b", b"r"]
-    assert sends[-1] == (b"q" if quit_key == "q" else b"\x03")
-    if quit_key == "ctrl+c":
-        assert sends[-2] == b"?"
-    assert events[-3:] == [("wait",), ("restored",), ("closed",)]
-    assert result["rendered_metrics"] and result["terminal_restored"]

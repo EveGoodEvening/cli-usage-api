@@ -22,6 +22,11 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   environment, isolate HOME/XDG, wait for meaningful rendered tokens, and bound
   every wait. Always kill/reap owned children and restore terminal state; a
   traceback-free startup alone does not cover modal return, resize or shutdown.
+- Permanent harness tests should assert observable behavior, not mock choreography.
+  Keep coverage for rendered surfaces, bounded waits, isolation, normal/Ctrl-C
+  shutdown and terminal restoration; do not freeze internal helper call sequences
+  with wiring-only mocks. Actual installed-entry PTY evidence remains distinct
+  from unit tests and belongs in PLAN.md.
 - UI countdown ticks are presentation only. Use the source's clock for demo time,
   show last-success and last-attempt separately, and retain numeric overage, unknown
   fields and last-known errors without resetting quota when a deadline passes.

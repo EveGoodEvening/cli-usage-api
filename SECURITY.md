@@ -392,8 +392,8 @@ exposed, revoke or replace it through the relevant first-party service.
   synthesize fresh quota or reset values to zero.
 - `stop()` cancels scheduler-owned tasks and discards obsolete results. Injected
   providers/transports are borrowed; their owner must close resources they own.
-  The current Transport already closes its client per request. There is no new
-  daemon, logging, raw-response persistence, CLI, or TUI integration.
+  The current Transport already closes its client per request. The scheduler adds
+  no daemon, logging or raw-response persistence; the CLI/dashboard own composition.
 
 These are library controls, not authenticated polling or end-to-end application
 acceptance. This documentation task ran no checks or requests; exercised evidence
@@ -416,21 +416,22 @@ remains the orchestrator's separate PLAN.md record.
   not actual provider responses or authenticated observations. Advancing a demo
   clock does not renew an allowance, retry a provider, or access a saved secret.
 - Source test assertions forbid storage/resolver/HTTP construction; test source is
-  not passing-check evidence. C11 supplies dashboard composition, but no checks or
-  smoke were executed by this documentation task. CLI entry composition remains
-  C12 work; exercised isolation evidence belongs in PLAN.md.
+  not passing-check evidence. The dashboard and production CLI compose this source
+  for `usage --demo` and `usage --demo --scenario errors`. This documentation task
+  executed no checks or smoke; exercised isolation evidence belongs in PLAN.md.
 
-## Remaining production CLI controls — not end-to-end guarantees
+## Production CLI controls — not authenticated acceptance guarantees
 
-The Python dashboard does not establish a working authenticated production CLI.
-C12 composition must preserve the implemented boundaries:
+The implemented CLI/dashboard composition preserves these controls. Its local
+verification does not establish authenticated provider or real-keyring acceptance:
 
 - Do not resolve saved secrets or request transport for the unresolved ChatGPT
   capability. API-key storage does not enable subscription or balance retrieval.
-- Require explicit organization/profile selection and warn before accepting a
-  Console session secret. Provider adapters must validate response semantics.
+- Require explicit organization/profile selection and warn before accepting only a
+  Console `sessionKey` value. Provider adapters validate response semantics.
 - Present secure persistence versus session-only choices honestly and provide
-  actionable errors; never describe memory as persistent storage.
+  actionable errors. CLI manual secrets require the secure keyring; session-only
+  entry is an explicit TUI choice and is never described as persistent storage.
 - Never accept secrets as command arguments or documented secret-bearing
   environment variables. Use masked interactive inputs without history, saved-value
   prefill, or reveal/copy controls, and refuse secret input without a TTY.
