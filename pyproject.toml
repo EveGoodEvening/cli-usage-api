@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "usage-tui"
+version = "0.1.0"
+description = "Immutable usage snapshots for a read-only terminal account dashboard"
+requires-python = ">=3.11"
+dependencies = ["textual", "httpx", "keyring"]
+
+[project.scripts]
+usage = "usage_tui.cli:main"
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "respx", "ruff"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/usage_tui"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/usage_tui", "tests", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

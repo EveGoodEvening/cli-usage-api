@@ -2,7 +2,7 @@
 
 ## 0. Status, purpose, and scheduling authority
 
-Planning baseline: 2026-10-28. The repository was empty when scoped. This document is the complete durable hand-off; no product code, tests, packaging, or live account checks exist yet. Research sources were read without browser automation or account credentials. All implementation checkboxes below are intentionally unchecked. No tests, lint, formatters, gates, or commits were run as part of planning.
+Planning baseline: 2026-10-28. The repository was empty when scoped; research sources were read without browser automation or account credentials, and no tests, lint, formatters, gates, or commits were run as part of planning. C01 package/domain implementation, initial lock, and bounded documentation have since landed and passed the orchestrator's checks and actual component smoke below. C01 review and commits remain pending; no chunk is closed and no live account checks have been exercised.
 
 Original goal: **终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。**
 
@@ -14,18 +14,24 @@ A finished error/unavailable UI is useful code, but is **not** completion of an 
 
 This file is the only progress tracker. The orchestrator updates checkboxes, acceptance matrix, and this ledger from worker reports and its own exercised evidence. Never mark a chunk complete from a worker's unsupported assertion. Do not place credentials, raw responses, email addresses, or account IDs here. For every C01–C14 chunk record separately: implementation landed; bounded documentation/changelog task completed; repo-root `AGENTS.md` Lessons updated (or observed “no new lesson”); exact orchestrator check commands/outcomes; actual smoke observations; green draft commit; review outcome; separately verified review-fix commits; and closed status. Worker implementation evidence is not orchestrator verification. Keep upstream/live blockers independent of code closure.
 
+A checked chunk heading records implementation/documentation landed and orchestrator checks plus actual component smoke passed; it does not imply review, commits, or closure. Those remain separate ledger fields, and a dependent chunk is not runnable until its predecessor closes.
+
 | Field | Current value |
 |---|---|
-| Planning | Reviewed baseline corrected; planning commit still pending; no implementation or verification performed |
-| Planning commit | Pending orchestrator action before C01: `docs(plan): record reviewed usage implementation plan` |
-| Last closed implementation chunk | None |
-| Next runnable action | Commit the approved plan, then assign C01-A as bounded below |
-| Implementation / docs / Lessons | None landed; no observed implementation lesson yet |
-| Orchestrator checks / actual smoke | None exercised |
-| Green draft / review / review-fix commits / clean close | None |
+| Planning | Reviewed baseline; C01 implementation and documentation landed and orchestrator-verified; review/commit/closure pending |
+| Planning commit | Previously recorded as pending: `docs(plan): record reviewed usage implementation plan`; no commit evidence supplied in this update |
+| Last closed implementation chunk | None; C01 is not closed |
+| Next runnable action | Create the green C01 draft commit and obtain independent review; resolve planning-commit accounting before closure; C02 is not runnable until C01 closes |
+| Implementation / docs / Lessons | C01-A package/domain and C01-B initial `uv.lock` landed; D(C01) completed `README.md`, `CHANGELOG.md`, `SECURITY.md`, and repo-root `AGENTS.md`; existing Lessons retained, no new implementation lesson reported |
+| Orchestrator checks | `uv sync --locked --group dev` succeeded; `uv run pytest -q`: 84 passed in 0.10s; `uv run ruff check .`: all checks passed; `uv run ruff format --check .`: 8 files already formatted. Initial lint failures were fixed before these green results |
+| Actual component smoke | Orchestrator exercised `uv run --locked python -c` with concrete component assertions: exact Account/Snapshot round-trips, Decimal overage, UTC timestamps, money, and rejection of invalid inputs passed; this is domain-library evidence, not CLI/TUI or live-provider acceptance |
+| Green draft commit | Pending; no C01 commit recorded |
+| Review outcome | Pending independent review |
+| Review-fix commits / verification | None yet; any review fixes require separately recorded orchestrator verification and commits |
+| Clean close | Pending review resolution and commit accounting; C01 remains open |
 | Live checks exercised | None; credentials unavailable |
 | Upstream research blocker | Ordinary ChatGPT chat-model weekly remaining/usage contract |
-| Next scheduling action | Planning commit → C01-A → C01-B lock → C01 documentation task → orchestrator gate/smoke → draft/review/fix/close; then C02…C14 |
+| Next scheduling action | Green C01 draft commit → independent review → bounded fixes with orchestrator verification and separate commits as needed → C01 close; only then C02…C14 |
 
 ## 1. Scope and truthfulness matrix
 
@@ -263,7 +269,7 @@ A worker assignment must contain: chunk/unit ID, exact owned paths, referenced c
 
 **Review disposition:** accepted both reviewers' credential boundary, per-chunk verification, planning/commit lifecycle, documentation accounting, initial-lock and orchestrator-owned final-gate findings. Adapted reviewer 2's Lessons proposal to repo-root `AGENTS.md` per the user requirement. Discarded the proposed permanent `scripts/chunk_smoke.py` framework and blanket C10/C11/C12 splits: exact throwaway component snippets, a real temporary PTY host from C10, and the production PTY harness in C12 provide independently exercised invariants without a second maintained dispatch framework or speculative chunks. Keep C01–C14; bounded internal follow-ons for lock, docs, and the C12 harness have explicit ownership. Split only if an actual dependency/size finding warrants a sourced plan amendment, not preemptively.
 
-### [ ] C01 — package and frozen domain contract
+### [x] C01 — package and frozen domain contract
 
 Two sequential bounded assignments:
 

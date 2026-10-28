@@ -1,0 +1,687 @@
+"""Immutable, secret-safe values shared by storage, providers and presentation.
+
+JSON codecs are explicit: secrets are never serializable, Decimal percentages are
+strings, money remains integer minor units, and timestamps are UTC RFC3339.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import unicodedata
+from dataclasses import dataclass, field, fields
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation, localcontext
+from enum import StrEnum
+from types import MappingProxyType
+from typing import Any
+from uuid import UUID, uuid4
+
+
+class DomainError(ValueError):
+    """Invalid local value, with no offending input in its message."""
+
+
+class ProviderId(StrEnum):
+    CLAUDE_SUBSCRIPTION = "claude_subscription"
+    CLAUDE_PLATFORM = "claude_platform"
+    CHATGPT_SUBSCRIPTION = "chatgpt_subscription"
+    GROK_SUBSCRIPTION = "grok_subscription"
+
+
+class CredentialKind(StrEnum):
+    CLAUDE_CODE_FILE = "claude_code_file"
+    GROK_AUTH_FILE = "grok_auth_file"
+    CONSOLE_SESSION = "console_session"
+    MANUAL_BEARER = "manual_bearer"
+    API_KEY = "api_key"
+
+
+class MetricId(StrEnum):
+    CLAUDE_FIVE_HOUR = "claude.subscription.five_hour"
+    CLAUDE_WEEKLY = "claude.subscription.weekly"
+    CLAUDE_FABLE_WEEKLY = "claude.subscription.fable_weekly"
+    CLAUDE_PURCHASED_BALANCE = "claude.platform.purchased_balance"
+    CLAUDE_PROMOTIONAL_BALANCE = "claude.platform.promotional_balance"
+    CLAUDE_TOTAL_BALANCE = "claude.platform.total_balance"
+    CHATGPT_WEEKLY = "chatgpt.subscription.weekly"
+    GROK_SHARED_POOL = "grok.subscription.shared_pool"
+    GROK_BUILD = "grok.product.build"
+    GROK_CHAT = "grok.product.chat"
+
+
+REQUIRED_METRIC_IDS = MappingProxyType(
+    {
+        ProviderId.CLAUDE_SUBSCRIPTION: (
+            MetricId.CLAUDE_FIVE_HOUR,
+            MetricId.CLAUDE_WEEKLY,
+            MetricId.CLAUDE_FABLE_WEEKLY,
+        ),
+        ProviderId.CLAUDE_PLATFORM: (
+            MetricId.CLAUDE_PURCHASED_BALANCE,
+            MetricId.CLAUDE_PROMOTIONAL_BALANCE,
+            MetricId.CLAUDE_TOTAL_BALANCE,
+        ),
+        ProviderId.CHATGPT_SUBSCRIPTION: (MetricId.CHATGPT_WEEKLY,),
+        ProviderId.GROK_SUBSCRIPTION: (
+            MetricId.GROK_SHARED_POOL,
+            MetricId.GROK_BUILD,
+            MetricId.GROK_CHAT,
+        ),
+    }
+)
+
+READ_CREDENTIAL_KINDS = MappingProxyType(
+    {
+        ProviderId.CLAUDE_SUBSCRIPTION: frozenset(
+            {
+                CredentialKind.CLAUDE_CODE_FILE,
+                CredentialKind.MANUAL_BEARER,
+            }
+        ),
+        ProviderId.CLAUDE_PLATFORM: frozenset({CredentialKind.CONSOLE_SESSION}),
+        ProviderId.CHATGPT_SUBSCRIPTION: frozenset(),
+        ProviderId.GROK_SUBSCRIPTION: frozenset(
+            {
+                CredentialKind.GROK_AUTH_FILE,
+                CredentialKind.MANUAL_BEARER,
+            }
+        ),
+    }
+)
+
+
+class MetricState(StrEnum):
+    READY = "ready"
+    UNKNOWN = "unknown"
+    NOT_APPLICABLE = "not_applicable"
+    BLOCKED = "blocked"
+
+
+class FetchState(StrEnum):
+    OK = "ok"
+    PARTIAL = "partial"
+    UNCONFIGURED = "unconfigured"
+    AUTH_REQUIRED = "auth_required"
+    PERMISSION_DENIED = "permission_denied"
+    RATE_LIMITED = "rate_limited"
+    NETWORK_ERROR = "network_error"
+    PROVIDER_ERROR = "provider_error"
+    SCHEMA_ERROR = "schema_error"
+    UPSTREAM_CONTRACT_MISSING = "upstream_contract_missing"
+
+
+class SourceKind(StrEnum):
+    PRIVATE_HTTP = "private_http"
+    OFFLINE_DEMO = "offline_demo"
+    UNRESOLVED = "unresolved"
+
+
+class GrantCategory(StrEnum):
+    PURCHASED = "purchased"
+    PROMOTIONAL = "promotional"
+
+
+# Only these curated strings cross the diagnostic/exception boundary. Extend the
+# catalog with reviewed messages, never with upstream text or exception reprs.
+DIAGNOSTIC_MESSAGES = MappingProxyType(
+    {
+        "invalid_config": "Configuration is invalid; correct it before saving changes.",
+        "credential_unavailable": "Reconnect the account or select an available credential.",
+        "credential_expired": "Sign in again using the official provider application.",
+        "credential_mismatch": "Select a credential kind supported by this provider.",
+        "unsafe_credential_file": "Use a private, user-owned regular credential file.",
+        "credential_selection_required": "Select the intended credential profile.",
+        "secure_store_unavailable": "Unlock the secure store or choose session-only storage.",
+        "organization_selection_required": "Select an accessible billing organization.",
+        "forbidden_request": "The request does not match the provider's allowed read contract.",
+        "auth_required": "Reconnect this account using a supported credential.",
+        "permission_denied": "Check the selected organization and account permissions.",
+        "rate_limited": "Wait until the retry deadline before refreshing.",
+        "network_error": "Check network connectivity and retry later.",
+        "provider_error": "The provider could not complete the request; retry later.",
+        "schema_error": "The provider response does not match the supported contract.",
+        "response_too_large": "The provider response exceeded the supported size limit.",
+        "partial_data": "Some values are unavailable; inspect the individual metric details.",
+        "unconfigured": "Connect an account to retrieve live usage.",
+        "upstream_contract_missing": "Ordinary ChatGPT weekly usage has no verified read contract.",
+    }
+)
+
+
+def _fail() -> None:
+    raise DomainError("Invalid domain value.")
+
+
+def _integer(value: Any, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    if type(value) is not int:
+        _fail()
+    if minimum is not None and value < minimum:
+        _fail()
+    if maximum is not None and value > maximum:
+        _fail()
+    return value
+
+
+def _enum(cls: type[StrEnum], value: Any) -> StrEnum:
+    try:
+        return cls(value)
+    except (ValueError, TypeError):
+        raise DomainError("Invalid domain value.") from None
+
+
+def _text(value: Any, *, maximum: int = 256, empty: bool = False) -> str:
+    if not isinstance(value, str) or len(value) > maximum or (not empty and not value):
+        _fail()
+    return value
+
+
+def sanitize_text(value: str, *, max_length: int = 256) -> str:
+    """Remove terminal escapes, controls and Rich markup delimiters for display."""
+    _text(value, maximum=1_048_576, empty=True)
+    _integer(max_length, minimum=1, maximum=4096)
+    value = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", value)
+    value = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
+    return "".join(
+        char
+        for char in value
+        if not unicodedata.category(char).startswith("C") and char not in "[]"
+    ).strip()[:max_length]
+
+
+def _display(value: str | None, maximum: int = 256) -> str | None:
+    return None if value is None else sanitize_text(value, max_length=maximum)
+
+
+def _identifier(value: Any) -> str:
+    _text(value, maximum=128)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", value):
+        _fail()
+    return value
+
+
+def _account_id(value: Any) -> str:
+    _text(value, maximum=36)
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        raise DomainError("Invalid account ID.") from None
+    if str(parsed) != value:
+        _fail()
+    return value
+
+
+def new_account_id() -> str:
+    return str(uuid4())
+
+
+def _organization(value: str | None) -> str | None:
+    if value is not None and (
+        not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,64}", value)
+    ):
+        _fail()
+    return value
+
+
+def utc_datetime(value: datetime) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        _fail()
+    try:
+        return value.astimezone(UTC)
+    except (ValueError, OverflowError):
+        raise DomainError("Invalid timestamp.") from None
+
+
+def parse_timestamp(value: str) -> datetime:
+    """Parse timezone-required RFC3339, never guess a numeric epoch unit."""
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}"
+        r"(?:\.[0-9]{1,6})?(?:[Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])",
+        value,
+    ):
+        _fail()
+    try:
+        parsed = datetime.fromisoformat(value.upper())
+    except ValueError:
+        raise DomainError("Invalid timestamp.") from None
+    return utc_datetime(parsed)
+
+
+def format_timestamp(value: datetime) -> str:
+    return utc_datetime(value).isoformat().replace("+00:00", "Z")
+
+
+def _optional_time(value: datetime | None) -> datetime | None:
+    return None if value is None else utc_datetime(value)
+
+
+def percent(value: Decimal | int | str) -> Decimal:
+    """Read exact nonnegative percentages; binary floats and bools are rejected."""
+    if type(value) not in (Decimal, int, str):
+        _fail()
+    try:
+        result = Decimal(value)
+    except (InvalidOperation, ValueError):
+        raise DomainError("Invalid percentage.") from None
+    if not result.is_finite() or result < 0:
+        _fail()
+    return result
+
+
+def remaining_percent(used: Decimal | int | str) -> Decimal:
+    used = percent(used)
+    if used >= 100:
+        return Decimal(0)
+    with localcontext() as context:
+        context.prec = max(28, len(used.as_tuple().digits) + abs(used.as_tuple().exponent) + 3)
+        return Decimal(100) - used
+
+
+def validate_credential_kind(
+    provider: ProviderId, kind: CredentialKind, *, for_read: bool = False
+) -> None:
+    provider = _enum(ProviderId, provider)
+    kind = _enum(CredentialKind, kind)
+    allowed = READ_CREDENTIAL_KINDS[provider]
+    if not for_read:
+        allowed = allowed | {CredentialKind.API_KEY}
+        if provider == ProviderId.CHATGPT_SUBSCRIPTION:
+            allowed = allowed | {CredentialKind.MANUAL_BEARER}
+    if kind not in allowed:
+        raise DomainError("Credential kind is not supported by this provider.")
+
+
+@dataclass(frozen=True, slots=True)
+class Account:
+    id: str
+    provider: ProviderId
+    label: str
+    credential_ref: str | None = None
+    credential_kind: CredentialKind | None = None
+    credential_selector: str | None = None
+    organization_id: str | None = None
+    poll_interval_seconds: int = 60
+    enabled: bool = True
+
+    def __post_init__(self) -> None:
+        _account_id(self.id)
+        object.__setattr__(self, "provider", _enum(ProviderId, self.provider))
+        object.__setattr__(self, "label", sanitize_text(self.label, max_length=80))
+        if not self.label:
+            _fail()
+        _integer(self.poll_interval_seconds, minimum=30, maximum=3600)
+        if type(self.enabled) is not bool:
+            _fail()
+        if (self.credential_ref is None) != (self.credential_kind is None):
+            _fail()
+        if self.credential_kind is not None:
+            object.__setattr__(self, "credential_kind", _enum(CredentialKind, self.credential_kind))
+            validate_credential_kind(self.provider, self.credential_kind)
+            _text(self.credential_ref, maximum=4096)
+        if self.credential_selector is not None:
+            _text(self.credential_selector, maximum=1024)
+            if self.provider != ProviderId.GROK_SUBSCRIPTION:
+                _fail()
+        _organization(self.organization_id)
+        if self.organization_id is not None and self.provider != ProviderId.CLAUDE_PLATFORM:
+            _fail()
+
+    def to_dict(self) -> dict[str, Any]:
+        return _encode(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Account:
+        return _construct(cls, value)
+
+
+@dataclass(frozen=True, slots=True)
+class Money:
+    minor: int
+    currency: str
+    exponent: int
+
+    def __post_init__(self) -> None:
+        _integer(self.minor)
+        _integer(self.exponent, minimum=0, maximum=4)
+        if not isinstance(self.currency, str) or not re.fullmatch(r"[A-Z]{3}", self.currency):
+            _fail()
+
+    def __add__(self, other: Money) -> Money:
+        if not isinstance(other, Money):
+            return NotImplemented
+        if (self.currency, self.exponent) != (other.currency, other.exponent):
+            raise DomainError("Money units must match.")
+        return Money(self.minor + other.minor, self.currency, self.exponent)
+
+    def format(self) -> str:
+        digits = str(abs(self.minor)).zfill(self.exponent + 1)
+        if self.exponent:
+            digits = digits[: -self.exponent] + "." + digits[-self.exponent :]
+        return f"{'-' if self.minor < 0 else ''}{digits} {self.currency}"
+
+
+@dataclass(frozen=True, slots=True)
+class QuotaValue:
+    used_percent: Decimal | None = None
+    remaining_percent: Decimal | None = None
+    used_count: int | None = None
+    limit_count: int | None = None
+    remaining_count: int | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("used_percent", "remaining_percent"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, percent(value))
+        if self.used_percent is not None:
+            expected = remaining_percent(self.used_percent)
+            if self.remaining_percent is not None and self.remaining_percent != expected:
+                _fail()
+            object.__setattr__(self, "remaining_percent", expected)
+        if self.remaining_percent is not None and self.remaining_percent > 100:
+            _fail()
+        for name in ("used_count", "limit_count", "remaining_count"):
+            value = getattr(self, name)
+            if value is not None:
+                _integer(value, minimum=0)
+
+
+@dataclass(frozen=True, slots=True)
+class SourceRef:
+    kind: SourceKind
+    contract: str
+    version_sensitive: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "kind", _enum(SourceKind, self.kind))
+        _identifier(self.contract)
+        if type(self.version_sensitive) is not bool:
+            _fail()
+
+
+@dataclass(frozen=True, slots=True)
+class Grant:
+    category: GrantCategory
+    granted: Money
+    remaining: Money
+    id: str | None = None
+    program_id: str | None = None
+    name: str | None = None
+    expires_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "category", _enum(GrantCategory, self.category))
+        if not isinstance(self.granted, Money) or not isinstance(self.remaining, Money):
+            _fail()
+        if (self.granted.currency, self.granted.exponent) != (
+            self.remaining.currency,
+            self.remaining.exponent,
+        ):
+            _fail()
+        for name in ("id", "program_id", "name"):
+            object.__setattr__(self, name, _display(getattr(self, name)))
+        object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
+
+
+@dataclass(frozen=True, slots=True)
+class Metric:
+    id: str
+    label: str
+    state: MetricState
+    source: SourceRef
+    quota: QuotaValue | None = None
+    balance: Money | None = None
+    reset_at: datetime | None = None
+    expires_at: datetime | None = None
+    shared_pool_id: str | None = None
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        _identifier(self.id)
+        object.__setattr__(self, "label", sanitize_text(self.label, max_length=120))
+        object.__setattr__(self, "state", _enum(MetricState, self.state))
+        if not isinstance(self.source, SourceRef):
+            _fail()
+        if self.quota is not None and not isinstance(self.quota, QuotaValue):
+            _fail()
+        if self.balance is not None and not isinstance(self.balance, Money):
+            _fail()
+        if self.balance is not None and self.quota is not None:
+            _fail()
+        object.__setattr__(self, "reset_at", _optional_time(self.reset_at))
+        object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
+        if self.shared_pool_id is not None:
+            _identifier(self.shared_pool_id)
+        object.__setattr__(self, "detail", _display(self.detail, 1024))
+
+
+@dataclass(frozen=True, slots=True)
+class Diagnostic:
+    code: str
+    message: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.code, str) or self.code not in DIAGNOSTIC_MESSAGES:
+            raise DomainError("Unknown safe diagnostic code.")
+        object.__setattr__(self, "message", DIAGNOSTIC_MESSAGES[self.code])
+
+
+class TransportError(Exception):
+    """Safe structured transport failure; no arbitrary message/body is accepted."""
+
+    def __init__(
+        self,
+        fetch_state: FetchState,
+        code: str,
+        *,
+        status: int | None = None,
+        retry_at: datetime | None = None,
+    ) -> None:
+        self.fetch_state = _enum(FetchState, fetch_state)
+        self.code = Diagnostic(code).code
+        if self.fetch_state in (FetchState.OK, FetchState.PARTIAL):
+            _fail()
+        self.status = None if status is None else _integer(status, minimum=100, maximum=599)
+        self.retry_at = _optional_time(retry_at)
+        super().__init__(DIAGNOSTIC_MESSAGES[self.code])
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCredential:
+    provider: ProviderId
+    credential_kind: CredentialKind
+    secret: str = field(repr=False)
+    generation_fingerprint: str = field(repr=False)
+    user_id: str | None = field(default=None, repr=False)
+    expires_at: datetime | None = None
+    organization_id: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "provider", _enum(ProviderId, self.provider))
+        object.__setattr__(self, "credential_kind", _enum(CredentialKind, self.credential_kind))
+        validate_credential_kind(self.provider, self.credential_kind)
+        _text(self.secret, maximum=1_048_576)
+        _identifier(self.generation_fingerprint)
+        if self.user_id is not None:
+            _text(self.user_id)
+        object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
+        _organization(self.organization_id)
+        if self.organization_id is not None and self.provider != ProviderId.CLAUDE_PLATFORM:
+            _fail()
+
+
+def validate_credential_binding(provider: ProviderId, credential: ResolvedCredential) -> None:
+    provider = _enum(ProviderId, provider)
+    if not isinstance(credential, ResolvedCredential) or credential.provider != provider:
+        raise DomainError("Credential provider does not match the account.")
+    validate_credential_kind(provider, credential.credential_kind, for_read=True)
+
+
+@dataclass(frozen=True, slots=True)
+class Snapshot:
+    account_id: str
+    metrics: tuple[Metric, ...]
+    grants: tuple[Grant, ...]
+    fetch_state: FetchState
+    attempted_at: datetime
+    fetched_at: datetime | None = None
+    retry_at: datetime | None = None
+    diagnostic: Diagnostic | None = None
+    organization_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _account_id(self.account_id)
+        if type(self.metrics) is not tuple or not all(isinstance(m, Metric) for m in self.metrics):
+            _fail()
+        if type(self.grants) is not tuple or not all(isinstance(g, Grant) for g in self.grants):
+            _fail()
+        if len({metric.id for metric in self.metrics}) != len(self.metrics):
+            _fail()
+        object.__setattr__(self, "fetch_state", _enum(FetchState, self.fetch_state))
+        object.__setattr__(self, "attempted_at", utc_datetime(self.attempted_at))
+        for name in ("fetched_at", "retry_at"):
+            object.__setattr__(self, name, _optional_time(getattr(self, name)))
+        if self.diagnostic is not None and not isinstance(self.diagnostic, Diagnostic):
+            _fail()
+        _organization(self.organization_id)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _encode(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Snapshot:
+        data = _mapping(value)
+        _keys(cls, data)
+        try:
+            data["metrics"] = tuple(_metric_from_dict(item) for item in _array(data["metrics"]))
+            data["grants"] = tuple(_grant_from_dict(item) for item in _array(data["grants"]))
+            for name in ("attempted_at", "fetched_at", "retry_at"):
+                if data.get(name) is not None:
+                    data[name] = parse_timestamp(data[name])
+            if data.get("diagnostic") is not None:
+                diagnostic = _mapping(data["diagnostic"])
+                if set(diagnostic) != {"code", "message"}:
+                    _fail()
+                data["diagnostic"] = Diagnostic(diagnostic["code"])
+                if data["diagnostic"].message != diagnostic["message"]:
+                    _fail()
+            return cls(**data)
+        except (KeyError, TypeError):
+            raise DomainError("Invalid serialized snapshot.") from None
+
+
+_SERIALIZABLE = (Account, Money, QuotaValue, SourceRef, Grant, Metric, Diagnostic, Snapshot)
+
+
+def _encode(value: Any) -> Any:
+    if isinstance(value, _SERIALIZABLE):
+        return {item.name: _encode(getattr(value, item.name)) for item in fields(value)}
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return format_timestamp(value)
+    if isinstance(value, StrEnum):
+        return value.value
+    if isinstance(value, tuple):
+        return [_encode(item) for item in value]
+    if value is None or type(value) in (str, int, bool):
+        return value
+    raise DomainError("Value cannot be serialized.")
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if type(value) is not dict or not all(isinstance(key, str) for key in value):
+        _fail()
+    return value.copy()
+
+
+def _array(value: Any) -> list[Any]:
+    if type(value) is not list:
+        _fail()
+    return value
+
+
+def _keys(cls: type, data: dict[str, Any]) -> None:
+    if set(data) - {item.name for item in fields(cls) if item.init}:
+        _fail()
+
+
+def _construct(cls: type, value: Any) -> Any:
+    data = _mapping(value)
+    _keys(cls, data)
+    try:
+        return cls(**data)
+    except TypeError:
+        raise DomainError("Invalid serialized value.") from None
+
+
+def _grant_from_dict(value: Any) -> Grant:
+    data = _mapping(value)
+    try:
+        data["granted"] = _construct(Money, data["granted"])
+        data["remaining"] = _construct(Money, data["remaining"])
+        if data.get("expires_at") is not None:
+            data["expires_at"] = parse_timestamp(data["expires_at"])
+    except KeyError:
+        raise DomainError("Invalid serialized grant.") from None
+    return _construct(Grant, data)
+
+
+def _metric_from_dict(value: Any) -> Metric:
+    data = _mapping(value)
+    try:
+        data["source"] = _construct(SourceRef, data["source"])
+        for name, cls in (("quota", QuotaValue), ("balance", Money)):
+            if data.get(name) is not None:
+                data[name] = _construct(cls, data[name])
+        for name in ("reset_at", "expires_at"):
+            if data.get(name) is not None:
+                data[name] = parse_timestamp(data[name])
+    except KeyError:
+        raise DomainError("Invalid serialized metric.") from None
+    return _construct(Metric, data)
+
+
+SCHEMA_VERSION = 1
+
+
+def dumps(value: Account | Snapshot) -> str:
+    if not isinstance(value, (Account, Snapshot)):
+        raise DomainError("Only accounts and snapshots have a public JSON schema.")
+    return json.dumps(
+        {"schema_version": SCHEMA_VERSION, "type": type(value).__name__, "value": value.to_dict()},
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            _fail()
+        result[key] = value
+    return result
+
+
+def loads(value: str) -> Account | Snapshot:
+    _text(value, maximum=1_048_576)
+    try:
+        data = json.loads(
+            value,
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda _: _fail(),
+            parse_float=Decimal,
+        )
+    except (ValueError, RecursionError):
+        raise DomainError("Invalid serialized JSON.") from None
+    data = _mapping(data)
+    if set(data) != {"schema_version", "type", "value"}:
+        _fail()
+    _integer(data["schema_version"], minimum=SCHEMA_VERSION, maximum=SCHEMA_VERSION)
+    if data["type"] == "Account":
+        return Account.from_dict(data["value"])
+    if data["type"] == "Snapshot":
+        return Snapshot.from_dict(data["value"])
+    raise DomainError("Unknown serialized value type.")
