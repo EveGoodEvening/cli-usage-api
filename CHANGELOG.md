@@ -59,10 +59,29 @@
   documentation of exact private origin/auth boundaries and reusable security
   Lessons. No checks or authenticated requests were run by the documentation worker.
 
+### Added — C04 Claude subscription provider library scope
+
+- `ClaudeProvider(transport)` with async `fetch(account, credential, now)`, explicit
+  credential requirement, and all three required metric rows on every result.
+  A fetch reads the private OAuth usage endpoint once through guarded Transport;
+  it does not log in, refresh credentials, retry, poll, or integrate a CLI/TUI.
+- Independent five-hour/weekly parsing, exact used/remaining percentages, per-window
+  unknown states, partial snapshots that preserve valid sibling windows, and
+  schema-error snapshots when no usable percentage exists. Invalid reset data does
+  not erase valid quota data. Aware strings and adapter-local positive Unix
+  seconds/milliseconds reset normalization are supported.
+- Scoped Fable selection independent of `is_active`, ordered legacy aliases, and
+  rejection of conflicting valid scoped duplicates. No Opus/Sonnet substitution,
+  inferred eligibility, fixed half-week quota, extra-usage balance conflation, or
+  additive Fable allowance.
+- Documentation of the library contract and private-API/unknown-window boundaries.
+  No authenticated response, live acceptance, or documentation-worker check is
+  claimed; verification remains separately recorded in `PLAN.md`.
+
 ### Not yet implemented / not verified
 
-- No CLI, terminal dashboard, interactive account/key management, provider adapter,
-  polling, or offline demo is delivered by the C03 libraries.
+- No CLI, terminal dashboard, interactive account/key management, other provider
+  adapters, polling, or offline demo is delivered by the current libraries.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.

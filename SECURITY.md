@@ -2,12 +2,13 @@
 
 ## Current implementation: Python libraries, not a live application
 
-This repository supplies package/domain, local storage, credential-resolution, and
-fixed-origin HTTP transport libraries. It does not implement provider adapters,
-polling, interactive account management, a CLI, or a TUI. A declared future console
-entry point does not provide these features. No authenticated provider or real
-OS-keyring check was exercised by this documentation task; implementation evidence
-and orchestrator verification remain separate in [PLAN.md](PLAN.md).
+This repository supplies package/domain, local storage, credential-resolution,
+fixed-origin HTTP transport, and Claude subscription provider libraries. It does not
+implement other provider adapters, polling, interactive account management, a CLI,
+or a TUI. A declared future console entry point does not provide these features.
+No authenticated provider or real OS-keyring check was exercised by this
+documentation task; implementation evidence and orchestrator verification remain
+separate in [PLAN.md](PLAN.md).
 
 Domain records are not a secure storage service. A credential value excluded from a
 representation is not encrypted or erased from process memory. Do not serialize
@@ -117,12 +118,37 @@ exposed, revoke or replace it through the relevant first-party service.
   HTTP debug mode, telemetry, endpoint configuration, or response cache.
 - Connect timeout is 5 seconds; the overall request deadline is 10 seconds.
   Decoded response data is streamed with a 1 MiB bound. The result is parsed JSON;
-  future adapters must independently validate its schema and metric semantics.
+  adapters independently validate its schema and metric semantics.
 - `TransportError` contains only fixed safe code/fetch state, optional status and
   retry time. Upstream bodies, credential paths, secrets, and arbitrary exceptions
   never become its diagnostic text. A valid 429 `Retry-After` has at least a
   60-second delay and is not shortened to a scheduler cap. Transport does not poll
   or implement the future scheduler's retry loop.
+
+## Implemented C04 Claude provider boundary
+
+- `ClaudeProvider(transport)` performs no construction-time I/O. Its async
+  `fetch(account, credential, now)` requires a Claude subscription account and a
+  provider-bound eligible credential; the injected transport independently enforces
+  provider/kind binding, fixed origin/path, and authentication rules. A fetch uses
+  one GET to `/api/oauth/usage`, never inference or credit-balance endpoints.
+- The OAuth usage route is private and version-sensitive. A working parser or mock
+  transport does not establish permission to read a particular live account.
+  First-party login, profile scope, and expiry requirements still apply; the
+  adapter does not refresh tokens, modify login files, or broaden credential scope.
+- Upstream fields are untrusted metric data, not user-facing error text. All three
+  metric rows remain present; missing/invalid windows are unknown, not zero, and
+  valid siblings survive partial responses. A wholly unusable response is a schema
+  error, not successful empty usage. Invalid reset data preserves a valid quota but
+  cannot supply a reset. This prevents malformed data from implying spare capacity.
+- Fable is a scoped weekly subset, not extra capacity. An inactive scoped entry can
+  still carry valid usage; conflicting valid duplicates are not arbitrarily chosen.
+  Missing Fable is not evidence of eligibility/ineligibility, and Opus/Sonnet data,
+  extra-usage balances, or a presumed half-week allowance cannot fill the gap.
+- Numeric reset normalization is local to this adapter: positive Unix seconds,
+  with values at least `10^11` treated as milliseconds. Timezone-free strings are
+  invalid. No response field changes the request destination, auth headers, or
+  credential selection. Snapshots carry normalized metrics, not raw response bodies.
 
 ## Planned integration controls — not end-to-end guarantees
 

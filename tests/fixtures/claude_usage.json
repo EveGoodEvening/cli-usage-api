@@ -1,0 +1,15 @@
+{
+  "five_hour": {"utilization": 12.5, "resets_at": "2026-10-28T18:00:00Z"},
+  "seven_day": {"utilization": 110.25, "resets_at": 1793793600000},
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "scope": {"model": {"display_name": "  FaBlE  "}},
+      "percent": 23.75,
+      "resets_at": "2026-11-01T14:00:00+02:00",
+      "is_active": false
+    }
+  ],
+  "seven_day_opus": {"utilization": 88},
+  "seven_day_sonnet": {"utilization": 99}
+}

@@ -52,3 +52,15 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 - A synthetic fixture, mock request, or working transport library does not establish
   a provider adapter, authenticated compatibility, or live metric acceptance. Keep
   library/API documentation separate from future CLI/TUI instructions and live claims.
+- Preserve response independence at the metric boundary: a valid Claude percentage
+  survives an invalid reset, and valid windows survive missing/invalid siblings.
+  Return every required row as known or unknown; a response with no usable window
+  is a schema error, not successful empty bars. Parsing must not infer eligibility
+  from absence or turn missing usage into zero.
+- Scoped Fable selection needs semantic identity and ambiguity handling, not an
+  activity-flag shortcut: match the weekly scope and normalized model display name,
+  retain inactive-but-valid meters, and reject conflicting valid duplicates before
+  considering any arbitrary choice. Keep legacy fallback ordering explicit.
+- Keep numeric timestamp heuristics provider-local. Claude's positive seconds and
+  `>= 10^11` millisecond normalization does not justify weakening the domain's
+  timezone-aware timestamp contract or applying the heuristic to other providers.

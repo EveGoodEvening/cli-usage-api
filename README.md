@@ -2,11 +2,11 @@
 
 A local terminal dashboard project for subscription usage and Claude Platform credit
 balances. **The current implementation provides Python domain, local storage,
-credential-resolution, and fixed-origin HTTP transport libraries, not a working
-dashboard or live provider integration.** There is no usable `usage` CLI, TUI,
-offline demo, interactive account manager, or provider adapter yet. The console
-entry point declared in package metadata targets a later implementation; do not
-invoke it at this stage.
+credential-resolution, fixed-origin HTTP transport, and Claude subscription provider
+libraries, not a working dashboard.** There is no usable `usage` CLI, TUI, offline
+demo, interactive account manager, or authenticated/live metric acceptance yet.
+The console entry point declared in package metadata targets a later implementation;
+do not invoke it at this stage.
 
 ## Original goal and scope
 
@@ -37,14 +37,15 @@ above 100%; remaining is exactly `max(0, 100 - used)`, not a rounded or capped u
 value. C01 verification and closure are recorded in PLAN.md.
 
 C02 adds library-level account/config persistence and credential storage. C03 adds
-read-only Linux credential-file resolution and guarded HTTP transport; see below.
-Provider adapters, polling, offline demo, interactive account management, terminal
-UI, and CLI integration remain **planned, not current support**:
+read-only Linux credential-file resolution and guarded HTTP transport. C04 adds the
+Claude subscription adapter described below. Other provider adapters, polling,
+offline demo, interactive account management, terminal UI, and CLI integration remain
+**planned, not current support**:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
-| Claude 5h / weekly | Subscription used/remaining percentages and server reset from private OAuth usage | No adapter or authenticated acceptance yet |
-| Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Plan/response dependent; no adapter yet |
+| Claude 5h / weekly | Subscription used/remaining percentages and server reset from private OAuth usage | Library adapter implemented; no authenticated acceptance |
+| Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Library parser implemented; availability is plan/response dependent, no authenticated acceptance |
 | Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Private Console credits contract researched; no adapter or live acceptance yet |
 | Ordinary ChatGPT weekly | Actual chat-model subscription usage/remaining/reset | **Upstream contract unresolved**, not just missing credentials |
 | Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Private direct billing contract researched; no adapter or live acceptance yet |
@@ -69,9 +70,52 @@ uv sync --locked --group dev
 ```
 
 This is an environment setup command, not a claim that the full verification gate
-has passed. Library modules are `usage_tui.domain`, `usage_tui.storage`,
-`usage_tui.credentials`, and `usage_tui.transport`; do not run the future console
-entry point. Transport alone does not fetch or normalize any requested metric.
+has passed. Library modules include `usage_tui.domain`, `usage_tui.storage`,
+`usage_tui.credentials`, `usage_tui.transport`, and `usage_tui.providers.claude`;
+do not run the future console entry point. Transport alone does not normalize metrics.
+
+## Claude subscription provider library (C04)
+
+`from usage_tui.providers.claude import ClaudeProvider` exposes
+`ClaudeProvider(transport)` with `requires_credential = True` and the three required
+`metric_ids`: `claude.subscription.five_hour`, `claude.subscription.weekly`, and
+`claude.subscription.fable_weekly`. Construction performs no request. The async
+`fetch(account, credential, now)` method returns a domain `Snapshot`; pass a Claude
+subscription `Account`, its provider-bound `ResolvedCredential`, and an aware
+observation time. Credential resolution is a separate library operation, not an
+implicit login or token refresh inside the adapter.
+
+Each eligible fetch makes one `Transport.get_json` call for
+`https://api.anthropic.com/api/oauth/usage`, using the transport's Bearer credential
+and `anthropic-beta: oauth-2025-04-20` header. This is a private, version-sensitive
+OAuth contract, not a supported public usage API or an inference API-key endpoint.
+It may change without notice. Eligible first-party account credentials and a real
+response comparison are still required for live acceptance; synthetic fixtures do
+not establish either.
+
+All results retain all three metric rows. `five_hour` and `seven_day` use
+`utilization`, falling back to `used_percentage`. These are **used** percentages;
+remaining is exactly `max(0, 100 - used)`, including overage. No absolute token or
+message quota is inferred. A missing/null/invalid window stays unknown, not zero;
+valid sibling windows survive in a partial snapshot. No usable percentage produces
+a schema-error snapshot rather than successful empty bars. Invalid reset data
+leaves a valid percentage intact but its reset unknown and the result partial.
+Aware RFC3339 reset strings normalize to UTC; positive numeric timestamps are Unix
+seconds, with values at least `10^11` interpreted as milliseconds only by this
+Claude adapter. This is not a global timestamp heuristic.
+
+Fable first uses valid `limits[]` entries with `kind == "weekly_scoped"` and
+`scope.model.display_name.strip().casefold() == "fable"`, reading `percent` and
+`resets_at` even when `is_active` is false. Conflicting valid duplicate scoped
+entries make that row unknown rather than selecting one arbitrarily. If no valid
+scoped entry is available, legacy aliases are considered in order: `fable_weekly`,
+`fable_seven_day`, `seven_day_fable`. Opus/Sonnet fields and extra-usage balances are
+not substitutes. Fable is a model-scoped subset of weekly capacity, not an additive
+allowance; absence establishes neither eligibility nor a fixed half-week quota.
+
+The adapter does not poll, retry, preserve last-known values, render bars, or connect
+accounts. Those remain later scheduler/UI integrations. No live request or CLI
+smoke is claimed here; exercised component verification belongs in PLAN.md.
 
 ## Local storage library (C02)
 
