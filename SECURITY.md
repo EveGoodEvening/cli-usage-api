@@ -1,14 +1,13 @@
 # Security boundaries
 
-## Current implementation: domain and local storage libraries
+## Current implementation: Python libraries, not a live application
 
-This repository supplies package metadata, domain value types, validation,
-serialization, and local account/credential-store libraries. It does not implement
-credential import, HTTP transport, provider adapters, polling, interactive account
-management, a CLI, or a TUI. A declared future console entry point does not provide
-these features. No authenticated provider or real OS-keyring check has been
-exercised as part of this documentation task; C02 verification is recorded only
-by the orchestrator in [PLAN.md](PLAN.md).
+This repository supplies package/domain, local storage, credential-resolution, and
+fixed-origin HTTP transport libraries. It does not implement provider adapters,
+polling, interactive account management, a CLI, or a TUI. A declared future console
+entry point does not provide these features. No authenticated provider or real
+OS-keyring check was exercised by this documentation task; implementation evidence
+and orchestrator verification remain separate in [PLAN.md](PLAN.md).
 
 Domain records are not a secure storage service. A credential value excluded from a
 representation is not encrypted or erased from process memory. Do not serialize
@@ -29,12 +28,12 @@ exposed, revoke or replace it through the relevant first-party service.
   default path is `$XDG_CONFIG_HOME/usage-tui/accounts.json`, falling back to
   `~/.config/usage-tui/accounts.json`; callers may supply an isolated path.
   Inline manual secrets and persisted references bound to another account are
-  rejected. External file references are metadata only at this stage: the store
-  neither opens nor modifies first-party credential files.
+  rejected. The store neither opens nor modifies external first-party credential
+  files; read-time import checks belong to `CredentialResolver`.
 - POSIX config operations use an owner-only `0700` directory, `0600` config/lock
   files, bounded 1 MiB reads, and regular-file ownership/mode checks. Symlinks and
   hardlinks are rejected. Invalid/newer-schema existing config is not overwritten.
-  These config checks do not yet implement first-party credential import checks.
+  Config validation is separate from the credential resolver's import checks.
 - A stable sibling lock file carries the advisory lock while the config is
   atomically replaced in the same directory. `mutate` rereads under that lock and
   writes only after its callback succeeds. Callers must use it for read-modify-write
@@ -59,39 +58,92 @@ exposed, revoke or replace it through the relevant first-party service.
   login files or remote sessions. Account metadata removal and credential deletion
   remain separate library calls until the account-management integration exists.
 
-## Planned controls — not implemented security guarantees
+## Implemented C03 credential-resolution boundary
 
-The following are requirements in [PLAN.md](PLAN.md), not claims that the current
-package enforces an end-to-end integration:
+- `CredentialResolver.resolve(account)` returns a frozen credential with explicit
+  provider/kind binding, secret excluded from repr, and an opaque generation
+  fingerprint local to the resolver instance. It is captured once per attempt;
+  never relabel an old credential after replacement or expose a fingerprint as a
+  public token identifier. Manual secrets come from `CredentialStore` references.
+- Imported references are literal local paths, not commands or URLs. The explicit
+  `default` reference resolves Claude's `$CLAUDE_CONFIG_DIR/.credentials.json` or
+  `~/.claude/.credentials.json`, and Grok's `$GROK_HOME/auth.json` or
+  `~/.grok/auth.json`, at resolution time. Construction does not read login files.
+- On Linux/POSIX, imported files are opened read-only with no-follow/nonblocking
+  flags and descriptor validation: regular file, effective-user ownership, exact
+  `0600` mode, and at most 1 MiB. Unsafe files are rejected, not chmodded or copied
+  into a less protected location. These checks are not a defense against hostile
+  code already running as the same user. Cross-platform import is not supported.
+- Claude imports validate `claudeAiOauth.accessToken`, optional millisecond expiry,
+  and optional scopes; supplied scopes must include `user:profile`. Grok imports
+  select an exact saved scope or an unambiguous modern auth scope, falling back
+  to the legacy sign-in scope only without modern candidates. Identity metadata
+  comes from that same entry, never another profile. Expired credentials fail;
+  absent expiry remains unknown and malformed supplied expiry is a schema error.
+- Only required access/identity metadata is returned. Refresh tokens are not copied
+  into application storage; no first-party file is written, deleted, refreshed,
+  or permission-modified. Users run official login/renewal outside this tool.
+  No browser extraction, subprocess login, or token-refresh protocol is implemented.
+- Errors expose curated codes/state/diagnostics, not secret values, local paths,
+  raw parse failures, or arbitrary exception text. Synthetic fixtures do not prove
+  live credential eligibility or upstream compatibility.
 
-- Provider-bound credentials and fixed-origin, read-only HTTPS GET requests; reject
-  credential-kind/provider mismatches before constructing authentication headers or
-  making requests. Disable redirects, implicit proxy/netrc use, and cookie persistence.
-- Claude subscription OAuth credentials go only to `api.anthropic.com`; a Claude
-  Platform `sessionKey` goes only to `platform.claude.com`; Grok subscription bearer
-  credentials go only to `cli-chat-proxy.grok.com`. API keys are not substitutes for
-  subscription OAuth or Console sessions.
-- Import existing Claude Code/Grok credential references read-only, without copying
-  refresh tokens, modifying first-party files, or refreshing tokens. Users perform
-  first-party login outside this tool. No browser-store extraction or browser automation.
-- Treat a manually supplied Console `sessionKey` as a high-sensitivity session secret,
-  not a limited API key. Do not collect account passwords, full Cookie headers, or HARs.
-  Organization selection must be explicit.
-- Connect the storage backend to explicit user-visible secure/session-only choices
-  and actionable failure guidance. Do not present session memory as persistence.
-- Apply bounded reads, ownership/mode checks, and symlink rejection to imported
-  first-party credential files before reading; never modify those files. Keep
-  secrets out of logs/diagnostics and do not add raw-response caches.
+## Implemented C03 HTTP boundary
+
+- Async `Transport.get_json` permits only fixed-origin HTTPS GET routes, with
+  provider and credential-kind checks before authentication construction or I/O:
+
+  | Provider | Origin | Allowed path | Credential kinds |
+  |---|---|---|---|
+  | Claude subscription | `https://api.anthropic.com` | `/api/oauth/usage` | `claude_code_file`, `manual_bearer` |
+  | Claude Platform | `https://platform.claude.com` | `/api/organizations`, `/api/organizations/{id}/prepaid/credits` | `console_session` |
+  | Grok subscription | `https://cli-chat-proxy.grok.com` | `/v1/billing?format=credits` | `grok_auth_file`, `manual_bearer` |
+
+  Console IDs must match `[A-Za-z0-9-]{1,64}`. No arbitrary origin/path, URL
+  override, API-key substitution, or ChatGPT request is permitted. The injected
+  in-memory HTTP test transport does not relax production URL/path checks.
+- Claude subscription sends Bearer plus `anthropic-beta: oauth-2025-04-20`.
+  Console sends only `Cookie: sessionKey=<value>` authentication, never that cookie
+  to another Anthropic service. Grok sends Bearer plus
+  `x-xai-token-auth: xai-grok-cli`; optional `x-userid` belongs to the same resolved
+  credential. No guessed upstream client-version headers are added.
+- A Console value is a high-sensitivity session credential, not a limited API key.
+  Invalid cookie controls/delimiters are rejected; full Cookie headers, passwords,
+  and HAR imports are not supported. Explicit organization selection remains a
+  later connection/adapter responsibility, not automatic transport behavior.
+- TLS verification is enabled; redirects and implicit proxy/netrc inheritance
+  are disabled. Each request has a fresh client, so response cookies do not carry
+  over. Requests identify the installed package and accept JSON. There is no raw
+  HTTP debug mode, telemetry, endpoint configuration, or response cache.
+- Connect timeout is 5 seconds; the overall request deadline is 10 seconds.
+  Decoded response data is streamed with a 1 MiB bound. The result is parsed JSON;
+  future adapters must independently validate its schema and metric semantics.
+- `TransportError` contains only fixed safe code/fetch state, optional status and
+  retry time. Upstream bodies, credential paths, secrets, and arbitrary exceptions
+  never become its diagnostic text. A valid 429 `Retry-After` has at least a
+  60-second delay and is not shortened to a scheduler cap. Transport does not poll
+  or implement the future scheduler's retry loop.
+
+## Planned integration controls — not end-to-end guarantees
+
+The libraries above do not establish a working authenticated application. Later
+chunks must connect them without bypassing their boundaries:
+
+- Do not resolve saved secrets or request transport for the unresolved ChatGPT
+  capability. API-key storage does not enable subscription or balance retrieval.
+- Require explicit organization/profile selection and warn before accepting a
+  Console session secret. Provider adapters must validate response semantics.
+- Present secure persistence versus session-only choices honestly and provide
+  actionable errors; never describe memory as persistent storage.
 - Never accept secrets as command arguments or documented secret-bearing
-  environment variables.
-- Use masked interactive input without saved-value prefill, reveal/copy controls, or
-  history. Refuse secret input without a TTY. Account removal must not delete external
-  login files or claim remote session revocation.
+  environment variables. Use masked interactive inputs without history, saved-value
+  prefill, or reveal/copy controls, and refuse secret input without a TTY.
+- Cancel obsolete in-flight account work. Account removal must not delete external
+  login files or claim remote revocation. Keep logs off by default and restrict
+  any logs to safe codes/local opaque account IDs, never raw responses or identity.
 
-These remaining integration controls require implementation and verification in
-later chunks. Linux/POSIX is the initial target; cross-platform credential import
-and secure persistence are not established. Private provider contracts can change
-without notice. No live metric or credential-safety acceptance follows from fixtures,
-package installation, or a future offline demo. Ordinary ChatGPT weekly usage remains
-blocked by an unresolved request/authentication/metric contract, not merely by missing
-credentials. See PLAN.md §§4–5 and §9 for exact boundaries and separate live acceptance.
+No live metric or credential-safety acceptance follows from fixtures, installation,
+or a future offline demo. Private provider contracts can change without notice.
+Ordinary ChatGPT weekly usage remains blocked by an unresolved read/authentication/
+metric contract, not merely missing credentials; WHAM/Codex is not a substitute.
+See PLAN.md §§4–5 and §9 for exact boundaries and separate live acceptance.

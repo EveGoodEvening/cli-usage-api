@@ -37,3 +37,18 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   alternative/plaintext, unknown, and subclassed backends rather than silently
   accepting a weaker backend or falling back. Session-only storage is an explicit
   separate choice and must not probe the OS keyring.
+- Bind credentials to an explicit provider and source kind in both resolver and
+  transport. Reject mismatches before auth-header construction or network I/O;
+  a shared brand or plausible token string is not authorization to reuse a secret.
+  Exact origin/path allowlists must still apply when a mock HTTP transport is injected.
+- Read external login references at resolution time through a validated descriptor,
+  not a prior pathname stat followed by an unchecked open. Reject unsafe files
+  rather than changing first-party permissions. Profile ambiguity requires explicit
+  selection; absent expiry is unknown, not fresh. Never refresh or copy refresh tokens.
+- A shared HTTP cookie jar can forward upstream cookies on later requests even when
+  application auth headers are curated. Keep server cookies from persisting across
+  reads, disable redirects and environment proxy/netrc inheritance, bound streamed
+  decoded bytes and the overall deadline, and expose only curated structured errors.
+- A synthetic fixture, mock request, or working transport library does not establish
+  a provider adapter, authenticated compatibility, or live metric acceptance. Keep
+  library/API documentation separate from future CLI/TUI instructions and live claims.

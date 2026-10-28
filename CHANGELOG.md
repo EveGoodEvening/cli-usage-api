@@ -36,14 +36,33 @@
   Service backend. Unsupported or locked backends raise safe errors without an
   automatic plaintext/memory fallback. No real OS-keyring acceptance is claimed.
 - Storage test source and fixed safe config/credential errors. Interactive
-  account/key management and first-party credential import remain unimplemented.
+  account/key management remains unimplemented; C03 adds read-only import below.
 - Bounded documentation of local persistence and session-only security boundaries;
   implementation evidence is separate from orchestrator verification in `PLAN.md`.
 
+### Added — C03 transport and credential-resolution library scope
+
+- Async fixed-origin, allowlisted-path GET transport with provider/kind binding
+  checks before authentication or network I/O; exact Claude Bearer/beta, Console
+  session-cookie, and Grok Bearer/token-auth headers. API keys and ChatGPT requests
+  do not enable these reads; injected mock transports retain the same URL guards.
+- Verified-TLS client configuration without redirects, proxy/netrc inheritance,
+  or cross-request server-cookie persistence; 5-second connect timeout, 10-second
+  overall deadline, 1 MiB streamed decoded-response bound, safe structured failures,
+  and 429 Retry-After interpretation without shortening long server deadlines.
+- Read-only Linux Claude Code/Grok credential references, explicit default-file
+  resolution, descriptor-based regular-file/owner/exact-0600 checks, 1 MiB bound,
+  expiry/scope validation, unambiguous Grok profile selection, manual-secret store
+  lookup, and provider-bound immutable resolved credentials with opaque generations.
+  No first-party file modification, refresh-token copying, or token refresh.
+- Synthetic credential fixtures and transport/resolver/security test source;
+  documentation of exact private origin/auth boundaries and reusable security
+  Lessons. No checks or authenticated requests were run by the documentation worker.
+
 ### Not yet implemented / not verified
 
-- No CLI, terminal dashboard, interactive account/key management, credential import,
-  HTTP transport, provider adapter, polling, or offline demo is delivered by C02.
+- No CLI, terminal dashboard, interactive account/key management, provider adapter,
+  polling, or offline demo is delivered by the C03 libraries.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.
