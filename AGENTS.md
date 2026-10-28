@@ -19,3 +19,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 - Fable is a model-scoped weekly subset, not an additional weekly allowance. GrokBuild
   and GrokChat product shares are not independent quotas: shared remaining/reset needs
   positive same-payload shared-pool evidence. Missing data is unknown, not zero.
+- Bound numeric representation complexity before exact arithmetic or fixed-point
+  formatting. A tiny scientific-notation Decimal can encode an enormous expansion,
+  so a JSON byte-size limit does not bound computation or memory. Check coefficient
+  digits and stored exponent (and string length before parsing), reject unsupported
+  representations through direct and deserialization paths, and retain exact normal
+  percent/overage semantics rather than hiding the risk with rounding or clamping.
+- Progress tracking must distinguish verified draft baselines from later review
+  fixes. Record existing exact commit hashes and replace completed next assignments;
+  keep fix verification, independent rereview, and closure explicitly pending until
+  the orchestrator records their own evidence.

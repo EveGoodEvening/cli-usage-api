@@ -242,6 +242,59 @@ def test_percentage_math_is_independent_of_ambient_decimal_precision():
         assert remaining_percent(raw) == Decimal("99.876543210987654321098765432109876543211")
 
 
+@pytest.mark.parametrize("raw", ["1e-10000000000", "1e+10000000000", "0e-10000000000"])
+@pytest.mark.parametrize("representation", [str, Decimal])
+def test_extreme_percentage_exponents_rejected_before_arithmetic(raw, representation, monkeypatch):
+    def unexpected_arithmetic():
+        pytest.fail("Out-of-bounds percentages must be rejected before subtraction")
+
+    monkeypatch.setattr("usage_tui.domain.localcontext", unexpected_arithmetic)
+    value = representation(raw)
+    for operation in (
+        lambda: percent(value),
+        lambda: remaining_percent(value),
+        lambda: QuotaValue(used_percent=value),
+        lambda: QuotaValue(remaining_percent=value),
+    ):
+        with pytest.raises(DomainError):
+            operation()
+
+
+@pytest.mark.parametrize("raw", ["1e-10000000000", "1e+10000000000", "0e-10000000000"])
+@pytest.mark.parametrize("field", ["used_percent", "remaining_percent"])
+def test_serialized_extreme_percentage_exponents_are_rejected(raw, field, monkeypatch):
+    payload = json.loads(dumps(snapshot()))
+    payload["value"]["metrics"][0]["quota"] = {field: raw}
+
+    def unexpected_arithmetic():
+        pytest.fail("Serialized percentages must be bounded before subtraction")
+
+    monkeypatch.setattr("usage_tui.domain.localcontext", unexpected_arithmetic)
+    with pytest.raises(DomainError):
+        loads(json.dumps(payload))
+
+
+def test_percentage_bounds_preserve_exact_values_and_snapshot_round_trips():
+    with localcontext() as context:
+        context.prec = 4
+        tiny = QuotaValue(used_percent="1e-1000")
+        assert tiny.remaining_percent == Decimal("99." + "9" * 1000)
+        overage = QuotaValue(used_percent="1e+1000")
+        assert overage.used_percent == Decimal("1e+1000")
+        assert overage.remaining_percent == 0
+        coefficient = "1" * 1024
+        assert percent(coefficient).as_tuple().digits == (1,) * 1024
+        for quota in (tiny, overage, QuotaValue(used_percent=coefficient)):
+            value = replace(snapshot(), metrics=(replace(snapshot().metrics[0], quota=quota),))
+            assert loads(dumps(value)) == value
+
+
+@pytest.mark.parametrize("raw", ["1e-1001", "1e+1001", "1" * 1025, "0" * 4097])
+def test_percentage_precision_and_scale_limits(raw):
+    with pytest.raises(DomainError):
+        percent(raw)
+
+
 @pytest.mark.parametrize("value", [True, False, -1, "-0.1", "NaN", "sNaN", "Infinity", 1.5, "bad"])
 def test_invalid_percentages(value):
     with pytest.raises(DomainError):

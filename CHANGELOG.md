@@ -13,6 +13,18 @@
 - Initial README, security-boundary documentation, and reusable research Lessons in
   root `AGENTS.md`, separating planned behavior from existing package/domain behavior.
 
+### Corrected — C01 review follow-on (verification pending)
+
+- Bound percentage strings to 4,096 characters, Decimal coefficients to 1,024 digits,
+  and stored exponents to −1,000…+1,000 before exponent-driven exact arithmetic.
+  Unsupported representations raise `DomainError` for direct and serialized quota
+  inputs, preventing tiny scientific-notation payloads from requesting enormous
+  decimal expansion. Supported values remain exact, including >100% overage and
+  `max(0, 100 - used)` remaining; no rounding or 100% used cap is introduced.
+- Correct planning/draft commit accounting and next-action tracking in `PLAN.md`;
+  preserve the verified implementation baseline while keeping review-fix checks,
+  independent rereview, separate fix commits, and C01 closure pending.
+
 ### Not yet implemented / not verified
 
 - No CLI, terminal dashboard, account/key management, credential import/storage, HTTP

@@ -26,6 +26,16 @@ safe error types, validation helpers, and schema serialization. Domain tests are
 source artifacts, not proof that checks have passed. Verification and chunk closure
 are recorded only from exercised evidence in [PLAN.md](PLAN.md).
 
+The C01 review correction bounds percentage representations before exact arithmetic:
+at most 4,096 input string characters, 1,024 Decimal coefficient digits, and a stored
+Decimal exponent from −1,000 through +1,000. Unsupported representations raise
+`DomainError`, including through serialized snapshots. These bounds prevent a tiny
+scientific-notation value from requesting enormous decimal expansion; a JSON byte
+limit alone is insufficient. Supported percentages remain exact, including values
+above 100%; remaining is exactly `max(0, 100 - used)`, not a rounded or capped used
+value. The green C01 baseline predates this correction; review-fix verification and
+closure remain pending in PLAN.md.
+
 Storage, credential import, fixed-origin HTTP transport, provider adapters, polling,
 offline demo, account management, terminal UI, and CLI integration belong to later
 chunks. Their requirements below are **planned, not current support**:

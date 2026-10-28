@@ -255,15 +255,28 @@ def _optional_time(value: datetime | None) -> datetime | None:
     return None if value is None else utc_datetime(value)
 
 
+# Bound coefficient precision and stored scale before any exact arithmetic.
+# These generous limits preserve provider decimals without letting a compact
+# exponent force gigabytes of zero padding during subtraction or presentation.
+_MAX_PERCENT_DIGITS = 1024
+_MAX_PERCENT_EXPONENT = 1000
+_MAX_PERCENT_TEXT_LENGTH = 4096
+
+
 def percent(value: Decimal | int | str) -> Decimal:
-    """Read exact nonnegative percentages; binary floats and bools are rejected."""
+    """Read exact nonnegative percentages within bounded precision and scale."""
     if type(value) not in (Decimal, int, str):
+        _fail()
+    if type(value) is str and len(value) > _MAX_PERCENT_TEXT_LENGTH:
         _fail()
     try:
         result = Decimal(value)
     except (InvalidOperation, ValueError):
         raise DomainError("Invalid percentage.") from None
     if not result.is_finite() or result < 0:
+        _fail()
+    parts = result.as_tuple()
+    if len(parts.digits) > _MAX_PERCENT_DIGITS or abs(parts.exponent) > _MAX_PERCENT_EXPONENT:
         _fail()
     return result
 
