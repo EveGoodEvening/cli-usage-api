@@ -1,12 +1,18 @@
 # Usage TUI
 
 A local terminal dashboard for subscription usage and Claude Platform credit
-balances. C12 wires the `usage` CLI to the live dashboard, offline demo, and
-interactive account/key management. **Ordinary ChatGPT weekly retrieval remains
-blocked by an unresolved upstream contract; saving a credential does not enable
-it. No authenticated/live metric or real OS-keyring acceptance is claimed.**
-This is a terminal TUI, not a web application. Exercised verification and chunk
-closure are recorded separately in [PLAN.md](PLAN.md).
+balances. The installed `usage` CLI opens a live dashboard, deterministic offline
+demo, or interactive account/key management. **The terminal application and local
+account workflows have passed offline acceptance; ordinary ChatGPT weekly retrieval
+remains blocked by an unresolved upstream contract. Saving a credential does not
+enable it. Authenticated provider compatibility and real OS-keyring persistence
+remain unexercised.** This is a terminal TUI, not a web application.
+
+To try it, run `uv sync --locked` then `uv run usage --demo`. To configure your
+own accounts, run `uv run usage` and press `a`; enter credentials only in the
+application's masked prompts, never in chat. See the provider connection guidance
+below. Exercised evidence and remaining live-acceptance boundaries are recorded in
+[PLAN.md](PLAN.md).
 
 ## Original goal and scope
 
@@ -62,6 +68,28 @@ spend is not credit balance; API usage is not subscription allowance. WHAM/Codex
 not a fallback for ordinary ChatGPT weekly chat usage. No requested live metric is
 currently claimed as working or accepted.
 
+## Exercised offline acceptance
+
+The orchestrator's final offline acceptance recorded:
+
+- `uv sync --locked --group dev` succeeded; **849 tests passed in 27.81 seconds**.
+- Ruff lint passed, the formatting check passed for **43 files**, and all **17
+  source files** had clean language-server diagnostics.
+- The installed `usage --help` succeeded. The installed executable rendered
+  healthy and error demo scenarios in four real-PTY runs (normal quit and Ctrl-C
+  per scenario), with terminal restoration confirmed in all four runs.
+- Separate installed-CLI real-PTY acceptance passed local account CRUD,
+  cancellation, non-TTY mutation refusal without writes, and the empty live
+  dashboard/account-manager flow, including Back, `q`, and Ctrl-C.
+
+These results establish usable offline rendering, terminal lifecycle, and local
+account workflows—not authenticated metric retrieval or real secret persistence.
+No authenticated provider requests or real OS-keyring persistence were exercised;
+no user secrets were supplied or imported. Claude and Grok private-provider
+compatibility still needs authenticated comparison with the user's eligible
+account. Ordinary ChatGPT additionally lacks the upstream request/authentication
+and metric contract, so credentials alone cannot unblock it.
+
 ## Install and run
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and an interactive
@@ -98,8 +126,9 @@ no live stores, resolver, providers or HTTP clients and does not read account
 configuration or credentials. Its account screen is
 read-only. Synthetic ChatGPT samples do not demonstrate live ChatGPT support.
 
-For development dependencies use `uv sync --locked --group dev`. Installation
-and the commands above are usage instructions, not claims of exercised acceptance.
+For development dependencies use `uv sync --locked --group dev`. The final offline
+acceptance above identifies what was exercised; the other commands are usage
+instructions, not additional live-provider acceptance claims.
 
 ### Account and key commands
 
@@ -168,9 +197,9 @@ separate normal-quit and Ctrl-C runs with isolated temporary HOME/XDG state.
 The harness waits for rendered metrics/details/help/read-only account screens,
 requests refresh, resizes 80×24 to 40×12, and checks terminal restoration with
 bounded waits and child kill/reap cleanup. Captures stay bounded in memory and
-are neither printed nor persisted. These are verification commands for the
-orchestrator, not a claim that this documentation task ran them or that any live
-provider/keyring was exercised.
+are neither printed nor persisted. The orchestrator exercised all four installed-
+entry-point runs successfully, including terminal restoration, as summarized above.
+No live provider or real keyring was exercised.
 
 ## Textual dashboard API (C11)
 
@@ -396,8 +425,9 @@ Removing an account deletes its local metadata and this tool's stored secret onl
 deleting a key leaves the account profile available for reconnection. Neither
 action revokes a remote session or removes Claude/Grok credential files. Account
 metadata and keyring are separate stores, so failures are reported rather than
-promising a cross-store atomic transaction. No real credential, real-keyring,
-authenticated provider, or dashboard acceptance is established by this documentation.
+promising a cross-store atomic transaction. The final offline acceptance above
+includes dashboard and local account workflows, but not real credentials,
+real-keyring persistence, or authenticated providers.
 
 ## Claude subscription provider library (C04)
 
@@ -445,8 +475,9 @@ allowance; absence establishes neither eligibility nor a fixed half-week quota.
 The adapter itself does not poll, retry, preserve last-known values, render bars, or
 connect accounts. Polling and last-known state belong to the C08 scheduler;
 the C11 dashboard renders its snapshots and embeds the C10 account screen.
-No live request or CLI smoke is claimed here; exercised component verification
-belongs in PLAN.md.
+The final offline acceptance above includes the installed CLI and terminal
+dashboard; no authenticated live request was exercised. Detailed evidence is in
+PLAN.md.
 
 ## Claude Platform Console library (C05)
 

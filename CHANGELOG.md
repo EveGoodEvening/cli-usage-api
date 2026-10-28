@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Verified — C14 final offline acceptance
+
+- Orchestrator evidence: `uv sync --locked --group dev` succeeded; 849 tests
+  passed in 27.81 seconds; Ruff lint and the 43-file formatting check passed;
+  all 17 source files had clean language-server diagnostics.
+- The installed `usage --help` succeeded. Four installed-entry-point real-PTY
+  demo runs covered healthy/errors rendering with normal quit and Ctrl-C;
+  all four confirmed terminal restoration.
+- Separate installed-CLI real-PTY acceptance passed local account CRUD,
+  cancellation, non-TTY mutation refusal without writes, and empty live dashboard
+  account-manager navigation with Back, `q`, and Ctrl-C.
+- Reconciled README's usable offline/local workflows with the remaining boundary:
+  no authenticated provider requests, real OS-keyring persistence, or user-secret
+  supply/import were exercised. Private Claude/Grok compatibility remains
+  unexercised; ordinary ChatGPT weekly retrieval remains upstream-contract-blocked,
+  not merely unconfigured. Users configure their own accounts through the TUI's
+  masked prompts, not by sharing credentials in chat.
+
 ### Changed — C13 operator documentation reconciliation
 
 - Added a Chinese terminal-only quickstart and clarified locked `uv` installation,
@@ -12,8 +30,8 @@
 - Removed obsolete pending-CLI wording from README/security guidance. Existing
   encrypted-keyring versus explicit TUI session-only storage, refresh/stale/reset,
   purchased/promotional grant sums and blocked ordinary ChatGPT semantics remain
-  unchanged. No authenticated provider, real-keyring or new verification result
-  is claimed; exercised evidence remains in `PLAN.md`.
+  unchanged. That documentation-only reconciliation added no verification result;
+  final offline acceptance is recorded above, with detailed evidence in `PLAN.md`.
 
 Entries below describe each chunk's delivered scope at that time; the current
 application includes the C12 CLI/dashboard composition.
@@ -36,10 +54,10 @@ application includes the C12 CLI/dashboard composition.
   read-only accounts, refresh, resize, quit/Ctrl-C and bounded terminal cleanup,
   with isolated HOME/XDG state. README/security/installation guidance and reusable
   repository Lessons document actual entry-point and secret-storage boundaries.
-- No documentation-worker checks or harness execution are claimed. C12 review,
-  exercised gate/smoke and closure remain separate in `PLAN.md`. Ordinary ChatGPT
-  weekly retrieval remains contract-blocked; no live or real-keyring acceptance
-  is implied by the CLI or demo.
+- C12 review, exercised gate/smoke and closure are recorded in `PLAN.md`; the
+  final installed-entry-point offline acceptance is summarized above. Ordinary
+  ChatGPT weekly retrieval remains contract-blocked; no live or real-keyring
+  acceptance is implied by the CLI or demo.
 
 ### Added — C11 terminal dashboard and help
 
