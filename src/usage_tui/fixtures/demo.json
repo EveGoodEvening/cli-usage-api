@@ -1,0 +1,54 @@
+{
+  "now": "2026-10-28T12:00:00Z",
+  "providers": {
+    "claude_subscription": {
+      "metrics": [
+        {"id": "claude.subscription.five_hour", "label": "Claude 5h · SYNTHETIC", "used_percent": "37.5", "reset_offset": 7200},
+        {"id": "claude.subscription.weekly", "label": "Claude weekly · SYNTHETIC", "used_percent": "62.25", "reset_offset": 259200},
+        {"id": "claude.subscription.fable_weekly", "label": "Fable weekly · SYNTHETIC", "used_percent": "110.25", "reset_offset": 259200}
+      ]
+    },
+    "claude_platform": {
+      "organization_id": "fictional-demo-organization",
+      "metrics": [
+        {"id": "claude.platform.purchased_balance", "label": "Purchased · SYNTHETIC", "balance_minor": 4250},
+        {"id": "claude.platform.promotional_balance", "label": "Promotional · SYNTHETIC", "balance_minor": 1250},
+        {"id": "claude.platform.total_balance", "label": "Total · SYNTHETIC", "balance_minor": 5500}
+      ],
+      "grants": [
+        {"category": "purchased", "granted_minor": 5000, "remaining_minor": 4250, "name": "Fictional purchased grant"},
+        {"category": "promotional", "granted_minor": 2000, "remaining_minor": 1250, "name": "Fictional promotional grant", "expiry_offset": 604800}
+      ]
+    },
+    "chatgpt_subscription": {
+      "metrics": [
+        {"id": "chatgpt.subscription.weekly", "label": "GPT weekly · SYNTHETIC ONLY", "used_percent": "24", "reset_offset": 345600, "detail": "Synthetic demonstration only; ordinary ChatGPT weekly live retrieval is unsupported: no verified upstream read contract. Not evidence of live support."}
+      ]
+    },
+    "grok_subscription": {
+      "metrics": [
+        {"id": "grok.subscription.shared_pool", "label": "Grok shared pool · SYNTHETIC", "used_percent": "45", "reset_offset": 86400, "shared_pool_id": "fictional-grok-pool", "detail": "Synthetic shared allowance; Build and Chat draw from this same pool."},
+        {"id": "grok.product.build", "label": "GrokBuild · SYNTHETIC", "shared_pool_id": "fictional-grok-pool", "detail": "Synthetic product consumption: 30% of shared pool; not an independent remaining allowance. See shared pool for remaining and reset."},
+        {"id": "grok.product.chat", "label": "GrokChat · SYNTHETIC", "shared_pool_id": "fictional-grok-pool", "detail": "Synthetic product consumption: 15% of shared pool; not an independent remaining allowance. See shared pool for remaining and reset."}
+      ]
+    }
+  },
+  "scenarios": {
+    "healthy": [
+      {"id": "00000000-0000-4000-8000-000000000001", "provider": "claude_subscription", "label": "FICTIONAL DEMO · Claude"},
+      {"id": "00000000-0000-4000-8000-000000000002", "provider": "claude_platform", "label": "FICTIONAL DEMO · Console"},
+      {"id": "00000000-0000-4000-8000-000000000003", "provider": "chatgpt_subscription", "label": "FICTIONAL DEMO · GPT synthetic, NOT live support"},
+      {"id": "00000000-0000-4000-8000-000000000004", "provider": "grok_subscription", "label": "FICTIONAL DEMO · Grok"}
+    ],
+    "errors": [
+      {"id": "00000000-0000-4000-8000-000000000011", "provider": "claude_subscription", "label": "FICTIONAL DEMO · auth required", "fetch_state": "auth_required", "diagnostic": "auth_required", "unknown_all": true},
+      {"id": "00000000-0000-4000-8000-000000000012", "provider": "claude_platform", "label": "FICTIONAL DEMO · permission denied", "fetch_state": "permission_denied", "diagnostic": "permission_denied", "unknown_all": true},
+      {"id": "00000000-0000-4000-8000-000000000013", "provider": "grok_subscription", "label": "FICTIONAL DEMO · rate limited, last known", "fetch_state": "rate_limited", "diagnostic": "rate_limited", "fetched_offset": -600, "retry_offset": 90},
+      {"id": "00000000-0000-4000-8000-000000000014", "provider": "claude_subscription", "label": "FICTIONAL DEMO · network failure, stale last known", "fetch_state": "network_error", "diagnostic": "network_error", "fetched_offset": -900, "retry_offset": 60},
+      {"id": "00000000-0000-4000-8000-000000000015", "provider": "claude_platform", "label": "FICTIONAL DEMO · malformed response", "fetch_state": "schema_error", "diagnostic": "schema_error", "unknown_all": true, "retry_offset": 60},
+      {"id": "00000000-0000-4000-8000-000000000016", "provider": "claude_subscription", "label": "FICTIONAL DEMO · unknown Fable", "fetch_state": "partial", "diagnostic": "partial_data", "unknown_metrics": ["claude.subscription.fable_weekly"]},
+      {"id": "00000000-0000-4000-8000-000000000017", "provider": "grok_subscription", "label": "FICTIONAL DEMO · missing products", "fetch_state": "partial", "diagnostic": "partial_data", "unknown_metrics": ["grok.product.build", "grok.product.chat"]},
+      {"id": "00000000-0000-4000-8000-000000000018", "provider": "chatgpt_subscription", "label": "FICTIONAL DEMO · GPT synthetic, NOT live support"}
+    ]
+  }
+}

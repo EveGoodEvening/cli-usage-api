@@ -3,10 +3,10 @@
 A local terminal dashboard project for subscription usage and Claude Platform credit
 balances. **The current implementation provides Python domain, local storage,
 credential-resolution, fixed-origin HTTP transport, Claude subscription, Console
-balance/organization-discovery, Grok billing, explicit provider-registry, and polling/
-freshness libraries, plus an unresolved ChatGPT capability, not a working dashboard.** There is no
-usable `usage` CLI, TUI, offline demo, interactive account manager, or
-authenticated/live metric acceptance yet.
+balance/organization-discovery, Grok billing, explicit provider-registry, polling/
+freshness, and deterministic offline-source libraries, plus an unresolved ChatGPT
+capability, not a working dashboard.** There is no usable `usage` CLI, TUI,
+interactive account manager, or authenticated/live metric acceptance yet.
 The console entry point declared in package metadata targets a later implementation;
 do not invoke it at this stage.
 
@@ -44,7 +44,8 @@ Claude subscription adapter; C05 adds Console balances and organization discover
 C06 adds the Grok billing adapter described below. C07 adds the explicit provider
 registry and a truthful blocked ChatGPT capability, **not** an ordinary-chat quota
 adapter. C08 adds the library-level scheduler and freshness state described below.
-Offline demo, interactive account management, terminal UI, and CLI integration remain
+C09 adds the deterministic offline source described below; it is not yet wired to a
+CLI or TUI. Interactive account management, terminal UI, and CLI integration remain
 **planned, not current support**:
 
 | Requested metric | Intended meaning and source | Current live status |
@@ -294,6 +295,51 @@ user-provided bearer/API-key storage does **not** enable weekly retrieval; there
 is no working ChatGPT connection/setup command yet. Do not supply a cookie or
 password, extract browser sessions, or invent an OAuth client to unblock it.
 No ordinary ChatGPT live quota integration or authenticated acceptance is claimed.
+
+## Deterministic offline-source library (C09)
+
+`from usage_tui.demo import DemoClock, DemoSource` exposes an offline alternative
+to the scheduler's published snapshot stream. Construct
+`DemoSource(*, scenario="healthy", publish, clock=None)` with a synchronous
+`publish(snapshot)` callback; `scenario` accepts `healthy` or `errors`. `.accounts`
+contains the fictional domain `Account` values, and `.clock` is the deterministic
+`DemoClock`. The source loads only its packaged `usage_tui/fixtures/demo.json`
+resource, not account configuration, keyring entries, or first-party login files.
+It does not construct a credential resolver, live provider registry, HTTP client,
+or live transport, and never sends a request. It is an explicitly selected source,
+**not a fallback when live retrieval fails**.
+
+The async lifecycle is `start()`, `refresh(account_id=None)`,
+`update_accounts(accounts)`, and `stop()`. Start and account updates publish the
+enabled fixture accounts immediately; refresh republishes all or one selected
+sample on the caller's event loop, with no background polling task. Account updates
+may select, edit, or disable only the current scenario's fictional profiles; new
+IDs, changed providers/organizations, or credential references/selectors are rejected.
+Repeated start is idempotent; stop permanently prevents further publication.
+`tick(seconds=1)` advances demo time without fetching or publishing. `DemoClock`
+supplies `now()`, `monotonic()`, `advance(seconds=1)`, and async `sleep(seconds)`;
+sleepers wake when the clock is advanced, not as machine time passes. The default
+observation time is `2026-10-28T12:00:00Z`; an injected `DemoClock(now=...)` rebases
+fixture reset, retry, grant-expiry, and last-known offsets to that initial time.
+Use `.clock.now()` with `scheduler.freshness` for deterministic age/reset displays;
+advancing time does not zero quota or fabricate a new allowance.
+
+| Scenario | Synthetic display inputs |
+|---|---|
+| `healthy` | Four fictional provider accounts, all ten required metric rows, subscription windows, credit balances/grants, shared-pool product consumption, and an explicitly synthetic GPT weekly sample |
+| `errors` | Eight fictional accounts covering auth required, permission denied, rate limit/retry, network failure with stale last-known data, schema error, partial/unknown Fable, missing Grok product breakdown, and synthetic GPT sample data |
+
+**Every account, value, timestamp, and scenario is fictional.** All metric
+provenance is `offline_demo`; a ready ChatGPT sample is explicitly labeled
+synthetic demonstration, **not a working adapter or evidence of live support**.
+Ordinary ChatGPT retrieval remains blocked by the missing upstream contract.
+Error scenarios are not actual service failures. Domain test/source assertions
+and this library documentation do not establish exercised verification; the
+orchestrator records component smoke and checks separately in PLAN.md.
+
+This is a Python library only. `usage --demo`, `--scenario`, countdown rendering,
+keyboard controls, and the terminal dashboard are not implemented yet; do not
+invoke the declared future entry point as though this source delivered a CLI/TUI.
 
 ## Polling and freshness library (C08)
 

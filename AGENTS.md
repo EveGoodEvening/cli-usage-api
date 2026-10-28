@@ -144,3 +144,10 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   without shortening the monotonic embargo or losing publication of the failure.
   Distinguish static review findings from actual reproductions and preserve
   pending fix-verification/rereview status despite earlier green gates.
+- Keep offline composition independent of live dependencies: a demo source reads
+  only its packaged synthetic resource, never account config, credential files,
+  keyring, resolver, provider registry, or live transport. Forbid those construction
+  paths in tests; do not use demo fixtures as live-fetch fallback. Fixed/injected
+  demo time and `offline_demo` provenance must accompany fictional labels and all
+  samples, especially ready ChatGPT data, so a useful display scenario cannot be
+  mistaken for a working upstream contract or authenticated metric acceptance.

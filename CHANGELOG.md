@@ -178,7 +178,7 @@
   smoke, CLI/TUI integration, live requests, or authenticated acceptance are claimed;
   exercised verification remains separate in PLAN.md.
 
-### C08 review corrections — separate verification pending
+### C08 review corrections — verification recorded separately
 
 - Independent reviews found three scheduler defects: insertion-order starvation
   of overdue accounts, same-origin spacing measured before slow credential
@@ -191,14 +191,31 @@
 - Required corrections select oldest eligible deadlines fairly, gate same-origin
   provider request starts after credential resolution, and saturate retry display
   timestamps without shortening monotonic server embargoes. Regression coverage
-  and implementation are not evidence of passing verification. Separate fix
-  gates/smoke, independent rereview, and C08 closure remain pending; C09 is gated.
+  and implementation are not evidence of passing verification. Separately exercised
+  fix gates/smoke, independent rereview, and closure are recorded in `PLAN.md`.
 
+
+### Added — C09 deterministic offline-source library
+
+- Packaged synthetic `healthy` and `errors` scenarios with fixed demo time,
+  fictional accounts, normalized snapshots, every requested metric, and explicit
+  `offline_demo` provenance. Ready GPT sample data is fictional demonstration,
+  not a working ordinary ChatGPT adapter or authenticated quota evidence.
+- Error scenarios cover authentication, permission, rate limit/retry, network,
+  malformed/partial data, unknown Fable, missing product breakdown, and stale
+  last-known values without inventing current quota or provider observations.
+- Offline source isolation excludes account configuration, credential files,
+  keyring, resolver, live provider construction, transport, and network access;
+  only the packaged fixture is read. Fixtures are not a live-error fallback.
+- Bounded README/security/Lessons documentation and source tests. No worker checks,
+  smoke, CLI/TUI integration, live request, or authenticated acceptance is claimed;
+  exercised verification remains separately recorded in `PLAN.md`.
 
 ### Not yet implemented / not verified
 
-- No CLI, terminal dashboard, interactive account/key management, ordinary ChatGPT
-  quota adapter, or offline demo is delivered by the current libraries.
+- No CLI, terminal dashboard, interactive account/key management, or ordinary ChatGPT
+  quota adapter is delivered by the current libraries. The offline source is a
+  Python library, not a runnable demo command.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.

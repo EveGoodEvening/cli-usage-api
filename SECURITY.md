@@ -4,10 +4,10 @@
 
 This repository supplies package/domain, local storage, credential-resolution,
 fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Grok
-billing, explicit provider-registry, and polling/freshness libraries, with an
-unresolved ChatGPT capability. It does not implement ordinary ChatGPT quota
-retrieval, interactive account management, a CLI, or a TUI. A declared future
-console entry point does not provide these features.
+billing, explicit provider-registry, polling/freshness, and deterministic offline-source
+libraries, with an unresolved ChatGPT capability. It does not implement ordinary
+ChatGPT quota retrieval, interactive account management, a CLI, or a TUI. A declared
+future console entry point does not provide these features.
 No authenticated provider or real OS-keyring check was exercised by this
 documentation task; implementation evidence and orchestrator verification remain
 separate in [PLAN.md](PLAN.md).
@@ -290,6 +290,26 @@ These are library controls, not authenticated polling or end-to-end application
 acceptance. This documentation task ran no checks or requests; exercised evidence
 remains the orchestrator's separate PLAN.md record.
 
+## Implemented C09 deterministic offline-source boundary
+
+- The offline source reads only the packaged synthetic
+  `usage_tui/fixtures/demo.json` resource. It does not load account configuration,
+  probe HOME/XDG or first-party credential files, access the keyring, resolve a
+  credential, build the live provider registry, construct a live transport/client,
+  or send network requests. It is explicitly selected, never a fallback after a
+  failed live fetch. Packaged fixture access is not a claim of zero file I/O.
+- Both `healthy` and `errors` scenarios use fictional account labels/IDs, normalized
+  domain snapshots, `offline_demo` provenance, and a fixed demo observation time.
+  All samples are synthetic, including any ready ChatGPT weekly sample. These
+  samples do not demonstrate a working ordinary ChatGPT adapter or remove its
+  missing upstream read/authentication/model/window/reset contract.
+- Error, partial, retry, unknown, and stale last-known samples are display inputs,
+  not actual provider responses or authenticated observations. Advancing a demo
+  clock does not renew an allowance, retry a provider, or access a saved secret.
+- Source test assertions forbid storage/resolver/HTTP construction; test source is
+  not passing-check evidence. No checks or smoke were executed by this documentation
+  task. CLI/TUI composition and its own isolation acceptance remain later work.
+
 ## Planned integration controls — not end-to-end guarantees
 
 The libraries above do not establish a working authenticated application. Later
@@ -310,7 +330,7 @@ chunks must connect them without bypassing their boundaries:
   never raw responses or identity.
 
 No live metric or credential-safety acceptance follows from fixtures, installation,
-or a future offline demo. Private provider contracts can change without notice.
+or the offline source. Private provider contracts can change without notice.
 Ordinary ChatGPT weekly usage remains blocked by an unresolved read/authentication/
 metric contract, not merely missing credentials; WHAM/Codex is not a substitute.
 See PLAN.md §§4–5 and §9 for exact boundaries and separate live acceptance.
