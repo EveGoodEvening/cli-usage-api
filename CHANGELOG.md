@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added — C11 terminal dashboard and help
+
+- Dependency-injected `UsageApp` with LIVE/DEMO distinction, Chinese metric labels,
+  account filtering, scrollable required rows, keyboard help, and details for
+  provenance, grants, shared pools, UTC timestamps and reconnect guidance.
+- Numeric quota/remaining plus visually clamped bars, currency-bearing balances,
+  explicit unknown/blocked/error states, separate success/attempt/retry times,
+  stale/last-known flags and presentation-only countdowns. Reset expiry never
+  fabricates a fresh allowance; Grok product shares remain shared-pool details.
+- Embedded account manager with committed changes forwarded to source account
+  updates and reconnect requests forwarded to refresh. Source stop precedes the
+  optional live factory cleanup hook; `q` and Ctrl-C exit from screens too.
+- Python offline dashboard startup for healthy/errors scenarios without live
+  stores, resolver or clients; demo accounts are read-only and synthetic ChatGPT
+  samples are explicitly not ordinary-chat support.
+- API/startup, lifecycle, security/freshness and repository-Lessons documentation.
+  The usable `usage` CLI remains C12 work. No documentation-worker checks, terminal
+  smoke, live metric or real-keyring acceptance are claimed; exercised evidence
+  remains separate in `PLAN.md`.
+
 ### Added — C10 Textual account-management scope
 
 - Reusable `AccountManagerScreen` and account service for terminal account
@@ -21,7 +41,7 @@
   No dashboard/CLI, authenticated provider, real-keyring, or documentation-worker
   verification claim; exercised evidence belongs separately in `PLAN.md`.
 
-### Fixed — C10 independent-review findings (verification pending)
+### Fixed — C10 independent-review findings
 
 - Preserve credentials referenced by config accepted before directory-sync failure;
   retain previous credentials too while crash durability is uncertain. Storage and
@@ -31,9 +51,9 @@
   `ConsoleProvider.discover_organizations` method, rather than as a provider object.
 - Display an explicit high-sensitivity Console `sessionKey` warning before masked
   entry, accepting only its value, not a password, full Cookie header, or HAR file.
-- These three review corrections and their regression source await separate
-  orchestrator verification; the earlier green gate does not verify them. C10 is
-  not closed and C11 remains gated.
+- Separate orchestrator fix verification and independent rereviews are recorded
+  in `PLAN.md`; this entry does not claim a documentation-worker check or live
+  acceptance.
 
 ### Added — C01 package/domain scope
 
@@ -246,9 +266,9 @@
 
 ### Not yet implemented / not verified
 
-- No CLI, terminal dashboard, interactive account/key management, or ordinary ChatGPT
-  quota adapter is delivered by the current libraries. The offline source is a
-  Python library, not a runnable demo command.
+- No usable CLI or ordinary ChatGPT quota adapter is delivered. The dashboard
+  and read-only offline demonstration are available through the Python API;
+  `usage --demo` and production-entry composition remain C12 work.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.

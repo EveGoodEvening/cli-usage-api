@@ -1,15 +1,13 @@
 # Usage TUI
 
-A local terminal dashboard project for subscription usage and Claude Platform credit
-balances. **The current implementation provides Python domain, local storage,
-credential-resolution, fixed-origin HTTP transport, Claude subscription, Console
-balance/organization-discovery, Grok billing, explicit provider-registry, polling/
-freshness, deterministic offline-source libraries, an unresolved ChatGPT capability,
-and a reusable Textual account-management screen. It is not yet a dashboard or
-usable `usage` CLI.** No authenticated/live metric acceptance is claimed.
-The console entry point declared in package metadata targets later integration;
-do not invoke it at this stage. Account-screen embedding and workflows are described
-below; dashboard and CLI launch integration remain separate work.
+A local terminal dashboard for subscription usage and Claude Platform credit
+balances. **C11 adds the dependency-injected Textual dashboard and help to the
+provider, storage, scheduler, offline-source, and account-management components.
+There is not yet a usable `usage` CLI.** No authenticated/live metric acceptance
+is claimed, and ordinary ChatGPT weekly retrieval remains contract-blocked.
+The console entry point declared in package metadata targets C12 integration;
+do not invoke it at this stage. Python dashboard startup and live dependency
+injection are described below. This is a terminal TUI, not a web application.
 
 ## Original goal and scope
 
@@ -45,10 +43,10 @@ Claude subscription adapter; C05 adds Console balances and organization discover
 C06 adds the Grok billing adapter described below. C07 adds the explicit provider
 registry and a truthful blocked ChatGPT capability, **not** an ordinary-chat quota
 adapter. C08 adds the library-level scheduler and freshness state described below.
-C09 adds the deterministic offline source described below; it is not yet wired to a
-CLI or dashboard. C10 adds the reusable Textual account-management screen described
-below. Dashboard rendering and CLI launch integration remain **planned, not current
-support**:
+C09 adds the deterministic offline source; C10 adds the reusable Textual account
+manager. C11 connects terminal rendering, help, account-management callbacks, and
+source lifecycle through `UsageApp`. CLI argument handling and production entry
+point composition remain C12 work:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
@@ -82,6 +80,116 @@ has passed. Library modules include `usage_tui.domain`, `usage_tui.storage`,
 `usage_tui.credentials`, `usage_tui.transport`, `usage_tui.providers.claude`,
 `usage_tui.providers.console`, and `usage_tui.providers.grok`; do not run the future console entry point.
 Transport alone does not normalize metrics.
+
+## Textual dashboard API (C11)
+
+`from usage_tui.app import UsageApp` exposes:
+
+```python
+UsageApp(
+    *, mode, accounts=(), scheduler_factory=None,
+    account_store=None, credential_store=None, scenario="healthy",
+)
+```
+
+`mode` is `"demo"` or `"live"`; scenarios are `"healthy"` and `"errors"`.
+Open the actual offline dashboard in a terminal after environment setup:
+
+```sh
+uv run python -c 'from usage_tui.app import UsageApp; UsageApp(mode="demo", scenario="healthy").run()'
+```
+
+Change the scenario to `"errors"` for synthetic failure/last-known views. This is
+the Python component API, **not** an installed `usage --demo` command or exercised
+verification claim. Demo constructs `DemoSource` directly and ignores injected
+live accounts/factories/stores. It never reads real account configuration or
+credentials and opens account management read-only. Its clock starts from the
+fixture time and advances one second per UI tick, not from the machine date.
+The DEMO banner and synthetic ChatGPT explanation distinguish samples from support.
+
+Live startup is explicit. An empty `UsageApp(mode="live").run()` shows the
+no-account guidance without implicit configuration reads; it cannot edit accounts.
+Supplying live accounts or either live store requires `scheduler_factory` too;
+omitting it raises `ValueError`, including for an initially empty editable app.
+The synchronous callable `scheduler_factory(accounts, *, publish)` returns a
+source with async `start()`, `refresh(account_id=None)`, `update_accounts(accounts)`,
+and `stop()`. `publish` is the synchronous snapshot callback on the app event
+loop. A Python host can compose:
+
+```python
+from usage_tui.app import UsageApp
+from usage_tui.credentials import CredentialResolver
+from usage_tui.domain import ProviderId
+from usage_tui.providers.base import build_providers
+from usage_tui.scheduler import Scheduler
+from usage_tui.storage import AccountStore, CredentialStore
+from usage_tui.transport import Transport
+
+
+class LiveFactory:
+    def __init__(self, credentials):
+        self.resolver = CredentialResolver(credentials)
+        self.providers = build_providers(Transport(), self.resolver)
+        self.console_discovery = self.providers[ProviderId.CLAUDE_PLATFORM].discover_organizations
+
+    def __call__(self, accounts, *, publish):
+        return Scheduler(accounts, self.providers, self.resolver, publish=publish)
+
+
+store = AccountStore()
+credentials = CredentialStore()
+UsageApp(
+    mode="live",
+    accounts=store.load(),
+    scheduler_factory=LiveFactory(credentials),
+    account_store=store,
+    credential_store=credentials,
+).run()
+```
+
+This is composition guidance, not live acceptance. `AccountStore.load()` is an
+explicit host operation and can raise a safe config error; do not replace invalid
+config. Share one credential store so session-only references remain resolvable.
+The factory's optional `resolver` and `console_discovery` attributes supply the
+account screen; discovery is the bound async `discover_organizations` callable,
+not a provider object. Without `resolver`, the screen creates one from the
+injected credential store. Console connection requires injected discovery.
+
+The app starts its source on mount, forwards committed account changes to
+`update_accounts`, discards obsolete displayed observations, and routes reconnect
+to `refresh(account_id)`. Teardown stops the source, then invokes the live
+factory's optional `aclose()` (awaiting an awaitable result), even if stop fails.
+This hook closes factory-owned clients; borrowed resources remain their owner's
+responsibility. The example `Transport` closes its fresh HTTP client per request
+and needs no shared-client close hook. Production CLI composition remains C12 work.
+
+### Dashboard keys and truthful presentation
+
+| Key | Behavior |
+|---|---|
+| `q`, Ctrl-C | Exit, including from help, details, or account screens |
+| `r` | Request selected-account or all-account refresh; scheduler deadlines and coalescing still apply |
+| `a` | Account manager; read-only fictional accounts in demo |
+| `?` | Help, including freshness, shared pools, credential guidance and ChatGPT blocker |
+| Tab / Shift-Tab, arrows | Move focus, select accounts/metrics, and scroll |
+| Enter on a metric | Details: provenance/contract, version sensitivity, UTC timestamps, grants and shared pools |
+| Escape | Return from help/details or cancel/return within account management |
+
+Chinese labels retain provider/model names. Every requested metric has a
+scrollable row before the first observation and when disabled, unknown, blocked,
+or failing. Selection filters the view, not the provider contract. At 80×24 the
+list scrolls; smaller terminals show a resize/scroll hint. Errors and `STALE` /
+`LAST KNOWN` are words, not color-only signals. Numeric used/remaining accompany
+bars; only drawing clamps at 100%, not overage. Missing data is `—`, never zero.
+Balances include currency; grant expiry is not a period reset. Grok product
+shares do not acquire independent remaining quota.
+
+Success, attempt and retry timestamps are separate. Resets appear in local time
+with UTC in details. One-second ticks update countdowns without provider requests:
+passed resets say `awaiting refresh`, never zero usage or invent a new window.
+Live refresh inherits scheduler backoff, origin spacing and retry embargoes.
+See freshness below for the stale threshold. Live ChatGPT remains blocked on its
+missing upstream contract, not merely a missing credential.
 
 ## Textual account management (C10)
 
@@ -242,10 +350,10 @@ not substitutes. Fable is a model-scoped subset of weekly capacity, not an addit
 allowance; absence establishes neither eligibility nor a fixed half-week quota.
 
 The adapter itself does not poll, retry, preserve last-known values, render bars, or
-connect accounts. Polling and last-known state belong to the C08 scheduler library;
-rendering remains a later dashboard integration. C10 supplies the separate account
-screen. No live request or CLI smoke is claimed here; exercised component
-verification belongs in PLAN.md.
+connect accounts. Polling and last-known state belong to the C08 scheduler;
+the C11 dashboard renders its snapshots and embeds the C10 account screen.
+No live request or CLI smoke is claimed here; exercised component verification
+belongs in PLAN.md.
 
 ## Claude Platform Console library (C05)
 
@@ -455,9 +563,9 @@ Error scenarios are not actual service failures. Domain test/source assertions
 and this library documentation do not establish exercised verification; the
 orchestrator records component smoke and checks separately in PLAN.md.
 
-This is a Python library only. `usage --demo`, `--scenario`, countdown rendering,
-keyboard controls, and the terminal dashboard are not implemented yet; do not
-invoke the declared future entry point as though this source delivered a CLI/TUI.
+The C11 dashboard can render this source through its Python API below. The
+`usage --demo` / `--scenario` CLI remains C12 work; do not invoke the declared
+future entry point as though the offline source itself delivered a CLI.
 
 ## Polling and freshness library (C08)
 
@@ -479,11 +587,12 @@ implementation, and the RNG supplies `uniform(a, b)`.
   immediately before the provider request starts, not when an attempt is queued.
   A fetch retrieves the provider's complete snapshot, not one request per metric.
   Console organization discovery is still an explicit connection operation.
-- `refresh()` is a library-level explicit reconnect attempt, not an implemented
-  `r` key binding. Repeated requests coalesce, do not overlap in-flight work, and
-  cannot bypass origin spacing or retry deadlines. Authentication, permission, and
-  unconfigured failures suspend automatic polling until explicit refresh or account
-  update; external login files are not monitored during suspension.
+- `refresh()` is a library-level explicit reconnect attempt; the C11 dashboard's
+  `r` key delegates refresh to its source. Repeated requests coalesce, do not
+  overlap in-flight work, and cannot bypass origin spacing or retry deadlines.
+  Authentication, permission, and unconfigured failures suspend automatic polling
+  until explicit refresh or account update; external login files are not monitored
+  during suspension.
 - Rate-limit, network, provider, and schema failures use exponential retry delays
   starting at 60, 120, 240 seconds, capped at 15 minutes plus bounded jitter. A valid
   server `Retry-After` has at least a 60-second delay and is never shortened to that
@@ -522,19 +631,16 @@ change its raw metric state. Reaching reset never zeroes usage or fabricates a n
 period: presentation must say it is awaiting refresh. Computing freshness does not
 issue requests.
 
-C08 review identified three scheduler defects: insertion-order starvation, origin
-spacing consumed by slow credential resolution, and retry timestamp overflow near
-`datetime.max`. The orchestrator's actual seven-account, same-origin, 30-second
-interval reproduction observed initial results for only six accounts over more
-than 100 seconds. The other two findings are static review findings, not exercised
-reproductions. The fairness, actual-request-start spacing, and saturated-retry
-contracts above describe the required corrections; separate fix verification and
-independent rereview remain pending. Earlier green gates and the single-account
-smoke do not verify these corrections. C08 is not closed; C09 remains gated.
+C08 review identified insertion-order starvation, origin spacing consumed before
+slow credential resolution completed, and retry timestamp overflow near
+`datetime.max`. The contracts above include the resulting fairness, actual-request
+spacing, and saturated-retry corrections. Their separate fix verification,
+independent rereviews, and chunk closure are recorded in PLAN.md; earlier green
+checks alone did not verify later corrections.
 
-No CLI/TUI controls, countdown display, offline source, live authenticated polling,
-or new verification outcome are claimed here. Exact exercised component evidence
-and remaining live prerequisites belong separately in PLAN.md.
+The C11 dashboard uses these freshness values for countdown and last-known
+presentation. This documentation adds no live authenticated polling or new
+verification outcome; exact exercised evidence belongs separately in PLAN.md.
 
 ## Local storage library (C02)
 

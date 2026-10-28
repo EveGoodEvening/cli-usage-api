@@ -1,16 +1,16 @@
 # Security boundaries
 
-## Current implementation: libraries and a reusable account screen
+## Current implementation: libraries and a terminal dashboard
 
 This repository supplies package/domain, local storage, credential-resolution,
 fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Grok
 billing, explicit provider-registry, polling/freshness, and deterministic offline-source
-libraries, an unresolved ChatGPT capability, and a reusable Textual account-management
-screen. It does not implement ordinary ChatGPT quota retrieval, a dashboard, or a
-usable CLI. A declared future console entry point does not launch these components.
-No authenticated provider or real OS-keyring check was exercised by this
-documentation task; implementation evidence and orchestrator verification remain
-separate in [PLAN.md](PLAN.md).
+libraries, an unresolved ChatGPT capability, a reusable Textual account-management
+screen, and the C11 dependency-injected Textual dashboard. It does not implement
+ordinary ChatGPT quota retrieval or a usable CLI. The declared future console
+entry point awaits C12 composition; Python dashboard startup is documented in
+README.md. No authenticated provider or real OS-keyring check was exercised by
+this documentation task; verification remains separate in [PLAN.md](PLAN.md).
 
 Domain records are not a secure storage service. A credential value excluded from a
 representation is not encrypted or erased from process memory. Do not serialize
@@ -23,6 +23,31 @@ HAR files, or identifying account/billing data in issues, chat, or commits. Secu
 reports should describe the affected component and reproduction with synthetic data;
 remove authentication and identity information before sharing. If a credential is
 exposed, revoke or replace it through the relevant first-party service.
+
+## Implemented C11 dashboard boundary
+
+- `UsageApp` is a terminal UI, not a web service or a new HTTP/authentication
+  implementation. Live access is supplied explicitly through an injected source
+  factory; the dashboard must not infer credentials from account labels or bypass
+  the provider/transport restrictions above. C12 owns production CLI composition.
+- Demo mode constructs the packaged offline source, not live stores, credential
+  resolution, transport, or clients. Its account screen is read-only. The DEMO
+  banner and synthetic ChatGPT warning distinguish examples from live support;
+  demo samples are never a fallback for a failed live request.
+- Rendered labels, diagnostic/detail text, organization/grant identifiers, and
+  provenance must be treated as display data, with control-character removal,
+  bounded lengths, and markup disabled. Do not add raw response/exception display,
+  credential suffixes, clipboard actions, or secret-bearing notifications.
+- Successful-observation time is distinct from attempt time. Stale and last-known
+  labels survive errors; a local countdown tick performs no provider request and
+  cannot zero usage or infer a new period. Passed resets await refresh, while
+  grant expiry remains expiry, not a renewed quota. Refresh delegates to the source
+  so retry embargoes, coalescing and concurrency limits remain scheduler-owned.
+- Committed account changes reach source `update_accounts`; reconnect requests
+  reach source `refresh`. Source shutdown must finish before owned injected client
+  cleanup. Borrowed resources remain their owner's responsibility. Neither demo
+  rendering nor lifecycle wiring establishes live provider or secure-keyring
+  acceptance. Exact exercised checks belong in PLAN.md.
 
 ## Implemented C10 terminal account-input boundary
 
@@ -356,13 +381,14 @@ remains the orchestrator's separate PLAN.md record.
   not actual provider responses or authenticated observations. Advancing a demo
   clock does not renew an allowance, retry a provider, or access a saved secret.
 - Source test assertions forbid storage/resolver/HTTP construction; test source is
-  not passing-check evidence. No checks or smoke were executed by this documentation
-  task. CLI/TUI composition and its own isolation acceptance remain later work.
+  not passing-check evidence. C11 supplies dashboard composition, but no checks or
+  smoke were executed by this documentation task. CLI entry composition remains
+  C12 work; exercised isolation evidence belongs in PLAN.md.
 
-## Planned integration controls — not end-to-end guarantees
+## Remaining production CLI controls — not end-to-end guarantees
 
-The libraries above do not establish a working authenticated application. Later
-chunks must connect them without bypassing their boundaries:
+The Python dashboard does not establish a working authenticated production CLI.
+C12 composition must preserve the implemented boundaries:
 
 - Do not resolve saved secrets or request transport for the unresolved ChatGPT
   capability. API-key storage does not enable subscription or balance retrieval.
@@ -373,7 +399,7 @@ chunks must connect them without bypassing their boundaries:
 - Never accept secrets as command arguments or documented secret-bearing
   environment variables. Use masked interactive inputs without history, saved-value
   prefill, or reveal/copy controls, and refuse secret input without a TTY.
-- Connect account-management removal/replacement actions to scheduler cancellation.
+- Preserve the dashboard's account-management-to-scheduler cancellation wiring.
   Removal must not delete external login files or claim remote revocation. Keep
   logs off by default and restrict any logs to safe codes/local opaque account IDs,
   never raw responses or identity.

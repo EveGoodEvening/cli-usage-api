@@ -1,0 +1,52 @@
+Screen {
+    background: $surface;
+}
+#banner {
+    height: auto;
+    max-height: 3;
+    color: $accent;
+    text-style: bold;
+    padding: 0 1;
+}
+#account-selector {
+    height: 3;
+    margin: 0 1;
+}
+#dashboard-status {
+    height: auto;
+    max-height: 2;
+    padding: 0 1;
+}
+#metrics {
+    height: 1fr;
+    min-height: 1;
+    margin: 0 1;
+    border: round $primary;
+    padding: 0;
+}
+#resize-hint {
+    height: auto;
+    max-height: 2;
+    padding: 0 1;
+}
+InformationScreen {
+    padding: 1;
+}
+InformationScreen > Label {
+    height: auto;
+    text-style: bold;
+    color: $accent;
+}
+InformationScreen > VerticalScroll {
+    height: 1fr;
+    min-height: 1;
+}
+InformationScreen Static {
+    height: auto;
+}
+Screen.compact #banner, Screen.compact #dashboard-status, Screen.compact #resize-hint {
+    max-height: 1;
+}
+Screen.compact Footer {
+    display: none;
+}

@@ -5,6 +5,18 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 
 ## Lessons
 
+- Keep dashboard composition distinct from a production CLI: a reusable `UsageApp`
+  and a Python demo launcher do not make the declared `usage` entry point runnable.
+  Document the actual constructor, factory callback and cleanup ownership, and keep
+  CLI acceptance separate until its composition exists.
+- UI countdown ticks are presentation only. Use the source's clock for demo time,
+  show last-success and last-attempt separately, and retain numeric overage, unknown
+  fields and last-known errors without resetting quota when a deadline passes.
+  Account replacement/removal must reach scheduler generation cancellation before
+  stale callbacks can be presented as the new connection's observations.
+- A demo account manager must be an injected read-only view, not an excuse to
+  construct real stores or a resolver. A synthetic ready ChatGPT row needs an
+  explicit demo warning; it cannot erase the live blocked-contract distinction.
 - A private contract is usable research evidence without being a supported public API.
   Record exact request origin/path/authentication, schema, semantic meaning, and source
   revision together. A community parser or official CLI source does not establish that
