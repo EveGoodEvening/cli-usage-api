@@ -308,11 +308,13 @@ implementation, and the RNG supplies `uniform(a, b)`.
 - Enabled accounts fetch immediately on start. Normal polling uses each account's
   validated integer interval (default 60 seconds, configurable 30–3600), with ±10%
   jitter and no interval below 30 seconds. Deadlines use monotonic time, not
-  wall-clock subtraction between polls.
-- Only one fetch per account and at most two accounts fetch concurrently. Fetch
-  starts sharing a provider origin are separated by at least five seconds. A fetch
-  retrieves the provider's complete snapshot, not one request per metric. Console
-  organization discovery is still an explicit connection operation, not a poll.
+  wall-clock subtraction between polls. Eligible accounts are selected by oldest
+  due deadline so an overdue initial poll is not starved by accounts polling again.
+- Only one fetch per account and at most two accounts fetch concurrently. The
+  five-second same-origin spacing gate applies after credential resolution,
+  immediately before the provider request starts, not when an attempt is queued.
+  A fetch retrieves the provider's complete snapshot, not one request per metric.
+  Console organization discovery is still an explicit connection operation.
 - `refresh()` is a library-level explicit reconnect attempt, not an implemented
   `r` key binding. Repeated requests coalesce, do not overlap in-flight work, and
   cannot bypass origin spacing or retry deadlines. Authentication, permission, and
@@ -321,7 +323,9 @@ implementation, and the RNG supplies `uniform(a, b)`.
 - Rate-limit, network, provider, and schema failures use exponential retry delays
   starting at 60, 120, 240 seconds, capped at 15 minutes plus bounded jitter. A valid
   server `Retry-After` has at least a 60-second delay and is never shortened to that
-  cap. Compatible successful fetches reset failure backoff.
+  cap. Retry presentation timestamps saturate at the largest representable UTC
+  datetime rather than overflowing; this must not shorten the monotonic embargo.
+  Compatible successful fetches reset failure backoff.
 - Credential-free unresolved ChatGPT accounts publish their blocked capability once
   per account generation, without resolving a saved secret or making a request.
   They are not periodically polled, and manual refresh does not poll them.
@@ -353,6 +357,16 @@ Without any successful observation, age is unknown and stale is true. Passing
 change its raw metric state. Reaching reset never zeroes usage or fabricates a new
 period: presentation must say it is awaiting refresh. Computing freshness does not
 issue requests.
+
+C08 review identified three scheduler defects: insertion-order starvation, origin
+spacing consumed by slow credential resolution, and retry timestamp overflow near
+`datetime.max`. The orchestrator's actual seven-account, same-origin, 30-second
+interval reproduction observed initial results for only six accounts over more
+than 100 seconds. The other two findings are static review findings, not exercised
+reproductions. The fairness, actual-request-start spacing, and saturated-retry
+contracts above describe the required corrections; separate fix verification and
+independent rereview remain pending. Earlier green gates and the single-account
+smoke do not verify these corrections. C08 is not closed; C09 remains gated.
 
 No CLI/TUI controls, countdown display, offline source, live authenticated polling,
 or new verification outcome are claimed here. Exact exercised component evidence

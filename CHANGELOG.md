@@ -178,6 +178,23 @@
   smoke, CLI/TUI integration, live requests, or authenticated acceptance are claimed;
   exercised verification remains separate in PLAN.md.
 
+### C08 review corrections — separate verification pending
+
+- Independent reviews found three scheduler defects: insertion-order starvation
+  of overdue accounts, same-origin spacing measured before slow credential
+  resolution rather than at actual provider request start, and overflow while
+  reconstructing a retry timestamp near UTC `datetime.max`.
+- The orchestrator's actual seven-account, same-origin, 30-second-interval
+  reproduction observed only six initial account results over more than 100
+  seconds. Resolver spacing and retry saturation are static review findings;
+  no exercised reproduction is claimed for those two findings here.
+- Required corrections select oldest eligible deadlines fairly, gate same-origin
+  provider request starts after credential resolution, and saturate retry display
+  timestamps without shortening monotonic server embargoes. Regression coverage
+  and implementation are not evidence of passing verification. Separate fix
+  gates/smoke, independent rereview, and C08 closure remain pending; C09 is gated.
+
+
 ### Not yet implemented / not verified
 
 - No CLI, terminal dashboard, interactive account/key management, ordinary ChatGPT

@@ -132,3 +132,15 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   only failed fetches retain prior metrics/grants with the old successful timestamp.
   Freshness and passed-reset status stay separate from raw metric state, so a local
   timer cannot manufacture a new allowance or make failed polling look fresh.
+- Choose eligible scheduler work by oldest due deadline, not account insertion
+  order. Seven same-origin accounts at a supported 30-second interval can starve
+  the seventh indefinitely when the first six reclaim five-second origin slots.
+  Cover initial-service fairness over repeated poll cycles, not just concurrency.
+- Apply origin spacing after credential resolution, immediately before entering
+  the provider request. A queue-time reservation can expire during a synchronous
+  keyring/file lookup and allow back-to-back actual request starts.
+- Keep extreme retry presentation representable: floating-point conversion of
+  UTC `datetime.max` can round into year 10000. Saturate the displayed timestamp
+  without shortening the monotonic embargo or losing publication of the failure.
+  Distinguish static review findings from actual reproductions and preserve
+  pending fix-verification/rereview status despite earlier green gates.

@@ -597,3 +597,114 @@ async def test_successful_missing_row_is_unknown_not_last_good():
     assert published[-1].fetch_state == FetchState.OK
     assert published[-1].metrics[-1].state == MetricState.UNKNOWN
     await scheduler.stop()
+
+
+async def test_seven_short_interval_accounts_receive_oldest_deadline_service():
+    items = tuple(account(number, poll_interval_seconds=30) for number in range(1, 8))
+    scheduler, clock, provider, _, published = setup(items)
+    await scheduler.start()
+    try:
+        await settle()
+        for _ in range(20):
+            await clock.advance(5)
+        # At t=30, account 1 is due again but account 7 is still due at t=0.
+        # Continue through 100 seconds to check repeated service, not just startup.
+        assert [call[0].id for call in provider.calls] == [item.id for item in items] * 3
+        assert [call[2] for call in provider.calls] == list(range(0, 101, 5))
+        assert [snapshot.account_id for snapshot in published] == [item.id for item in items] * 3
+    finally:
+        await scheduler.stop()
+
+
+async def test_slow_credential_resolution_cannot_consume_actual_start_spacing():
+    items = tuple(account(number) for number in range(1, 4))
+    scheduler, clock, provider, resolver, published = setup(items)
+    provider.gate = asyncio.Event()
+    resolve = resolver.resolve
+
+    def slow_second(item):
+        if item.id == items[1].id:
+            # Synchronous keyring/file lookup blocks the loop from t=5 to t=11.
+            clock.elapsed += 6
+            provider.gate.set()
+        return resolve(item)
+
+    resolver.resolve = slow_second
+    await scheduler.start()
+    try:
+        await settle()
+        assert [call[2] for call in provider.calls] == [0]
+        await clock.advance(5)
+        assert [call[2] for call in provider.calls] == [0, 11]
+        second = next(snapshot for snapshot in published if snapshot.account_id == items[1].id)
+        assert second.attempted_at == clock.now()
+        await clock.advance(nextafter(16, float("-inf")) - clock.monotonic())
+        assert len(provider.calls) == 2
+        await clock.advance(16 - clock.monotonic())
+        assert [call[2] for call in provider.calls] == [0, 11, 16]
+        assert provider.maximum <= 2
+    finally:
+        await scheduler.stop()
+
+
+async def test_origin_gate_serializes_waiters_and_cancellation_keeps_spacing():
+    scheduler, clock, _, _, _ = setup()
+    starts = []
+
+    async def start():
+        await scheduler._start_origin(account().provider)
+        starts.append(clock.monotonic())
+
+    tasks = [asyncio.create_task(start()) for _ in range(4)]
+    try:
+        await settle()
+        assert starts == [0]
+        tasks[1].cancel()
+        await settle()
+        # Wall-clock changes must neither expire nor extend the start embargo.
+        clock.wall += timedelta(days=1)
+        await clock.advance(5)
+        assert starts == [0, 5]
+        await clock.advance(5)
+        assert starts == [0, 5, 10]
+        assert tasks[1].cancelled()
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await scheduler.stop()
+
+
+@pytest.mark.parametrize("last_good", [False, True])
+async def test_maximum_retry_deadline_publishes_without_shortening_embargo(last_good):
+    scheduler, clock, provider, _, published = setup()
+    maximum = datetime.max.replace(tzinfo=UTC)
+    failure = TransportError(FetchState.RATE_LIMITED, "rate_limited", retry_at=maximum)
+    if not last_good:
+        provider.results = [failure]
+    await scheduler.start()
+    try:
+        await settle()
+        good = published[-1] if last_good else None
+        if last_good:
+            provider.results = [failure]
+            await scheduler.refresh()
+            await clock.advance(5)
+        failed = published[-1]
+        assert failed.fetch_state == FetchState.RATE_LIMITED
+        assert failed.retry_at == maximum
+        embargo = scheduler._states[account().id].retry_deadline
+        assert embargo >= clock.monotonic() + (maximum - clock.now()).total_seconds()
+        if good is not None:
+            assert failed.metrics == good.metrics
+            assert failed.fetched_at == good.fetched_at
+        else:
+            assert failed.fetched_at is None
+        count = len(provider.calls)
+        await scheduler.refresh()
+        await scheduler.update_accounts((account(),))
+        await clock.advance(10000)
+        assert len(provider.calls) == count
+        assert scheduler._states[account().id].retry_deadline == embargo
+    finally:
+        await scheduler.stop()

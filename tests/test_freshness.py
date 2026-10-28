@@ -133,3 +133,19 @@ def test_unknown_state_and_freshness_are_orthogonal():
 
 def test_wall_clock_reversal_does_not_show_negative_age():
     assert freshness(snapshot(), NOW - timedelta(seconds=60)).age_seconds == 0
+
+
+@pytest.mark.parametrize("last_good", [False, True])
+def test_maximum_retry_timestamp_does_not_change_observation_freshness(last_good):
+    value = replace(
+        snapshot(fetched_at=NOW if last_good else None, state=FetchState.RATE_LIMITED),
+        attempted_at=NOW + timedelta(seconds=300),
+        retry_at=datetime.max.replace(tzinfo=UTC),
+    )
+    original = value.to_dict()
+    result = freshness(value, NOW + timedelta(seconds=301))
+    assert result.stale
+    assert result.last_known is last_good
+    assert result.age_seconds == (301 if last_good else None)
+    assert result.attempted_age_seconds == 1
+    assert value.to_dict() == original

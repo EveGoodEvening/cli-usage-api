@@ -109,13 +109,15 @@ class _AccountState:
 
 
 class Scheduler:
-    """Two global fetches, one per account, and five-second provider spacing.
+    """Two global fetches, one per account, and five-second provider start spacing.
 
     refresh() is an explicit reconnect attempt for suspended accounts. Requests
     during a fetch coalesce into one follow-up, still subject to retry embargoes.
     update_accounts() invalidates every supplied generation, even when a secret
     was replaced behind an unchanged reference. Same-provider retry embargoes
     survive that operation. Removed/replaced generations can never publish.
+    Eligible accounts run oldest account deadline first, before origin spacing is
+    applied, so periodic polls cannot overtake an account's initial observation.
     """
 
     def __init__(
@@ -219,7 +221,14 @@ class Scheduler:
                 self._wake.clear()
                 active_ids = set(self._active.values())
                 deadlines = []
-                for key, state in self._states.items():
+                # Origin deadlines are shared: sorting by them would hide which
+                # account has waited longest when several are already overdue.
+                states = sorted(
+                    self._states.items(),
+                    key=lambda item: max(item[1].due, item[1].retry_deadline),
+                )
+                dispatched = False
+                for key, state in states:
                     if (
                         not state.account.enabled
                         or state.suspended
@@ -230,14 +239,17 @@ class Scheduler:
                     deadline = self._deadline(state)
                     if len(self._active) < 2 and deadline <= self._clock.monotonic():
                         state.pending = False
-                        provider = state.account.provider
-                        self._origin_next[provider] = self._clock.monotonic() + 5.0
+                        dispatched = True
                         task = asyncio.create_task(self._fetch(state))
                         self._active[task] = key
                         task.add_done_callback(self._finished)
-                        active_ids.add(key)
-                    else:
-                        deadlines.append(deadline)
+                        break
+                    deadlines.append(deadline)
+                if dispatched:
+                    # Let credential resolution and the actual start gate run
+                    # before choosing another account from the same origin.
+                    await asyncio.sleep(0)
+                    continue
                 if len(self._active) >= 2 or not deadlines:
                     await self._wake.wait()
                 else:
@@ -299,12 +311,30 @@ class Scheduler:
             organization_id=state.account.organization_id,
         )
 
+    async def _start_origin(self, provider: ProviderId) -> None:
+        """Reserve spacing at the actual start, not before credential lookup.
+
+        Recheck after every monotonic wait. No await separates checking and
+        updating the deadline, serializing concurrent starters on this loop.
+        """
+        while True:
+            current = self._clock.monotonic()
+            remaining = self._origin_next.get(provider, 0.0) - current
+            if remaining <= 0:
+                self._origin_next[provider] = current + 5.0
+                return
+            await self._clock.sleep(remaining)
+
     async def _fetch(self, state: _AccountState) -> None:
         account = state.account
         provider = self._providers[account.provider]
         now = self._clock.now()
         try:
             credential = self._resolver.resolve(account) if provider.requires_credential else None
+            if not self._running or self._states.get(account.id) is not state:
+                return
+            await self._start_origin(account.provider)
+            now = self._clock.now()
             result = await provider.fetch(account, credential, now)
             if not isinstance(result, Snapshot) or result.account_id != account.id:
                 raise TransportError(FetchState.SCHEMA_ERROR, "schema_error")
@@ -350,10 +380,14 @@ class Scheduler:
                     delay = max(delay, (result.retry_at - self._clock.now()).total_seconds())
                 state.retry_deadline = max(state.retry_deadline, current + delay)
                 state.due = state.retry_deadline
-                result = replace(
-                    result,
-                    retry_at=self._clock.now() + timedelta(seconds=state.retry_deadline - current),
-                )
+                wall = self._clock.now()
+                try:
+                    retry_at = wall + timedelta(seconds=state.retry_deadline - current)
+                except OverflowError:
+                    # Float conversion may round datetime.max into year 10000.
+                    # Only presentation saturates; the monotonic embargo stays.
+                    retry_at = datetime.max.replace(tzinfo=UTC)
+                result = replace(result, retry_at=retry_at)
         if not provider.requires_credential:
             state.capability_done = True
         state.snapshot = result
