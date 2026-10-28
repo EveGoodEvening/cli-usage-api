@@ -1,22 +1,30 @@
 """Text rendering preserves domain truth instead of deriving quota from timers."""
 
+import time
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from usage_tui.app import UsageApp, metric_value
+import httpx
+import pytest
+
+from usage_tui.app import UsageApp, local_time, metric_value
 from usage_tui.demo import DEMO_NOW
 from usage_tui.domain import (
     Account,
     CredentialKind,
+    FetchState,
     Metric,
     MetricState,
     ProviderId,
     QuotaValue,
+    ResolvedCredential,
     SourceKind,
     SourceRef,
 )
 from usage_tui.providers.chatgpt import ChatGPTProvider
+from usage_tui.providers.claude import ClaudeProvider
+from usage_tui.transport import Transport
 
 
 async def test_all_required_provider_rows_values_and_details():
@@ -142,4 +150,54 @@ async def test_fresh_success_missing_metric_does_not_preserve_current_value():
         )
         assert "未知 / no data" in app._row_text(account, metric_id)
         assert "已用" not in app._row_text(account, metric_id)
+        await pilot.press("q")
+
+
+@pytest.fixture(params=[("Asia/Shanghai", datetime.max), ("America/Los_Angeles", datetime.min)])
+def saturated_local_timezone(request, monkeypatch):
+    timezone, boundary = request.param
+    try:
+        with monkeypatch.context() as patch:
+            patch.setenv("TZ", timezone)
+            time.tzset()
+            yield boundary.replace(tzinfo=UTC)
+    finally:
+        time.tzset()
+
+
+def test_local_time_preserves_utc_at_both_conversion_boundaries(saturated_local_timezone):
+    boundary = saturated_local_timezone
+    assert local_time(boundary) == boundary.isoformat() + " (UTC)"
+    assert local_time(None) == "—"
+
+
+async def test_saturated_retry_response_renders_without_local_overflow(saturated_local_timezone):
+    account = Account(
+        id="11111111-1111-4111-8111-111111111111",
+        provider=ProviderId.CLAUDE_SUBSCRIPTION,
+        label="Synthetic rate limit",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref="session:synthetic",
+    )
+    transport = Transport(
+        http_transport=httpx.MockTransport(
+            lambda _: httpx.Response(429, headers={"Retry-After": "9" * 5000})
+        ),
+        clock=lambda: DEMO_NOW,
+    )
+    credential = ResolvedCredential(
+        account.provider, CredentialKind.MANUAL_BEARER, "synthetic-secret", "generation-1"
+    )
+    snapshot = await ClaudeProvider(transport).fetch(account, credential, DEMO_NOW)
+    assert snapshot.fetch_state == FetchState.RATE_LIMITED
+    assert snapshot.retry_at == datetime.max.replace(tzinfo=UTC)
+    app = UsageApp(mode="live", accounts=(account,), scheduler_factory=lambda *a, **kw: None)
+    async with app.run_test() as pilot:
+        app.publish_snapshot(snapshot)
+        app._tick()
+        row = app._row_text(account, snapshot.metrics[0].id)
+        assert "rate_limited" in row and "重试 / retry" in row
+        assert local_time(snapshot.retry_at) in row
+        assert snapshot.retry_at.isoformat() in app.details(account, snapshot.metrics[0].id)
+        assert app.listing.option_count == 3
         await pilot.press("q")

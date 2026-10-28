@@ -167,7 +167,8 @@ and needs no shared-client close hook. Production CLI composition remains C12 wo
 
 | Key | Behavior |
 |---|---|
-| `q`, Ctrl-C | Exit, including from help, details, or account screens |
+| `q` | Dashboard quit shortcut; printable `q` remains available to focused text inputs |
+| Ctrl-C | Unconditional exit, including from help, details, or account screens |
 | `r` | Request selected-account or all-account refresh; scheduler deadlines and coalescing still apply |
 | `a` | Account manager; read-only fictional accounts in demo |
 | `?` | Help, including freshness, shared pools, credential guidance and ChatGPT blocker |
@@ -185,7 +186,9 @@ Balances include currency; grant expiry is not a period reset. Grok product
 shares do not acquire independent remaining quota.
 
 Success, attempt and retry timestamps are separate. Resets appear in local time
-with UTC in details. One-second ticks update countdowns without provider requests:
+with UTC in details. If local-time conversion would exceed datetime bounds (for
+example, a saturated retry deadline in a positive-offset timezone), display the
+UTC timestamp instead. One-second ticks update countdowns without provider requests:
 passed resets say `awaiting refresh`, never zero usage or invent a new window.
 Live refresh inherits scheduler backoff, origin spacing and retry embargoes.
 See freshness below for the stale threshold. Live ChatGPT remains blocked on its

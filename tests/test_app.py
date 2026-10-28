@@ -5,11 +5,11 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from textual.widgets import OptionList, Select
+from textual.widgets import Input, OptionList, Select
 
-from usage_tui.accounts import AccountManagerScreen
+from usage_tui.accounts import AccountForm, AccountManagerScreen
 from usage_tui.app import InformationScreen, UsageApp
-from usage_tui.domain import Account, ProviderId
+from usage_tui.domain import Account, CredentialKind, ProviderId
 
 
 @pytest.mark.parametrize("size", [(80, 24), (40, 12)])
@@ -193,3 +193,54 @@ def test_configured_live_requires_injection():
     )
     with pytest.raises(ValueError, match="factory"):
         UsageApp(mode="live", accounts=(account,))
+
+
+async def test_account_form_accepts_q_in_label_reference_and_masked_secret(monkeypatch):
+    factory = InjectedFactory()
+    store = Mock()
+    store.load.return_value = ()
+    app = UsageApp(
+        mode="live",
+        scheduler_factory=factory,
+        account_store=store,
+        credential_store=Mock(),
+    )
+    quit_action = AsyncMock(wraps=app.action_quit)
+    monkeypatch.setattr(app, "action_quit", quit_action)
+    async with app.run_test() as pilot:
+        await pilot.press("a", "a")
+        assert isinstance(app.screen, AccountForm)
+        form = app.screen
+        label = form.query_one("#label", Input)
+        await pilot.press("q")
+        assert label.value == "q"
+        for kind, selector in (
+            (CredentialKind.CLAUDE_CODE_FILE, "#reference"),
+            (CredentialKind.MANUAL_BEARER, "#secret"),
+        ):
+            form.query_one("#kind", Select).value = kind
+            await pilot.pause()
+            field = form.query_one(selector, Input)
+            field.value = ""
+            field.focus()
+            await pilot.press("q")
+            assert field.value == "q"
+            assert app.screen is form
+            assert app.is_running
+        assert form.query_one("#secret", Input).password
+        quit_action.assert_not_awaited()
+        await pilot.press("ctrl+c")
+        quit_action.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize("open_manager", [False, True])
+async def test_nonpriority_q_quits_dashboard_and_account_manager(open_manager, monkeypatch):
+    app = UsageApp(mode="demo")
+    quit_action = AsyncMock(wraps=app.action_quit)
+    monkeypatch.setattr(app, "action_quit", quit_action)
+    async with app.run_test() as pilot:
+        if open_manager:
+            await pilot.press("a")
+            assert isinstance(app.screen, AccountManagerScreen)
+        await pilot.press("q")
+        quit_action.assert_awaited_once_with()

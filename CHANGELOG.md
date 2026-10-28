@@ -13,7 +13,8 @@
   fabricates a fresh allowance; Grok product shares remain shared-pool details.
 - Embedded account manager with committed changes forwarded to source account
   updates and reconnect requests forwarded to refresh. Source stop precedes the
-  optional live factory cleanup hook; `q` and Ctrl-C exit from screens too.
+  optional live factory cleanup hook; Ctrl-C exits unconditionally from screens too,
+  while printable `q` is a dashboard shortcut that does not preempt text entry.
 - Python offline dashboard startup for healthy/errors scenarios without live
   stores, resolver or clients; demo accounts are read-only and synthetic ChatGPT
   samples are explicitly not ordinary-chat support.
@@ -21,6 +22,18 @@
   The usable `usage` CLI remains C12 work. No documentation-worker checks, terminal
   smoke, live metric or real-keyring acceptance are claimed; exercised evidence
   remains separate in `PLAN.md`.
+
+### Fixed — C11 independent-review findings; verification pending
+
+- Keep printable `q` nonpriority so focused account-form inputs can accept it;
+  retain unconditional priority Ctrl-C exit. The defect was identified by static
+  review of Textual key dispatch, not an exercised account-entry reproduction.
+- Fall back to UTC when local-time conversion of a bounded timestamp overflows,
+  preserving saturated retry deadlines and scheduler embargoes. The supplied
+  `TZ=Asia/Shanghai` reproduction raised `OverflowError` for UTC `datetime.max`.
+- Earlier 779-test/24.82s and four real-PTY results are pre-review baselines only.
+  Separate fix verification and independent rereview remain pending; C11 is not
+  closed and C12 remains gated. No new checks or smoke are claimed here.
 
 ### Added — C10 Textual account-management scope
 

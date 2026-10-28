@@ -54,7 +54,13 @@ STATE_LABELS = {
 
 
 def local_time(value: datetime | None) -> str:
-    return "—" if value is None else value.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    if value is None:
+        return "—"
+    try:
+        return value.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    except OverflowError:
+        # Saturated UTC deadlines may be outside the local timezone's range.
+        return utc_time(value) + " (UTC)"
 
 
 def utc_time(value: datetime | None) -> str:
@@ -131,7 +137,7 @@ class UsageApp(App[None]):
 
     CSS_PATH = "app.tcss"
     BINDINGS = (
-        Binding("q", "quit", "退出", priority=True),
+        Binding("q", "quit", "退出"),
         Binding("ctrl+c", "quit", "退出", priority=True),
         Binding("r", "refresh", "刷新"),
         Binding("a", "accounts", "账号"),

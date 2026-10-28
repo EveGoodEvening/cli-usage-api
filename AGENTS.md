@@ -17,6 +17,14 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 - A demo account manager must be an injected read-only view, not an excuse to
   construct real stores or a resolver. A synthetic ready ChatGPT row needs an
   explicit demo warning; it cannot erase the live blocked-contract distinction.
+- Printable dashboard shortcuts must not preempt focused text entry: keep `q`
+  nonpriority so account labels, paths, selectors and masked credentials can contain
+  it; reserve priority quit dispatch for unconditional Ctrl-C.
+- A valid UTC deadline can overflow during local-time conversion near datetime
+  bounds. Fall back to its UTC representation without changing the deadline or
+  shortening the scheduler embargo. Distinguish static key-dispatch findings from
+  exercised timezone reproductions, and keep review-fix verification pending until
+  the orchestrator supplies new evidence.
 - A private contract is usable research evidence without being a supported public API.
   Record exact request origin/path/authentication, schema, semantic meaning, and source
   revision together. A community parser or official CLI source does not establish that
