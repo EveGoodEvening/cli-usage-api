@@ -3,10 +3,10 @@
 ## Current implementation: Python libraries, not a live application
 
 This repository supplies package/domain, local storage, credential-resolution,
-fixed-origin HTTP transport, Claude subscription, and Console balance/discovery
-provider libraries. It does not implement ChatGPT/Grok adapters, polling, interactive
-account management, a CLI, or a TUI. A declared future console entry point does not
-provide these features.
+fixed-origin HTTP transport, Claude subscription, Console balance/discovery, and
+Grok billing provider libraries. It does not implement a ChatGPT adapter, polling,
+interactive account management, a CLI, or a TUI. A declared future console entry
+point does not provide these features.
 No authenticated provider or real OS-keyring check was exercised by this
 documentation task; implementation evidence and orchestrator verification remain
 separate in [PLAN.md](PLAN.md).
@@ -191,6 +191,46 @@ exposed, revoke or replace it through the relevant first-party service.
 - Neither API-key substitution nor `/current_spend`/Admin reporting fills a missing
   balance. A synthetic parser fixture does not establish live billing permission,
   session validity, or compatibility; those require separate authenticated acceptance.
+
+## Implemented C06 Grok provider boundary
+
+- `GrokProvider(transport)` performs no construction-time I/O. Async
+  `fetch(account, credential, now)` requires a Grok subscription account and its
+  provider-bound `grok_auth_file` or `manual_bearer`; API/management keys beginning
+  `xai-` are not subscription credentials. Each eligible fetch makes one direct
+  GET to `https://cli-chat-proxy.grok.com/v1/billing?format=credits`. Transport
+  independently enforces origin/path and credential kind/provider binding.
+- This official-CLI proxy request and observed product fields are private and
+  version-sensitive, not a public billing API guarantee. Bearer plus
+  `x-xai-token-auth: xai-grok-cli` is used; optional `x-userid` comes from the same
+  resolved credential. No guessed client version or client-mode impersonation is
+  added when compatibility is unproven. Response fields cannot change destination,
+  authentication, identity selection, or account binding.
+- Users run `grok login` outside the app. The resolver reads a selected scope in
+  `$GROK_HOME/auth.json`, `~/.grok/auth.json`, or an explicit private local file;
+  ambiguous identities require a nonsecret selector. It does not write, delete,
+  chmod, refresh, or copy first-party login files or refresh tokens. Unknown expiry
+  is not asserted fresh; unsupported team-principal responses must not cause a
+  switch to another personal identity. No browser extraction or login subprocess.
+- All three required rows remain visible. Missing aggregate or product entries
+  are unknown, not zero; explicit validated zero remains zero. Product breakdown
+  requires a wholly valid unique-product array reconciling within one percentage
+  point to the same response's aggregate. Unknown products are preserved under
+  sanitized IDs; duplicate/malformed/inconsistent shares do not invalidate an
+  independently valid aggregate. No values are blended across accounts/requests.
+- Only `config.isUnifiedBillingUser == true` establishes the common included pool.
+  Build/Chat percentages are consumed shares, never independent remaining quotas.
+  Product remaining/reset refer to the shared pool only with positive evidence;
+  otherwise the relationship and product remaining/reset are unknown. Neither
+  on-demand spend nor prepaid balance establishes included usage.
+- Server period type determines weekly/monthly labeling. Reset uses aware
+  `currentPeriod.end`, falling back to `billingPeriodEnd` only if end is absent;
+  invalid/reversed bounds cannot invent a reset. Valid usage survives invalid reset
+  metadata. No hardcoded renewal, reset-coupon lookup, legacy cap estimate, ACP/gRPC
+  substitution, raw-response persistence, polling, or retries are implemented.
+- Synthetic responses do not establish live subscription eligibility, credential
+  acceptance, or private-proxy compatibility. No live or CLI/TUI acceptance follows
+  from this library or documentation.
 
 ## Planned integration controls — not end-to-end guarantees
 

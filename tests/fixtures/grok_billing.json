@@ -1,0 +1,16 @@
+{
+  "config": {
+    "subscriptionTier": "Synthetic plan",
+    "isUnifiedBillingUser": true,
+    "creditUsagePercent": 42.5,
+    "currentPeriod": {
+      "type": "USAGE_PERIOD_TYPE_WEEKLY",
+      "start": "2026-10-26T00:00:00Z",
+      "end": "2026-11-02T00:00:00Z"
+    },
+    "productUsage": [
+      {"product": "GrokBuild", "usagePercent": 32.5},
+      {"product": "GrokChat", "usagePercent": 10}
+    ]
+  }
+}

@@ -106,10 +106,31 @@
   credentials, live requests, CLI integration, or authenticated acceptance claimed;
   exercised verification remains the orchestrator's separate `PLAN.md` record.
 
+### Added — C06 Grok billing provider library scope
+
+- `GrokProvider(transport)` with async `fetch(account, credential, now)`, explicit
+  credential requirement, and shared-pool, Build, and Chat rows on every result.
+  One direct private-proxy billing GET per eligible fetch through fixed-origin
+  Transport; no Grok/ACP subprocess, login, token refresh, polling, or retry.
+- Reported aggregate consumption with positively established unified-pool semantics
+  kept separate from unproven pool relationships. Product shares require a complete
+  valid unique-product array and same-payload aggregate reconciliation within one
+  percentage point; unknown products are retained with sanitized IDs. Invalid
+  breakdowns preserve independent aggregate evidence. Explicit product zero is
+  zero; missing products are unknown, never an inferred zero or independent quota.
+- Server weekly/monthly period interpretation, aware reset parsing, reversed-bound
+  rejection, and absent-only end fallback. Invalid reset leaves valid usage intact;
+  Build/Chat remaining/reset refer only to a positively established shared pool.
+  No on-demand spend, prepaid wallet, estimated cap, or coupon lookup substitution.
+- Bounded README/security/Lessons updates for the exact private proxy origin and
+  credential binding, external login references, and read-only first-party files.
+  No documentation-worker checks, CLI/TUI integration, live requests, or authenticated
+  acceptance claimed; exercised evidence belongs separately in `PLAN.md`.
+
 ### Not yet implemented / not verified
 
-- No CLI, terminal dashboard, interactive account/key management, ChatGPT/Grok
-  adapters, polling, or offline demo is delivered by the current libraries.
+- No CLI, terminal dashboard, interactive account/key management, ChatGPT adapter,
+  polling, or offline demo is delivered by the current libraries.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
   WHAM/Codex or API consumption is not a substitute.

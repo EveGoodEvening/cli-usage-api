@@ -2,8 +2,8 @@
 
 A local terminal dashboard project for subscription usage and Claude Platform credit
 balances. **The current implementation provides Python domain, local storage,
-credential-resolution, fixed-origin HTTP transport, Claude subscription, and Console
-balance/organization-discovery libraries, not a working dashboard.** There is no
+credential-resolution, fixed-origin HTTP transport, Claude subscription, Console
+balance/organization-discovery, and Grok billing libraries, not a working dashboard.** There is no
 usable `usage` CLI, TUI, offline demo, interactive account manager, or
 authenticated/live metric acceptance yet.
 The console entry point declared in package metadata targets a later implementation;
@@ -39,9 +39,9 @@ value. C01 verification and closure are recorded in PLAN.md.
 
 C02 adds library-level account/config persistence and credential storage. C03 adds
 read-only Linux credential-file resolution and guarded HTTP transport. C04 adds the
-Claude subscription adapter; C05 adds Console balances and organization discovery
-described below. ChatGPT/Grok adapters, polling, offline demo, interactive account
-management, terminal UI, and CLI integration remain **planned, not current support**:
+Claude subscription adapter; C05 adds Console balances and organization discovery;
+C06 adds the Grok billing adapter described below. The ChatGPT adapter, polling,
+offline demo, interactive account management, terminal UI, and CLI integration remain **planned, not current support**:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
@@ -49,7 +49,7 @@ management, terminal UI, and CLI integration remain **planned, not current suppo
 | Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Library parser implemented; availability is plan/response dependent, no authenticated acceptance |
 | Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Console library adapter implemented; private version-sensitive contract, no authenticated acceptance |
 | Ordinary ChatGPT weekly | Actual chat-model subscription usage/remaining/reset | **Upstream contract unresolved**, not just missing credentials |
-| Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Private direct billing contract researched; no adapter or live acceptance yet |
+| Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Library adapter implemented; private version-sensitive contract, no authenticated acceptance |
 
 Grok product shares must not become independent `100 - share` allowances. Remaining
 and reset refer to the shared pool only when unified billing is established. Credit
@@ -72,8 +72,8 @@ uv sync --locked --group dev
 
 This is an environment setup command, not a claim that the full verification gate
 has passed. Library modules include `usage_tui.domain`, `usage_tui.storage`,
-`usage_tui.credentials`, `usage_tui.transport`, `usage_tui.providers.claude`, and
-`usage_tui.providers.console`; do not run the future console entry point.
+`usage_tui.credentials`, `usage_tui.transport`, `usage_tui.providers.claude`,
+`usage_tui.providers.console`, and `usage_tui.providers.grok`; do not run the future console entry point.
 Transport alone does not normalize metrics.
 
 ## Claude subscription provider library (C04)
@@ -182,6 +182,73 @@ spend reports, API keys, nor inferred renewal dates fill balance gaps.
 This library does not connect accounts, poll, retry, render grant details, or revoke
 remote sessions. No CLI, live request, or authenticated balance acceptance is
 claimed; orchestrator verification is recorded separately in PLAN.md.
+
+## Grok billing provider library (C06)
+
+`from usage_tui.providers.grok import GrokProvider` exposes
+`GrokProvider(transport)` with `requires_credential = True` and the three required
+`metric_ids`: `grok.subscription.shared_pool`, `grok.product.build`, and
+`grok.product.chat`. Construction performs no request. Async
+`fetch(account, credential, now)` accepts a Grok subscription `Account`, its
+provider-bound `ResolvedCredential`, and an aware observation time, returning a
+normalized `Snapshot` with all required rows even when unavailable.
+
+Each eligible fetch reads exactly
+`GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` through guarded
+Transport. This is the official CLI's private proxy billing request, not a public
+xAI API-usage endpoint or a compatibility guarantee. Authentication is Bearer plus
+`x-xai-token-auth: xai-grok-cli`; optional `x-userid` comes only from the same
+resolved credential. No invented upstream version/client-mode headers are sent.
+A live rejection requiring other headers is a compatibility blocker, not grounds
+for guessing a first-party client identity.
+
+Run official `grok login` outside this application. The separate resolver reads
+`$GROK_HOME/auth.json` or `~/.grok/auth.json` (or a selected local file), with
+explicit nonsecret scope selection when identities are ambiguous. Use a
+provider-bound `grok_auth_file` or stored `manual_bearer`; manual identity remains
+unknown unless supplied. API/management keys beginning `xai-` do not enable
+subscription reads. Imports are read-only: no first-party file modification,
+permission changes, refresh-token copying, or token refresh. Team-principal
+incompatibility requires guidance, never fallback to another personal account.
+
+`config.creditUsagePercent` supplies reported aggregate used percent. Missing or
+invalid aggregate is unknown, not zero; on-demand spend, a prepaid wallet, or an
+estimated cap cannot replace it. Only `config.isUnifiedBillingUser == true`
+establishes the shared included-pool relationship. Otherwise reported consumption
+remains visible with the pool relationship unknown, without asserting a shared
+remaining allowance or attaching product resets.
+
+`config.productUsage` must be a complete valid array: unique products with finite,
+nonnegative `usagePercent`, reconciling to the aggregate from the **same payload**
+within one percentage point. Unknown products remain visible under sanitized IDs
+so other consumers are not lost. Malformed, duplicate, or inconsistent breakdowns
+leave product rows unknown without erasing a valid aggregate. An explicit
+`GrokBuild`/`GrokChat` zero is zero; an absent entry is unknown. Product percentages
+are consumed shares, never independent `100 - share` allowances. When unified
+billing is proven, Build/Chat reference the common pool for “剩余/重置：共享池”;
+otherwise product remaining/reset are unavailable. No cross-request or
+cross-account enrichment is used.
+
+In the normalized API, product consumption is carried in `Metric.detail`, with
+`quota=None`: `QuotaValue` would imply an independent remaining allowance.
+Validated additional products use stable `grok.product.other.<SHA-256>` metric
+IDs (digest of the original product's UTF-8 bytes) and sanitized labels. Proven
+unified product rows link `shared_pool_id` and
+`reset_at` to the common pool. Without proven semantics, aggregate consumption is
+also detail-only, with no quota, reset, or shared-pool reference.
+
+The server's `currentPeriod.type` determines weekly/monthly labeling; unknown
+types remain a generic period, regardless of marketing tier. Aware RFC3339
+`currentPeriod.end` supplies reset; `billingPeriodEnd` is considered only when that
+end is absent, not as a rescue for a malformed end. Reversed period bounds are
+invalid. Bad reset metadata must not erase valid usage; reset stays unknown.
+There is no invented renewal or reset to zero when time passes.
+
+The adapter does not invoke Grok/ACP subprocesses, infer included usage from
+`onDemandUsed / onDemandCap`, look up reset coupons, poll, retry, or connect
+accounts. Typed ACP responses may omit product breakdown and are not a fallback.
+No CLI/TUI behavior, live request, or authenticated Grok acceptance is claimed;
+exercised verification remains separately recorded in PLAN.md.
 
 ## Local storage library (C02)
 

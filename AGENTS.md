@@ -84,3 +84,22 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   exclude known-expired grants from active sums, and include unknown expiry only
   with explicit uncertainty. A nearest expiry is not the whole category balance
   and cannot establish renewal or turn promotional API credits into quota windows.
+- Grok unified-pool semantics require positive `isUnifiedBillingUser == true`
+  evidence, not a marketing tier or aggregate percentage alone. Keep reported
+  consumption distinct from proven remaining allowance; product shares never mean
+  `100 - share` remaining. Attach product remaining/reset only to the proven pool.
+  A consumed share belongs in product detail with `quota=None` when the generic
+  quota value would auto-derive an independent remaining percentage; use the
+  shared-pool reference rather than weakening that domain invariant.
+- Validate the entire same-payload Grok product array before exposing a breakdown:
+  reject duplicate/malformed shares, reconcile all products to the wire aggregate
+  within one percentage point, and preserve sanitized unknown-product IDs. Missing
+  Build/Chat is unknown even when other shares reconcile; only an explicit entry
+  proves zero. An invalid breakdown must not erase independent aggregate evidence.
+- Period fallback is an absence rule, not an error-recovery shortcut. A malformed
+  `currentPeriod.end` must not be replaced by `billingPeriodEnd`; reversed bounds
+  cannot establish reset. Preserve valid usage independently and derive period
+  labels from server type, not subscription marketing.
+- Direct Grok proxy JSON preserves private product evidence that typed ACP may
+  discard. Do not silently substitute a subprocess, infer included quota from
+  on-demand spend, or guess client-version/auth headers to hide incompatibility.
