@@ -81,12 +81,34 @@
   initially returned Fable UNKNOWN with quota None in the orchestrator reproduction.
   The required behavior retains quota, leaves reset unknown, and flags partial;
   malformed reset metadata alone must not be treated as a quota conflict. The bounded
-  review fix is pending reverify; initial green checks do not establish fix verification
-  or C04 closure.
+  review fix was separately verified and C04 closed as recorded in `PLAN.md`; this
+  entry does not claim any new checks.
+
+### Added — C05 Console balance and organization-discovery library scope
+
+- `ConsoleProvider(transport)` with async `fetch(account, credential, now)`, explicit
+  Console-session requirement, and purchased, promotional, and authoritative total
+  metric rows on every result. One selected-org credits read per eligible fetch;
+  no automatic discovery, organization switching, login, refresh, polling, or retry.
+- Separate async `discover_organizations(credential)` returns immutable
+  `OrganizationChoice(id, label)` candidates with exact `api` capability and safe
+  validated IDs; malformed candidates/duplicate IDs fail safely. Discovery never
+  persists or automatically chooses an organization, including a singleton.
+- Independent exact category sums across all grants not known expired, retained
+  zero/negative amounts, explicit empty-array zero versus missing/null unknown,
+  per-grant metadata/expiry, and unknown-expiry uncertainty. Invalid grant numeric
+  fields do not erase independent category/authoritative-total evidence. The top-level
+  total is never reconstructed from categories; disagreement remains visible.
+- Private/version-sensitive Console compatibility and high-sensitivity session
+  documentation, explicit organization-selection boundary, and distinction between
+  grant expiry and subscription reset. No API-key/spend-report balance fallback.
+- Bounded README/security/Lessons updates. No documentation-worker checks, real
+  credentials, live requests, CLI integration, or authenticated acceptance claimed;
+  exercised verification remains the orchestrator's separate `PLAN.md` record.
 
 ### Not yet implemented / not verified
 
-- No CLI, terminal dashboard, interactive account/key management, other provider
+- No CLI, terminal dashboard, interactive account/key management, ChatGPT/Grok
   adapters, polling, or offline demo is delivered by the current libraries.
 - No live metric, authenticated provider response, or secure OS-keyring acceptance is
   established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;

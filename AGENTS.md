@@ -65,7 +65,22 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   scoped Fable duplicates with an invalid reset must preserve quota, leave reset
   unknown, and flag partial, not become an unknown quota through tuple inequality.
   C04 review's orchestrator reproduction initially lost quota (Fable UNKNOWN,
-  quota None); its bounded fix remains pending reverify, not established green.
+  quota None); separately verified fix/closure evidence is recorded in PLAN.md.
 - Keep numeric timestamp heuristics provider-local. Claude's positive seconds and
   `>= 10^11` millisecond normalization does not justify weakening the domain's
   timezone-aware timestamp contract or applying the heuristic to other providers.
+- Console organization discovery is an explicit connection operation, not a balance
+  polling side effect. Validate exact API capability and safe IDs; return choices
+  without silently selecting even a singleton. Fetch only the saved organization;
+  stale/inaccessible selection requires guidance, never another readable account.
+- A Console cookie is a high-sensitivity session, not a limited API key. Preserve
+  the secure-store/session-only distinction and exact origin binding; a library
+  adapter does not implement the future UI's warning or selection confirmation.
+- Keep authoritative credit totals independent from category sums. Sum every grant
+  not known expired in each complete validated category; an empty array proves zero,
+  absence does not. Preserve zeros/negative money and independent valid evidence
+  when one category is invalid. Never infer a missing category by subtraction.
+- Grant expiry is not subscription reset. Retain per-grant amounts/program/expiry,
+  exclude known-expired grants from active sums, and include unknown expiry only
+  with explicit uncertainty. A nearest expiry is not the whole category balance
+  and cannot establish renewal or turn promotional API credits into quota windows.

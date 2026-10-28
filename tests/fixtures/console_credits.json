@@ -1,0 +1,15 @@
+{
+  "amount": 1450,
+  "currency": "USD",
+  "balance": {"credits": {"exponent": 2}},
+  "tranches": [
+    {"name": "Purchased first", "granted_amount_minor_units": 1000, "remaining_amount_minor_units": 700, "expires_at": "2026-11-01T12:00:00Z"},
+    {"name": "Purchased second", "granted_amount_minor_units": 500, "remaining_amount_minor_units": 500, "expires_at": "2026-12-01T12:00:00Z"},
+    {"name": "Zero remains visible", "granted_amount_minor_units": 100, "remaining_amount_minor_units": 0, "expires_at": "2026-11-02T12:00:00Z"},
+    {"name": "Expired", "granted_amount_minor_units": 999, "remaining_amount_minor_units": 999, "expires_at": "2026-10-28T12:00:00Z"}
+  ],
+  "promo_tranches": [
+    {"name": "Included API credit", "program_id": "subscription_api_credit", "granted_amount_minor_units": 300, "remaining_amount_minor_units": 200, "expires_at": "2026-11-05T12:00:00Z"},
+    {"name": "Promotion", "granted_amount_minor_units": 100, "remaining_amount_minor_units": 50, "expires_at": "2026-11-10T12:00:00Z"}
+  ]
+}

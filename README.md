@@ -2,9 +2,10 @@
 
 A local terminal dashboard project for subscription usage and Claude Platform credit
 balances. **The current implementation provides Python domain, local storage,
-credential-resolution, fixed-origin HTTP transport, and Claude subscription provider
-libraries, not a working dashboard.** There is no usable `usage` CLI, TUI, offline
-demo, interactive account manager, or authenticated/live metric acceptance yet.
+credential-resolution, fixed-origin HTTP transport, Claude subscription, and Console
+balance/organization-discovery libraries, not a working dashboard.** There is no
+usable `usage` CLI, TUI, offline demo, interactive account manager, or
+authenticated/live metric acceptance yet.
 The console entry point declared in package metadata targets a later implementation;
 do not invoke it at this stage.
 
@@ -38,15 +39,15 @@ value. C01 verification and closure are recorded in PLAN.md.
 
 C02 adds library-level account/config persistence and credential storage. C03 adds
 read-only Linux credential-file resolution and guarded HTTP transport. C04 adds the
-Claude subscription adapter described below. Other provider adapters, polling,
-offline demo, interactive account management, terminal UI, and CLI integration remain
-**planned, not current support**:
+Claude subscription adapter; C05 adds Console balances and organization discovery
+described below. ChatGPT/Grok adapters, polling, offline demo, interactive account
+management, terminal UI, and CLI integration remain **planned, not current support**:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
 | Claude 5h / weekly | Subscription used/remaining percentages and server reset from private OAuth usage | Library adapter implemented; no authenticated acceptance |
 | Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Library parser implemented; availability is plan/response dependent, no authenticated acceptance |
-| Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Private Console credits contract researched; no adapter or live acceptance yet |
+| Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Console library adapter implemented; private version-sensitive contract, no authenticated acceptance |
 | Ordinary ChatGPT weekly | Actual chat-model subscription usage/remaining/reset | **Upstream contract unresolved**, not just missing credentials |
 | Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Private direct billing contract researched; no adapter or live acceptance yet |
 
@@ -71,8 +72,9 @@ uv sync --locked --group dev
 
 This is an environment setup command, not a claim that the full verification gate
 has passed. Library modules include `usage_tui.domain`, `usage_tui.storage`,
-`usage_tui.credentials`, `usage_tui.transport`, and `usage_tui.providers.claude`;
-do not run the future console entry point. Transport alone does not normalize metrics.
+`usage_tui.credentials`, `usage_tui.transport`, `usage_tui.providers.claude`, and
+`usage_tui.providers.console`; do not run the future console entry point.
+Transport alone does not normalize metrics.
 
 ## Claude subscription provider library (C04)
 
@@ -110,8 +112,8 @@ Fable first uses valid `limits[]` entries with `kind == "weekly_scoped"` and
 entries make that row unknown rather than selecting one arbitrarily. Equal-percent
 duplicates with an invalid reset must instead retain quota, leave reset unknown,
 and produce a partial snapshot; invalid reset metadata alone is not a quota conflict.
-Review reproduced an initial violation returning Fable UNKNOWN with quota None;
-the bounded review fix is pending reverify, not claimed green or closed.
+The independently verified C04 review fix and closure evidence are recorded in
+PLAN.md; this documentation does not add a verification claim.
 If no valid scoped entry is available, legacy aliases are considered in order: `fable_weekly`,
 `fable_seven_day`, `seven_day_fable`. Opus/Sonnet fields and extra-usage balances are
 not substitutes. Fable is a model-scoped subset of weekly capacity, not an additive
@@ -120,6 +122,66 @@ allowance; absence establishes neither eligibility nor a fixed half-week quota.
 The adapter does not poll, retry, preserve last-known values, render bars, or connect
 accounts. Those remain later scheduler/UI integrations. No live request or CLI
 smoke is claimed here; exercised component verification belongs in PLAN.md.
+
+## Claude Platform Console library (C05)
+
+`from usage_tui.providers.console import ConsoleProvider` exposes
+`ConsoleProvider(transport)`, with `requires_credential = True` and the required
+`metric_ids`: `claude.platform.purchased_balance`,
+`claude.platform.promotional_balance`, and `claude.platform.total_balance`.
+Its async `fetch(account, credential, now)` accepts a Claude Platform `Account`,
+provider-bound `ResolvedCredential`, and aware observation time. Separate async
+`discover_organizations(credential)` returns a tuple of frozen
+`OrganizationChoice(id, label)` candidates. Construction does not make a request.
+Each eligible balance fetch reads only the selected
+organization's `/api/organizations/{organization_id}/prepaid/credits` route through
+the guarded transport and retains all three required metric rows. Discovery uses
+`GET /api/organizations` separately, not on every balance fetch. Both routes use
+the fixed `https://platform.claude.com` origin and private, version-sensitive
+contracts; synthetic fixtures do not establish authenticated compatibility.
+
+Only a provider-bound `console_session` credential enables these reads. A
+`sessionKey` is a **high-sensitivity account session**, not a limited API key.
+Sign in to the first-party Console outside this application; supply only your own
+session's cookie value through `CredentialStore`, never a password, full Cookie
+header, HAR, or browser-store import. Persistent storage uses the supported secure
+backend; explicit session-only storage is nonpersistent and still subject to
+process-memory risk. No interactive secret prompt or warning screen exists yet;
+later integration must display the sensitivity warning before accepting a session.
+The cookie is sent only to platform.claude.com, never api.anthropic.com or claude.ai.
+
+Discovery candidates require the exact `api` capability and a validated `uuid`
+matching `[A-Za-z0-9-]{1,64}`; names are sanitized for display. The caller must
+obtain explicit organization selection, even if only one candidate is offered,
+before saving the account. An absent or no-longer-accessible selection requires
+reselection or permission guidance, never automatic switching. Discovery does not
+persist an account or silently choose an organization. HTTP 401 and discovery
+403 require reconnection; credits 403 means selected-organization billing permission
+is denied. A UI for selection/reconnection remains planned.
+
+`tranches` are purchased grants; `promo_tranches` are promotional grants. Category
+balances sum **all** grants not known to be expired, not just the soonest-expiring
+grant. Explicit empty arrays mean zero; missing/null arrays mean unknown. Invalid
+grant numeric fields make only their category unavailable, preserving an
+independently valid sibling category and top-level `amount`. Integer minor units
+remain exact, including explicitly reported negative balances; zero-valued grants
+are retained. Currency defaults to the evidenced `USD` only when omitted; exponent
+defaults to `2` when omitted, with supplied values validated in `0…4`.
+
+The authoritative top-level total is independent of category sums: it is not
+reconstructed from them or used to invent a missing category. Disagreement is
+reported rather than forcing equality. Unknown or malformed grant expiry stays
+unknown and is included with an uncertainty note; known-expired grants are excluded
+from active category totals. Per-grant amounts, program/name, and expiry remain
+available as normalized `Grant` details, alongside nearest known active expiry.
+Credits **expire; they do not reset weekly**. `subscription_api_credit` identifies
+subscription-origin API credits but remains promotional when supplied in
+`promo_tranches`, not a subscription usage window. Neither `/current_spend`, Admin
+spend reports, API keys, nor inferred renewal dates fill balance gaps.
+
+This library does not connect accounts, poll, retry, render grant details, or revoke
+remote sessions. No CLI, live request, or authenticated balance acceptance is
+claimed; orchestrator verification is recorded separately in PLAN.md.
 
 ## Local storage library (C02)
 
@@ -229,7 +291,7 @@ proxy/netrc environment use, and does not persist server cookies between request
 Requests include JSON acceptance and the installed-package User-Agent, not an
 invented upstream client identity. Connect timeout is 5 seconds, with a 10-second
 overall request deadline and a streamed 1 MiB response limit. JSON shape validation
-and metric interpretation belong to future adapters. Safe `TransportError` values
+and metric interpretation belong to provider adapters. Safe `TransportError` values
 carry only fetch state, fixed code, optional HTTP status and retry time, never a
 response body, secret, credential path, or arbitrary exception text. A valid 429
 `Retry-After` is preserved with a minimum 60-second deadline; scheduler retry/backoff

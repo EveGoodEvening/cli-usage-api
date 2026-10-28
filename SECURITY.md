@@ -3,9 +3,10 @@
 ## Current implementation: Python libraries, not a live application
 
 This repository supplies package/domain, local storage, credential-resolution,
-fixed-origin HTTP transport, and Claude subscription provider libraries. It does not
-implement other provider adapters, polling, interactive account management, a CLI,
-or a TUI. A declared future console entry point does not provide these features.
+fixed-origin HTTP transport, Claude subscription, and Console balance/discovery
+provider libraries. It does not implement ChatGPT/Grok adapters, polling, interactive
+account management, a CLI, or a TUI. A declared future console entry point does not
+provide these features.
 No authenticated provider or real OS-keyring check was exercised by this
 documentation task; implementation evidence and orchestrator verification remain
 separate in [PLAN.md](PLAN.md).
@@ -110,8 +111,8 @@ exposed, revoke or replace it through the relevant first-party service.
   credential. No guessed upstream client-version headers are added.
 - A Console value is a high-sensitivity session credential, not a limited API key.
   Invalid cookie controls/delimiters are rejected; full Cookie headers, passwords,
-  and HAR imports are not supported. Explicit organization selection remains a
-  later connection/adapter responsibility, not automatic transport behavior.
+  and HAR imports are not supported. Console discovery returns candidates, not an
+  automatic selection; the later connection UI must obtain explicit confirmation.
 - TLS verification is enabled; redirects and implicit proxy/netrc inheritance
   are disabled. Each request has a fresh client, so response cookies do not carry
   over. Requests identify the installed package and accept JSON. There is no raw
@@ -149,6 +150,47 @@ exposed, revoke or replace it through the relevant first-party service.
   with values at least `10^11` treated as milliseconds. Timezone-free strings are
   invalid. No response field changes the request destination, auth headers, or
   credential selection. Snapshots carry normalized metrics, not raw response bodies.
+
+## Implemented C05 Console provider boundary
+
+- `ConsoleProvider(transport)` performs no construction-time I/O. Its separate async
+  `discover_organizations(credential)` returns candidate `OrganizationChoice` values
+  (`id`, sanitized `label`), never saves an account or selects even a sole candidate.
+  Candidates need exact `api` capability and an ID matching `[A-Za-z0-9-]{1,64}`.
+  Invalid candidate schema or duplicate IDs produce a safe schema error rather
+  than ambiguous organization selection.
+- `fetch(account, credential, now)` requires a Claude Platform account and a
+  provider-bound `console_session`. It reads credits only for the account's selected
+  organization, with no polling-time discovery or automatic fallback. A supplied
+  credential organization binding must match. Missing selection requires explicit
+  organization selection; inaccessible organizations require reselection/permission
+  guidance, not silent substitution. HTTP 401 or discovery 403 means reconnect;
+  selected-organization credits 403 means billing permission denied.
+- A Console `sessionKey` is a high-sensitivity session, not a limited API key.
+  Users sign in outside the application and supply only their own cookie value;
+  do not collect passwords, HARs, full Cookie headers, or browser-store contents.
+  Use `CredentialStore` secure persistence or explicit nonpersistent session-only
+  storage, not account JSON. The future UI must warn before secret acceptance;
+  that end-to-end interaction is not implemented by a library adapter. Local secret
+  deletion is not remote session revocation.
+- Discovery/credits use private, version-sensitive Console contracts at
+  platform.claude.com only. No session goes to api.anthropic.com or claude.ai;
+  transport independently enforces exact destination, kind, and cookie-value
+  validation. No response field can redirect authentication or select another org.
+- All three balance rows remain present. Purchased/promotional totals use their
+  complete validated grant arrays independently; missing/null is unknown, explicit
+  empty is zero, and invalid numeric grant data invalidates that category only.
+  Exact integer minor units retain negative balances and zero grants. Authoritative
+  top-level total is independent, not a derived sum or an invented missing category;
+  discrepancies remain visible. Program IDs annotate grants, not subscription quota.
+- Known-expired grants do not contribute to active category totals. Unknown or
+  malformed expiry is included with uncertainty, never asserted unexpired. Grant
+  details preserve amounts and known expiry; nearest known active expiry is not a
+  fabricated renewal/reset. Names/programs are untrusted display metadata, not raw
+  diagnostics. Snapshots contain normalized values rather than response bodies.
+- Neither API-key substitution nor `/current_spend`/Admin reporting fills a missing
+  balance. A synthetic parser fixture does not establish live billing permission,
+  session validity, or compatibility; those require separate authenticated acceptance.
 
 ## Planned integration controls — not end-to-end guarantees
 
