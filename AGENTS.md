@@ -141,6 +141,15 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   within one percentage point, and preserve sanitized unknown-product IDs. Missing
   Build/Chat is unknown even when other shares reconcile; only an explicit entry
   proves zero. An invalid breakdown must not erase independent aggregate evidence.
+- Provider-emitted extra metrics must remain visible through the consumer, not
+  merely survive parsing and scheduling. Final split review found additional Grok
+  products hidden by required-ID-only dashboard enumeration; supplied actual
+  UsageApp/Pilot evidence emitted four Grok metrics while visible rows stayed
+  10 → 10. Preserve all required rows, append deduplicated snapshot extras, and
+  retain selection identity, filtering and existing details/shared-pool semantics
+  across refreshes. Producer-only coverage does not establish end-to-end UI
+  visibility; keep post-fix verification and independent rereview separate from
+  the prior green gate.
 - Exact arithmetic starts at the HTTP JSON boundary. Decode decimal numeric tokens
   directly as `Decimal`; stringifying a binary float cannot recover lost wire
   precision. C06 review reproduced raw numeric `43.500000000000000000000000000001`

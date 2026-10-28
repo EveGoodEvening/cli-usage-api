@@ -276,18 +276,38 @@ class UsageApp(App[None]):
                 message += f" · retry {countdown(min(retries), self.now())}"
         self.status_line.update(message + ("\n" + self._notice if self._notice else ""))
 
-    def _rebuild(self) -> None:
-        self.rows = [
-            (account, metric_id)
-            for account in self.accounts
-            if self.selected_account is None or account.id == self.selected_account
-            for metric_id in REQUIRED_METRIC_IDS[account.provider]
-        ]
+    def _visible_rows(self) -> list[tuple[Account, str]]:
+        rows = []
+        for account in self.accounts:
+            if self.selected_account is not None and account.id != self.selected_account:
+                continue
+            seen = set(REQUIRED_METRIC_IDS[account.provider])
+            rows.extend((account, metric_id) for metric_id in REQUIRED_METRIC_IDS[account.provider])
+            snapshot = self.snapshots.get(account.id)
+            if snapshot is not None:
+                for metric in snapshot.metrics:
+                    if metric.id not in seen:
+                        rows.append((account, metric.id))
+                        seen.add(metric.id)
+        return rows
+
+    def _rebuild(self, rows: list[tuple[Account, str]] | None = None) -> None:
+        highlighted = self.listing.highlighted
+        selected = (
+            self.rows[highlighted]
+            if highlighted is not None and highlighted < len(self.rows)
+            else None
+        )
+        self.rows = self._visible_rows() if rows is None else rows
         self.listing.clear_options()
         for index, (account, metric_id) in enumerate(self.rows):
             self.listing.add_option(Option(Text(self._row_text(account, metric_id)), id=str(index)))
         if self.rows:
-            self.listing.highlighted = 0
+            self.listing.highlighted = (
+                self.rows.index(selected)
+                if selected in self.rows
+                else min(highlighted or 0, len(self.rows) - 1)
+            )
         self._render_header()
 
     def _metric(self, account: Account, metric_id: str) -> Metric | None:
@@ -337,6 +357,10 @@ class UsageApp(App[None]):
         return "\n".join(lines)
 
     def _render_rows(self) -> None:
+        rows = self._visible_rows()
+        if rows != self.rows:
+            self._rebuild(rows)
+            return
         for index, (account, metric_id) in enumerate(self.rows):
             self.listing.replace_option_prompt(str(index), Text(self._row_text(account, metric_id)))
         self._render_header()

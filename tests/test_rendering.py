@@ -201,3 +201,57 @@ async def test_saturated_retry_response_renders_without_local_overflow(saturated
         assert snapshot.retry_at.isoformat() in app.details(account, snapshot.metrics[0].id)
         assert app.listing.option_count == 3
         await pilot.press("q")
+
+
+async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth():
+    app = UsageApp(mode="demo")
+    async with app.run_test() as pilot:
+        account = next(a for a in app.accounts if a.provider == ProviderId.GROK_SUBSCRIPTION)
+        snapshot = app.snapshots[account.id]
+        product = snapshot.metrics[-1]
+        first = replace(
+            product,
+            id="grok.product.other.first",
+            label="First other product",
+            detail="Reported consumption share: 10%. Not an independent quota.",
+            quota=None,
+        )
+        unknown = replace(
+            first,
+            id="grok.product.other.unknown",
+            label="Unknown other product",
+            state=MetricState.UNKNOWN,
+            detail="Usage is unavailable; missing does not mean zero.",
+            shared_pool_id=None,
+            reset_at=None,
+        )
+        app.publish_snapshot(replace(snapshot, metrics=(first, *snapshot.metrics, unknown)))
+        required = [metric.id for metric in snapshot.metrics]
+        ids = [metric_id for row_account, metric_id in app.rows if row_account == account]
+        assert ids == [*required, first.id, unknown.id]
+        assert len(ids) == len(set(ids))
+        index = app.rows.index((account, first.id))
+        app.listing.highlighted = index
+        assert "10%" in str(app.listing.get_option_at_index(index).prompt)
+        details = app.details(account, first.id)
+        assert "provenance" in details and "不推算产品剩余" in details
+        assert "剩余 90%" not in details
+        unknown_text = app._row_text(account, unknown.id)
+        assert "未知 / no data" in unknown_text and "missing does not mean zero" in unknown_text
+        assert "已用 0" not in unknown_text and "剩余 100" not in unknown_text
+        # A new extra before the highlighted one must not change the selection.
+        earlier = replace(first, id="grok.product.other.earlier", label="Earlier product")
+        app.publish_snapshot(
+            replace(snapshot, metrics=(*snapshot.metrics, earlier, first, unknown))
+        )
+        assert app.rows[app.listing.highlighted] == (account, first.id)
+        assert [metric_id for a, metric_id in app.rows if a == account] == [
+            *required,
+            earlier.id,
+            first.id,
+            unknown.id,
+        ]
+        app.publish_snapshot(replace(snapshot, metrics=()))
+        assert [metric_id for a, metric_id in app.rows if a == account] == required
+        assert all("未知 / no data" in app._row_text(account, metric_id) for metric_id in required)
+        await pilot.press("q")

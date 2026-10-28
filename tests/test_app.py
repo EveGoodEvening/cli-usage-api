@@ -2,14 +2,24 @@
 
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from textual.widgets import Input, OptionList, Select
 
 from usage_tui.accounts import AccountForm, AccountManagerScreen
 from usage_tui.app import InformationScreen, UsageApp
-from usage_tui.domain import Account, CredentialKind, ProviderId
+from usage_tui.domain import (
+    REQUIRED_METRIC_IDS,
+    Account,
+    CredentialKind,
+    ProviderId,
+    ResolvedCredential,
+)
+from usage_tui.providers.grok import GrokProvider
+from usage_tui.transport import Transport
 
 
 @pytest.mark.parametrize("size", [(80, 24), (40, 12)])
@@ -183,6 +193,101 @@ async def test_account_selection_filters_rows():
         assert app.query_one("#metrics", OptionList).option_count == 1
         assert all(a.id == account.id for a, _ in app.rows)
         await pilot.press("q")
+
+
+async def test_real_grok_extra_product_mount_details_filter_and_refresh():
+    grok = Account(
+        id="11111111-1111-4111-8111-111111111111",
+        provider=ProviderId.GROK_SUBSCRIPTION,
+        label="Synthetic Grok",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref="memory:synthetic",
+    )
+    other_account = Account(
+        id="22222222-2222-4222-8222-222222222222",
+        provider=ProviderId.CHATGPT_SUBSCRIPTION,
+        label="Pending ChatGPT",
+    )
+    credential = ResolvedCredential(
+        grok.provider, CredentialKind.MANUAL_BEARER, "synthetic-secret", "generation-1"
+    )
+    bodies = [
+        (
+            b'{"config":{"isUnifiedBillingUser":true,"creditUsagePercent":50,'
+            b'"currentPeriod":{"end":"2099-11-02T00:00:00Z"},"productUsage":['
+            b'{"product":"GrokBuild","usagePercent":20},'
+            b'{"product":"GrokChat","usagePercent":20},'
+            b'{"product":"Other","usagePercent":10}]}}'
+        ),
+        (
+            b'{"config":{"isUnifiedBillingUser":true,"creditUsagePercent":40,'
+            b'"currentPeriod":{"end":"2099-11-02T00:00:00Z"},"productUsage":['
+            b'{"product":"GrokBuild","usagePercent":20},'
+            b'{"product":"GrokChat","usagePercent":20}]}}'
+        ),
+    ]
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        assert str(request.url) == "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
+        return httpx.Response(200, content=bodies.pop(0))
+
+    provider = GrokProvider(Transport(http_transport=httpx.MockTransport(respond)))
+
+    class ProviderScheduler(InjectedScheduler):
+        async def start(self):
+            await super().start()
+            await self.refresh()
+
+        async def refresh(self, account_id=None):
+            await super().refresh(account_id)
+            factory.publish(await provider.fetch(grok, credential, datetime.now(UTC)))
+
+    factory = InjectedFactory()
+    factory.scheduler = ProviderScheduler()
+    app = UsageApp(mode="live", accounts=(grok, other_account), scheduler_factory=factory)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        required = list(REQUIRED_METRIC_IDS[grok.provider])
+        assert [metric_id for _, metric_id in app.rows[:3]] == required
+        extra = app.snapshots[grok.id].metrics[-1]
+        assert extra.label == "Other" and extra.id.startswith("grok.product.other.")
+        assert app.rows[3] == (grok, extra.id)
+        assert app.listing.option_count == 5
+        prompt = str(app.listing.get_option_at_index(3).prompt)
+        assert "Other" in prompt and "consumption share: 10%" in prompt
+        assert "非独立额度" in prompt and "剩余 90%" not in prompt
+        assert extra.quota is None
+        app.listing.highlighted = 3
+        await pilot.press("enter")
+        assert isinstance(app.screen, InformationScreen)
+        assert "Other" in app.screen.content and "10%" in app.screen.content
+        assert "private_http" in app.screen.content
+        assert "grok.cli.billing.credits" in app.screen.content
+        assert "不推算产品剩余" in app.screen.content
+        await pilot.press("escape")
+        selector = app.query_one("#account-selector", Select)
+        selector.value = other_account.id
+        await pilot.pause()
+        assert app.rows == [(other_account, REQUIRED_METRIC_IDS[other_account.provider][0])]
+        selector.value = grok.id
+        await pilot.pause()
+        assert [metric_id for _, metric_id in app.rows] == [*required, extra.id]
+        selector.value = "all"
+        await pilot.pause()
+        # Removing a row before the selected account must preserve its identity.
+        app.listing.highlighted = 4
+        app.listing.focus()
+        await pilot.press("r")
+        await pilot.pause()
+        assert len(requests) == 2 and not bodies
+        assert [metric_id for _, metric_id in app.rows[:3]] == required
+        assert app.listing.option_count == 4
+        assert extra.id not in [metric_id for _, metric_id in app.rows]
+        assert app.rows[app.listing.highlighted][0] == other_account
+        await pilot.press("q")
+    assert factory.closed and factory.scheduler.stopped
 
 
 def test_configured_live_requires_injection():

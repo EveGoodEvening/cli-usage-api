@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Correcting — final split review additional Grok product visibility
+
+- Final split review completed four independent slices: three clean, one P2
+  finding. Additional Grok product metrics survived the provider/scheduler path
+  but were omitted by the dashboard's required-ID-only enumeration.
+- Supplied actual UsageApp/Pilot synthetic-extra-snapshot evidence emitted four
+  Grok metrics while overall visible rows stayed **10 → 10**. This is an exercised
+  offline UI reproduction, not an authenticated-provider check.
+- Coordinated bounded correction keeps all required rows first and appends
+  deduplicated snapshot extras in emission order, using existing selectable
+  details/provenance and shared-pool semantics. Refresh adds/removes extras while
+  preserving selected metric identity and account filtering.
+- Separate post-fix verification, independent rereview, fix commit and final
+  gate/accounting commit remain pending. The C14 evidence below predates the
+  correction. All 13 blocked acceptance tasks and exact prerequisites remain
+  unchanged; no full original-goal completion is claimed.
+
 ### Verified — C14 final offline acceptance
 
 - Orchestrator evidence: `uv sync --locked --group dev` succeeded; 849 tests
