@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added — C10 Textual account-management scope
+
+- Reusable `AccountManagerScreen` and account service for terminal account
+  add/list/edit, enable/disable, credential/reference replacement, explicit
+  organization/scope selection, reconnect guidance, key deletion, and confirmed
+  removal. Host callbacks connect committed changes to scheduler cancellation;
+  this is not dashboard rendering or CLI launch integration.
+- Masked, initially empty secret input with cancellation clearing and explicit
+  replacement/deletion confirmation; encrypted Secret Service persistence and
+  process-only session storage remain distinct choices without silent fallback.
+  Console session entry has a high-sensitivity warning and explicit organization
+  discovery/selection; external Claude/Grok files remain read-only references.
+- Read-only injected-account mode for demo viewing without real storage/credential
+  access. Optional ChatGPT bearer/API-key storage remains local management only;
+  ordinary-chat weekly retrieval is still blocked on the upstream contract.
+- Bounded account-screen/API, security, and repository-Lessons documentation.
+  No dashboard/CLI, authenticated provider, real-keyring, or documentation-worker
+  verification claim; exercised evidence belongs separately in `PLAN.md`.
+
 ### Added — C01 package/domain scope
 
 - Python 3.11+ `src/` package metadata and runtime/development dependency declarations.

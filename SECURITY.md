@@ -1,13 +1,13 @@
 # Security boundaries
 
-## Current implementation: Python libraries, not a live application
+## Current implementation: libraries and a reusable account screen
 
 This repository supplies package/domain, local storage, credential-resolution,
 fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Grok
 billing, explicit provider-registry, polling/freshness, and deterministic offline-source
-libraries, with an unresolved ChatGPT capability. It does not implement ordinary
-ChatGPT quota retrieval, interactive account management, a CLI, or a TUI. A declared
-future console entry point does not provide these features.
+libraries, an unresolved ChatGPT capability, and a reusable Textual account-management
+screen. It does not implement ordinary ChatGPT quota retrieval, a dashboard, or a
+usable CLI. A declared future console entry point does not launch these components.
 No authenticated provider or real OS-keyring check was exercised by this
 documentation task; implementation evidence and orchestrator verification remain
 separate in [PLAN.md](PLAN.md).
@@ -23,6 +23,43 @@ HAR files, or identifying account/billing data in issues, chat, or commits. Secu
 reports should describe the affected component and reproduction with synthetic data;
 remove authentication and identity information before sharing. If a credential is
 exposed, revoke or replace it through the relevant first-party service.
+
+## Implemented C10 terminal account-input boundary
+
+- `AccountManagerScreen` is a reusable Textual screen, not a dashboard or a CLI
+  secret prompt. New secrets use masked keyboard input, begin empty even when
+  editing a saved account, and have no reveal/copy control. Pending secret values
+  are cleared on every submit attempt (including failures), cancel, and teardown.
+  Replacement confirmation opens after field clearing; canceling it leaves the
+  field empty. Replacement, key deletion, and account removal require confirmation.
+  Escape cancels a form without committing partial edits.
+  Masking does not defeat clipboard exposure, terminal recording, same-user code,
+  or process-memory inspection; Python cannot promise zeroization.
+- Persistent and session-only storage are explicit choices. Unsupported/locked
+  secure backends return actionable errors without silently switching to memory
+  or plaintext. A session-only value lasts only in its owning `CredentialStore`
+  instance/process; a saved nonsecret profile does not preserve that credential
+  across exit. Share that store instance with the resolver in the embedding app.
+- Console input warns that `sessionKey` is a high-sensitivity account session.
+  Accept only the value, not a password, full Cookie header, HAR, or browser
+  extraction. Discovery runs only when requested; users explicitly choose an
+  eligible organization even for a singleton. Console session replacement requires
+  newly discovered explicit selection rather than fallback to the previous scope.
+  Grok scope choices use numbered display labels, not arbitrary auth-file key names,
+  and bind the intended imported identity instead of guessing among ambiguous profiles.
+- Local API-key management does not authorize OAuth/session reads; optional
+  ChatGPT bearer/API-key storage does not repair its missing weekly contract.
+  No ChatGPT cookie/password, browser login, refresh protocol, or login subprocess
+  is supplied. Reconnect guidance directs users to first-party login outside the app.
+- Confirmed removal affects only this tool's account metadata and locally stored
+  secret. Key deletion can retain the local account for reconnect. External
+  Claude/Grok login files are never removed, and no action revokes remote sessions.
+  Config and keyring are separate stores, not an atomic transaction; errors must
+  remain visible. The host must forward committed account updates to the scheduler
+  to cancel obsolete fetch generations; a screen alone does not own live polling.
+- Read-only demo viewing takes injected accounts and must not touch account files,
+  imported credentials, or keyring. No actual account credential, live-provider,
+  real-keyring, or terminal acceptance is claimed by this documentation task.
 
 ## Implemented C02 local persistence boundaries
 
@@ -58,8 +95,9 @@ exposed, revoke or replace it through the relevant first-party service.
 - Store failures use fixed safe `ConfigError`/`CredentialError` messages instead
   of interpolating backend exception text, secret values, or local paths.
   Deleting a stored credential touches only this tool's local store, not external
-  login files or remote sessions. Account metadata removal and credential deletion
-  remain separate library calls until the account-management integration exists.
+  login files or remote sessions. The C10 account manager coordinates the separate
+  metadata and local-credential operations; neither store provides a cross-store
+  atomic transaction.
 
 ## Implemented C03 credential-resolution boundary
 
@@ -113,7 +151,7 @@ exposed, revoke or replace it through the relevant first-party service.
 - A Console value is a high-sensitivity session credential, not a limited API key.
   Invalid cookie controls/delimiters are rejected; full Cookie headers, passwords,
   and HAR imports are not supported. Console discovery returns candidates, not an
-  automatic selection; the later connection UI must obtain explicit confirmation.
+  automatic selection; the C10 connection screen obtains explicit confirmation.
 - TLS verification is enabled; redirects and implicit proxy/netrc inheritance
   are disabled. Each request has a fresh client, so response cookies do not carry
   over. Requests identify the installed package and accept JSON. There is no raw
@@ -171,9 +209,9 @@ exposed, revoke or replace it through the relevant first-party service.
   Users sign in outside the application and supply only their own cookie value;
   do not collect passwords, HARs, full Cookie headers, or browser-store contents.
   Use `CredentialStore` secure persistence or explicit nonpersistent session-only
-  storage, not account JSON. The future UI must warn before secret acceptance;
-  that end-to-end interaction is not implemented by a library adapter. Local secret
-  deletion is not remote session revocation.
+  storage, not account JSON. The C10 screen warns before accepting a session;
+  a library adapter alone does not provide that interaction. Local secret deletion
+  is not remote session revocation.
 - Discovery/credits use private, version-sensitive Console contracts at
   platform.claude.com only. No session goes to api.anthropic.com or claude.ai;
   transport independently enforces exact destination, kind, and cookie-value

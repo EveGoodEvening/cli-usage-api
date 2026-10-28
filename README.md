@@ -4,11 +4,12 @@ A local terminal dashboard project for subscription usage and Claude Platform cr
 balances. **The current implementation provides Python domain, local storage,
 credential-resolution, fixed-origin HTTP transport, Claude subscription, Console
 balance/organization-discovery, Grok billing, explicit provider-registry, polling/
-freshness, and deterministic offline-source libraries, plus an unresolved ChatGPT
-capability, not a working dashboard.** There is no usable `usage` CLI, TUI,
-interactive account manager, or authenticated/live metric acceptance yet.
-The console entry point declared in package metadata targets a later implementation;
-do not invoke it at this stage.
+freshness, deterministic offline-source libraries, an unresolved ChatGPT capability,
+and a reusable Textual account-management screen. It is not yet a dashboard or
+usable `usage` CLI.** No authenticated/live metric acceptance is claimed.
+The console entry point declared in package metadata targets later integration;
+do not invoke it at this stage. Account-screen embedding and workflows are described
+below; dashboard and CLI launch integration remain separate work.
 
 ## Original goal and scope
 
@@ -45,8 +46,9 @@ C06 adds the Grok billing adapter described below. C07 adds the explicit provide
 registry and a truthful blocked ChatGPT capability, **not** an ordinary-chat quota
 adapter. C08 adds the library-level scheduler and freshness state described below.
 C09 adds the deterministic offline source described below; it is not yet wired to a
-CLI or TUI. Interactive account management, terminal UI, and CLI integration remain
-**planned, not current support**:
+CLI or dashboard. C10 adds the reusable Textual account-management screen described
+below. Dashboard rendering and CLI launch integration remain **planned, not current
+support**:
 
 | Requested metric | Intended meaning and source | Current live status |
 |---|---|---|
@@ -80,6 +82,109 @@ has passed. Library modules include `usage_tui.domain`, `usage_tui.storage`,
 `usage_tui.credentials`, `usage_tui.transport`, `usage_tui.providers.claude`,
 `usage_tui.providers.console`, and `usage_tui.providers.grok`; do not run the future console entry point.
 Transport alone does not normalize metrics.
+
+## Textual account management (C10)
+
+The account manager is a reusable terminal screen, not a web page, shell-based
+setup substitute, or dashboard. There is no `usage accounts …` command or installed
+dashboard launch workflow yet. A host Textual application can embed it with:
+
+```python
+from usage_tui.accounts import AccountManagerScreen
+
+screen = AccountManagerScreen(
+    account_store,
+    credential_store,
+    resolver,
+    console_discovery=console_provider.discover_organizations,
+    on_changed=handle_accounts_changed,
+    on_reconnect=handle_reconnect,
+)
+app.push_screen(screen)
+```
+
+`on_changed(accounts)` receives the committed `tuple[Account, ...]`;
+`on_reconnect(account_id)` receives the local opaque account ID after local
+credential resolution succeeds. Either callback may return an awaitable. ChatGPT
+reconnect only shows its blocked-contract guidance and does not resolve its key.
+`console_discovery` accepts a resolved Console credential and asynchronously returns
+the provider's `OrganizationChoice` candidates.
+
+For local non-UI callers, `AccountService(account_store, credential_store)` exposes
+`save(account, *, original=None, secret=None, persist=False)` and `remove(account)`,
+both returning the resulting account tuple. Pass the previously loaded `original`
+when editing; updates check for conflicts inside `AccountStore.mutate`. A new manual
+secret gets a new opaque reference, and the old tool-owned secret is cleaned up
+after config commit. Cleanup errors explicitly distinguish already-saved config
+from failed credential cleanup; neither method promises atomicity across both
+stores. Key deletion is a confirmed screen action, not a separate service method.
+
+Supply the same `CredentialStore` to the screen and resolver so session-only
+credentials remain resolvable within that process. The host owns scheduler
+integration and must deliver committed account changes to `Scheduler.update_accounts`
+to cancel obsolete in-flight generations. Embedding this screen alone does not start
+polling or render usage metrics. `readonly=True, accounts=demo_accounts` supplies a
+read-only account view without reading account files, credentials, or keyring;
+demo viewing must not mutate real connections.
+
+### Keyboard and account lifecycle
+
+Use arrow keys to choose an account, Tab/Shift-Tab to move through form controls,
+and Enter/Space to activate the focused control. On the account list, `a` adds,
+`e` edits, Space enables/disables, `d` removes, `k` deletes this tool's saved key,
+and `r` requests reconnect. Escape returns from the manager or cancels the current
+dialog. Secret entry is masked; no reveal/copy control or saved-secret prefill is
+provided. Every submit attempt clears the secret field, including validation/backend
+failures; cancellation and teardown clear it too. Replacement confirmation opens
+with the field already empty; canceling that confirmation leaves it empty and saves
+no partial edits. Replacement, key deletion, and account removal require confirmation.
+Do not paste
+secrets into a shell command or use screen sharing/session recording while entering
+them; masking does not protect the clipboard, terminal recorder, or process memory.
+
+Add/edit forms select a provider and credential kind, label, and the applicable
+credential reference or new secret; Space on the list changes enabled state.
+Editing does not reveal the old
+secret; leave replacement input empty to keep it. Choose explicitly between encrypted
+persistence and **session only** for new manual secrets. A locked or unsupported
+keyring produces guidance, not silent fallback. Session-only values belong to the
+current process and do not become durable credentials merely because account
+metadata exists; after exit/restart reconnect or supply a new secret. Python cannot
+guarantee memory zeroization. The persistence backend is the supported Linux Secret
+Service only; plaintext, alternative/chained, and null backends are rejected.
+
+- **Claude subscription:** sign in through official Claude Code outside this app.
+  Select the default credential-file reference or a specific private file; a
+  supported manual bearer is also available. Imports remain references, not copies
+  of refresh tokens. Reconnect guidance covers expiry and missing `user:profile`;
+  inference-only setup tokens/API keys do not enable subscription reads.
+- **Claude Platform:** a warning identifies `sessionKey` as a high-sensitivity
+  session before masked entry. Supply only its value, never a password, Cookie
+  header, HAR, or browser-store import. Use **Discover** to list eligible API
+  organizations, then explicitly select the desired organization before saving,
+  including when only one is available. Discovery is an explicit read, not automatic
+  polling or permission to silently switch organizations. Missing/inaccessible
+  selection requires reselection or billing-permission guidance. Replacing an existing
+  Console session requires newly discovered, explicitly selected organization scope;
+  the previous organization's selection is not an automatic fallback.
+- **Grok:** run official `grok login` outside this app; select the default/private
+  auth-file reference or a supported manual bearer. Discover scopes and explicitly
+  select the intended identity when necessary; the saved nonsecret selector binds
+  future reads. The tool never runs login, refreshes credentials, changes file
+  permissions, or deletes the external login file.
+- **ChatGPT:** a labeled local profile may have no credential, or an optional
+  bearer/API key for local management only. It remains blocked by the missing
+  ordinary-chat weekly contract; storage does not enable retrieval. No sensitive
+  cookie/password prompt or WHAM/Codex fallback is offered.
+
+API keys are local storage only, not substitutes for provider OAuth/session
+credentials. Reconnect does not perform browser login or remote token renewal.
+Removing an account deletes its local metadata and this tool's stored secret only;
+deleting a key leaves the account profile available for reconnection. Neither
+action revokes a remote session or removes Claude/Grok credential files. Account
+metadata and keyring are separate stores, so failures are reported rather than
+promising a cross-store atomic transaction. No real credential, real-keyring,
+authenticated provider, or dashboard acceptance is established by this documentation.
 
 ## Claude subscription provider library (C04)
 
@@ -126,8 +231,9 @@ allowance; absence establishes neither eligibility nor a fixed half-week quota.
 
 The adapter itself does not poll, retry, preserve last-known values, render bars, or
 connect accounts. Polling and last-known state belong to the C08 scheduler library;
-rendering and interactive connections remain later UI integrations. No live request
-or CLI smoke is claimed here; exercised component verification belongs in PLAN.md.
+rendering remains a later dashboard integration. C10 supplies the separate account
+screen. No live request or CLI smoke is claimed here; exercised component
+verification belongs in PLAN.md.
 
 ## Claude Platform Console library (C05)
 
@@ -152,8 +258,8 @@ Sign in to the first-party Console outside this application; supply only your ow
 session's cookie value through `CredentialStore`, never a password, full Cookie
 header, HAR, or browser-store import. Persistent storage uses the supported secure
 backend; explicit session-only storage is nonpersistent and still subject to
-process-memory risk. No interactive secret prompt or warning screen exists yet;
-later integration must display the sensitivity warning before accepting a session.
+process-memory risk. The C10 account screen displays the sensitivity warning before
+accepting a session; the adapter itself does not provide an interactive prompt.
 The cookie is sent only to platform.claude.com, never api.anthropic.com or claude.ai.
 
 Discovery candidates require the exact `api` capability and a validated `uuid`
@@ -163,7 +269,7 @@ before saving the account. An absent or no-longer-accessible selection requires
 reselection or permission guidance, never automatic switching. Discovery does not
 persist an account or silently choose an organization. HTTP 401 and discovery
 403 require reconnection; credits 403 means selected-organization billing permission
-is denied. A UI for selection/reconnection remains planned.
+is denied. The C10 account screen supplies explicit selection and reconnect guidance.
 
 `tranches` are purchased grants; `promo_tranches` are promotional grants. Category
 balances sum **all** grants not known to be expired, not just the soonest-expiring
@@ -291,8 +397,8 @@ OpenAI API consumption, local message counts, and user-entered caps are not
 fallbacks. Returning this blocked state does not complete the requested metric.
 
 A local labeled ChatGPT account profile may exist without a credential. Optional
-user-provided bearer/API-key storage does **not** enable weekly retrieval; there
-is no working ChatGPT connection/setup command yet. Do not supply a cookie or
+user-provided bearer/API-key storage through the account screen does **not** enable
+weekly retrieval; there is no ChatGPT setup command. Do not supply a cookie or
 password, extract browser sessions, or invent an OAuth client to unblock it.
 No ordinary ChatGPT live quota integration or authenticated acceptance is claimed.
 
@@ -454,13 +560,14 @@ chained, unrecognized, and subclassed backends are rejected; unavailable or lock
 keyring operations raise `CredentialError`, never silently fall back to memory
 or plaintext. `get(ref)` retrieves and `delete(ref)` removes this tool's stored
 credential; neither operates on external Claude/Grok login files or revokes a
-remote session. Deleting account metadata and deleting its local secret are
-separate library operations, not an interactive account-removal workflow yet.
+remote session. The C10 account manager coordinates account metadata and local-secret
+removal with confirmation; the low-level store operations remain separate calls.
 
 No real-keyring acceptance or C02 check outcome is claimed here. Python cannot
 guarantee memory zeroization, and a reference is not itself a secret-management
-permission boundary. Masked prompts and account-removal confirmation are later UI
-integrations; C08 supplies cancellation of obsolete in-flight provider work.
+permission boundary. C10 adds masked inputs and account-removal confirmation; C08
+supplies cancellation of obsolete in-flight provider work when account updates
+are delivered to the scheduler.
 
 ## Credential resolution and transport libraries (C03)
 
@@ -518,7 +625,7 @@ All other paths, origins, credential-kind/provider combinations, and API keys ar
 rejected for these reads. There is no user-configurable base URL. Console accepts
 only a cookie value, not a full Cookie header or HAR; invalid cookie delimiters
 and controls are rejected. Treat a `sessionKey` as a high-sensitivity session, not
-a limited API key. A later connection UI must warn before accepting it and require
+a limited API key. The C10 connection screen warns before accepting it and requires
 explicit organization selection; transport does not discover or select accounts.
 
 Production transport verifies TLS, uses GET only, disables redirects and implicit
@@ -532,8 +639,9 @@ response body, secret, credential path, or arbitrary exception text. A valid 429
 `Retry-After` is preserved with a minimum 60-second deadline; the C08 scheduler
 implements retry/backoff outside this transport boundary.
 
-No account setup or key-management command works at this stage. Do not paste
-credentials into chat, issues, shell arguments, documentation, or fixtures. No
+No account setup or key-management CLI command works at this stage. Use the Textual
+account screen, not shell arguments, for interactive secrets. Do not paste
+credentials into chat, issues, documentation, or fixtures. No
 browser extraction, token refresh protocol, live-provider acceptance, or real
 OS-keyring acceptance is claimed. Private HTTP routes and product fields remain
 version-sensitive, not official public API guarantees. Researched sources and

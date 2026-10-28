@@ -151,3 +151,12 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   demo time and `offline_demo` provenance must accompany fictional labels and all
   samples, especially ready ChatGPT data, so a useful display scenario cannot be
   mistaken for a working upstream contract or authenticated metric acceptance.
+- Treat account editing as staged user intent, not immediate credential mutation.
+  Keep saved secrets out of prefilled inputs and display text; use masked keyboard
+  input, explicit replacement/removal confirmation, and clear pending secrets on
+  cancellation. External first-party references are never owned login files to delete.
+- Account metadata and OS-keyring operations are separate stores, not one atomic
+  transaction. Preserve actionable failure reporting and the distinction between
+  durable references and explicit process-only secrets. Notify the scheduler after
+  committed account changes so obsolete generations cannot publish; do not equate
+  local removal with remote revocation or treat credential storage as live support.
