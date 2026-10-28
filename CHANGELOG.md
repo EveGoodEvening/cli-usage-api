@@ -2,35 +2,44 @@
 
 ## Unreleased
 
-### Changed — Codex atomic cutover implemented and verified offline
+### Changed — Codex atomic cutover complete and independently reviewed
 
 - User-corrected GPT scope is Codex quota, not ordinary ChatGPT chat-model usage.
-  The single cutover authorized by reviewed planning commit `e3190b9` is implemented.
-  Integrated offline checks and synthetic/terminal proofs passed; independent
-  implementation review, draft closure and authorized live comparison remain pending.
+  The single cutover authorized by reviewed planning commit `e3190b9` is complete.
+  Draft `2d7ea6b` received four clean independent implementation reviews and two
+  clean final split reviews; no fixes were required. Final integrated offline
+  checks and synthetic/terminal proofs passed. Authorized live comparison remains
+  unexercised, not an active ordinary-ChatGPT chat blocker.
 - Replaced the old runtime provider/CLI identity with `codex_subscription` /
   `codex-subscription`, file-only `codex_auth_file`, and the private version-sensitive
   WHAM usage contract. Default login reference uses `$CODEX_HOME/auth.json` when
   CODEX_HOME is nonempty, otherwise `~/.codex/auth.json`; no manual bearer, API-key
   or Codex-keyring fallback.
+- Official file-backed setup: set `cli_auth_credentials_store = "file"` in Codex's
+  `config.toml`, then run `codex login` outside this app for ChatGPT sign-in; see
+  the official [authentication guide](https://developers.openai.com/codex/auth).
+  No force-file CLI flag is assumed; managed policy may prevent this storage choice.
 - Main weekly quota follows 604800-second duration, not primary/secondary position;
   5h and other reported windows/pools are optional distinct extras. Use absolute
   `reset_at` seconds, never a timestamp invented from relative reset or plan name.
 - Explicit TTY `usage accounts migrate-chatgpt-to-codex` requires whole-set consent,
   disables and detaches legacy profiles, preserves other providers/local identities,
   and retains old secrets detached/unmanaged without reading, reusing, transmitting
-  or deleting them.
-- Post-cleanup orchestrator gate: **1,098 tests passed in 28.59 seconds**, Ruff lint
-  passed, the **44-file** formatting check passed, and all **17 source files** had
-  clean language-server diagnostics. Installed `usage --help` passed.
-- Synthetic auth resolver → Codex provider → transport smoke passed. Actual
-  Scheduler proof passed initial/manual refresh, two scheduled intervals, retry,
-  stale state, replacement/removal and stop. Offline demo component smoke passed
-  **4 healthy / 8 errors snapshots**.
+  or deleting them. Configure the replacement's file-backed login separately before
+  enabling it; migration itself never authorizes a Codex read.
+- Final orchestrator gate: `uv sync --locked --group dev` succeeded; **1,098 tests
+  passed in 30.20 seconds**, Ruff lint passed and the **44-file** formatting check
+  passed. Earlier clean language-server diagnostics for all **17 source files**
+  apply to unchanged source. Installed `usage --help` passed.
+- Synthetic auth resolver → Codex provider → transport proof passed. Actual
+  Scheduler proof passed initial/manual refresh, two scheduled intervals, retry
+  embargo, last-known/reset-stale state, replacement/removal and stop. Offline demo
+  component proof passed **4 healthy / 8 errors snapshots**.
 - Actual installed-CLI real-PTY proof passed migration decline/cancel/non-TTY
   unchanged paths, affirmative mixed-config migration, file-backed edit/reconnect,
   enable/disable and isolated empty-live/account flows. Four installed-entry
   healthy/errors PTY runs rendered and restored terminals on normal quit and Ctrl-C.
+- Isolated installed `usage accounts list` exited 0 with no accounts.
 - No real Codex auth files, user secrets, network or keyring were used. The private
   source is not a supported public API; authenticated compatibility and same-account
   weekly/reset comparison remain unknown, not established by synthetic proof.

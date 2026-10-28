@@ -4,9 +4,9 @@ A local terminal dashboard for subscription usage and Claude Platform credit
 balances. The installed `usage` CLI opens a live dashboard, deterministic offline
 demo, or interactive account/key management. **The user-corrected GPT requirement
 means Codex weekly quota, not ordinary ChatGPT chat usage. The atomic cutover is
-implemented and its integrated offline checks and synthetic/terminal proofs passed.
-Draft review and closure remain pending under PLAN.md §11, as does authorized live
-Codex comparison. Real OS-keyring persistence remains unexercised.** This is a terminal TUI.
+implemented; final integrated offline checks, synthetic/terminal proofs, four
+independent implementation reviews and two final split reviews passed cleanly.
+Authorized live Codex comparison and real OS-keyring persistence remain unexercised.** This is a terminal TUI.
 
 To try it, run `uv sync --locked` then `uv run usage --demo`. To configure your
 own accounts, run `uv run usage` and press `a`; enter credentials only in the
@@ -59,7 +59,7 @@ installed `usage` entry point and matching account/key prompts:
 | Claude 5h / weekly | Subscription used/remaining percentages and server reset from private OAuth usage | Library adapter implemented; no authenticated acceptance |
 | Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Library parser implemented; availability is plan/response dependent, no authenticated acceptance |
 | Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Console library adapter implemented; private version-sensitive contract, no authenticated acceptance |
-| Codex weekly (7d) | Main Codex quota selected by 604800-second duration; private WHAM read using file-backed Codex login | Implemented; integrated offline proof passed, implementation review and authenticated acceptance pending |
+| Codex weekly (7d), plus reported optional 5h | Main Codex quota selected by 604800-second duration, server reset; private WHAM read using file-backed Codex login | Implemented and independently reviewed clean; final integrated offline proof passed, authenticated acceptance unexercised |
 | Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Library adapter implemented; private version-sensitive contract, no authenticated acceptance |
 
 Grok product shares must not become independent `100 - share` allowances. Remaining
@@ -71,27 +71,31 @@ claimed as working or accepted.
 
 ## Current exercised Codex offline acceptance
 
-The orchestrator's post-cleanup integrated gate recorded **1,098 tests passed in
-28.59 seconds**, Ruff lint passed, the **44-file** formatting check passed, and all
-**17 source files** had clean language-server diagnostics. Installed `usage --help`
-passed. This is the current cutover result, not the historical 851-test gate below.
+The orchestrator's final integrated gate recorded `uv sync --locked --group dev`
+succeeded, **1,098 tests passed in 30.20 seconds**, Ruff lint passed and the
+**44-file** formatting check passed. Earlier clean language-server diagnostics for
+all **17 source files** apply to unchanged source. Installed `usage --help` passed.
+This is the current cutover result, not the historical 851-test gate below.
 
 - A synthetic private auth file passed through the real resolver, Codex provider
   and transport with an injected HTTP transport; no live request was made.
 - Actual Scheduler proof passed initial/manual refresh, two scheduled intervals,
-  retry embargo, stale state, replacement/removal and stop behavior.
+  retry embargo, last-known/reset-stale state, replacement/removal and stop behavior.
 - Offline demo component smoke passed **4 healthy / 8 errors snapshots**. Four
   installed-entry healthy/errors real-PTY runs rendered successfully and restored
   the terminal on normal quit and Ctrl-C.
 - Actual installed-CLI real-PTY migration proof passed decline/cancel and non-TTY
   unchanged paths, affirmative mixed-config migration, file-backed edit/reconnect,
   enable/disable and isolated empty-live/account flows.
+- Isolated installed `usage accounts list` exited 0 with no accounts.
+- Four independent implementation reviews and both final split reviews were clean;
+  no fixes were required. The reviewed draft is `2d7ea6b`; planning is `e3190b9`.
 
 No real Codex auth files, user secrets, network or real keyring were used. These
 results verify the implemented offline cutover, not authenticated quota accuracy,
-supported-public-API availability or live compatibility. Independent implementation
-review/draft closure and same-account authorized weekly/reset comparison remain
-pending; the latter must use a locally authorized file-backed Codex login.
+supported-public-API availability or live compatibility. The implementation and
+offline review closeout are complete. Same-account authorized weekly/reset
+comparison remains unexercised and requires a locally authorized file-backed login.
 
 ## Historical exercised offline acceptance — before Codex cutover
 
@@ -136,10 +140,10 @@ visible and selectable through the existing details/provenance surface, without
 inventing independent remaining allowances; refresh adds/removes extras while
 preserving selected metric identity and account filtering. The post-fix offline
 checks above passed, and both independent rereviews were clean.
-PLAN.md §11 supersedes the old ordinary-ChatGPT acceptance tasks with the implemented,
-offline-verified Codex cutover and a separate authorized live comparison. Independent
-implementation review/closure and providers' live prerequisites remain open; full
-goal completion is not claimed.
+PLAN.md §11 supersedes the old ordinary-ChatGPT acceptance tasks with the completed,
+offline-verified and independently reviewed Codex cutover and a separate authorized
+live comparison. Ordinary-ChatGPT chat blockers are not active Codex blockers;
+providers' live prerequisites remain unexercised, so full live acceptance is not claimed.
 
 ## Install and run
 
@@ -151,7 +155,7 @@ credential-import and persistence target. Run from the repository root:
 
 先执行 `uv sync --locked`，再运行 `uv run usage --demo` 查看离线演示；
 这不是网页，也不会启动浏览器或 Web 服务。当前 GPT 需求已更正为 **Codex 配额**，
-不是普通 ChatGPT 聊天用量；原子切换已实现并通过集成离线检查，独立实现审查、收尾及真实账号验收仍待完成。
+不是普通 ChatGPT 聊天用量；原子切换、最终集成离线检查和独立审查均已完成，真实账号对照验收尚未执行。
 运行 `uv run usage` 打开实时模式，按 `a` 管理账号、按 `r` 请求刷新、按 `?`
 查看帮助、按 `q` 退出。无账号时先显示配置引导；连接步骤见下方说明。
 Claude/Grok 须先在官方工具登录；Console 只手动输入自己的 `sessionKey` 值并
@@ -466,14 +470,19 @@ Service only; plaintext, alternative/chained, and null backends are rejected.
   identity; the saved nonsecret selector binds future reads. A supported manual
   bearer is also available. The tool never runs login, refreshes credentials,
   changes file permissions, or deletes the external login file.
-- **Codex:** configure an existing file-backed login in official Codex outside this
-  app, add `codex-subscription`, and choose **External Codex auth file**. `default`
-  reads `$CODEX_HOME/auth.json` when CODEX_HOME is nonempty, otherwise
-  `~/.codex/auth.json`; an explicit private file may select another login. Only
-  `codex_auth_file` is supported: no manual bearer or API key. Keyring-only,
-  auto-without-file and ephemeral Codex login are unavailable; configure file-backed
-  storage externally. The app never launches Codex, probes its keyring or refreshes
-  or rewrites the login file.
+- **Codex:** use the official CLI outside this app. In Codex's `config.toml`, set
+  `cli_auth_credentials_store = "file"`, then run `codex login` and complete its
+  first-party ChatGPT sign-in. These are documented in the official
+  [authentication and credential-storage guide](https://developers.openai.com/codex/auth);
+  no force-file CLI flag is required or assumed. Treat the resulting auth file as
+  a password; do not paste it into chat. Add `codex-subscription` in this app and
+  choose **External Codex auth file**. `default` reads `$CODEX_HOME/auth.json` when
+  CODEX_HOME is nonempty, otherwise `~/.codex/auth.json`; an explicit private file
+  may select another login. Only `codex_auth_file` is supported: no manual bearer
+  or API key. Keyring-only, auto-without-file and ephemeral Codex login are
+  unavailable. The app never launches Codex, probes its keyring or refreshes or
+  rewrites the login file. Managed Codex policy may prevent changing storage;
+  without an eligible private file this integration cannot connect.
 
 For other providers, API keys are local storage only, not substitutes for provider
 OAuth/session credentials. Codex rejects API-key storage. Reconnect does not perform
@@ -681,8 +690,8 @@ Converting a rounded float back to a decimal cannot recover the wire value. C06
 review reproduced aggregate `42.5` with raw numeric Build share
 `43.500000000000000000000000000001` and Chat `0` incorrectly accepted as READY,
 although the discrepancy exceeds one percentage point. The decoding correction
-and raw-numeric boundary regression coverage are pending separate verification;
-the earlier green component smoke does not verify this case.
+and raw-numeric boundary regressions are included in the final integrated offline
+gate above; the earlier green component smoke alone did not verify this case.
 
 In the normalized API, product consumption is carried in `Metric.detail`, with
 `quota=None`: `QuotaValue` would imply an independent remaining allowance.

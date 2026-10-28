@@ -7,10 +7,10 @@ fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Gro
 billing, provider-registry, polling/freshness and offline-source libraries, a
 Textual account manager/dashboard, and the production `usage` CLI. The corrected
 scope is **Codex quota**, not ordinary ChatGPT chat usage. The atomic Codex cutover
-is implemented and integrated offline verification passed under PLAN.md §11;
-independent implementation review and draft closure remain pending. No authenticated
-provider or real OS-keyring acceptance is claimed. Exact exercised evidence remains
-in [PLAN.md](PLAN.md).
+is complete under PLAN.md §11: final integrated offline verification, four
+independent implementation reviews and both final split reviews passed cleanly,
+with no fixes required. No authenticated provider or real OS-keyring acceptance
+is claimed. Exact exercised evidence remains in [PLAN.md](PLAN.md).
 
 Domain records are not a secure storage service. A credential value excluded from a
 representation is not encrypted or erased from process memory. Do not serialize
@@ -358,9 +358,13 @@ exposed, revoke or replace it through the relevant first-party service.
 - Read only an existing private file: `$CODEX_HOME/auth.json` when CODEX_HOME is
   nonempty, otherwise `~/.codex/auth.json`, or an explicit selected file. Preserve
   owner/mode/no-follow/size/stability checks. Keyring-only, auto-without-file and
-  ephemeral Codex storage are unavailable; configure file-backed login externally.
-  The app does not probe Codex keyring or launch Codex; verification used only
-  synthetic private auth files, never real Codex auth files or user secrets.
+  ephemeral Codex storage are unavailable. Outside this app, configure Codex's
+  `config.toml` with `cli_auth_credentials_store = "file"` and run `codex login`
+  for first-party ChatGPT sign-in, as documented in the official
+  [authentication guide](https://developers.openai.com/codex/auth). Managed policy
+  may prohibit that storage choice. No force-file CLI flag is assumed. The app
+  does not probe Codex keyring or launch Codex; verification used only synthetic
+  private auth files, never real Codex auth files or user secrets.
 - Bearer is only `tokens.access_token`; selected account is `tokens.account_id`,
   falling back only when absent to decoded ID-token payload
   `["https://api.openai.com/auth"]["chatgpt_account_id"]`. Invalid explicit ID is
@@ -390,15 +394,22 @@ exposed, revoke or replace it through the relevant first-party service.
   never reads, reuses, transmits or deletes them, calls the secret backend or deletes
   external files. Separate deliberate owner/backend deletion is not migration
   cleanup. Configure file-backed auth before enable.
-- The orchestrator recorded 1,098 passing tests (28.59 seconds), Ruff lint, 44-file
-  formatting and clean diagnostics for all 17 source files. Synthetic resolver →
-  provider → transport, actual Scheduler lifecycle, offline demo component and
-  installed-entry PTY proofs passed. Installed-CLI real-PTY proof exercised
-  unchanged decline/cancel/non-TTY paths, affirmative mixed-config migration and
-  file-backed edit/reconnect and enable/disable. No real auth files, user secrets,
-  network or keyring were used. These are offline security/behavior proofs, not a
-  supported public API or successful same-account live quota comparison; independent
-  implementation review/closure and authorized live acceptance remain pending.
+- The orchestrator's final `uv sync --locked --group dev` succeeded; 1,098 tests
+  passed in 30.20 seconds, Ruff lint and 44-file formatting passed. Earlier clean
+  diagnostics for all 17 source files apply to unchanged source. Synthetic
+  resolver → provider → transport and actual Scheduler initial/manual/two-interval,
+  retry embargo, last-known/reset-stale, replacement/removal/stop proofs passed.
+  Offline demo produced 4 healthy / 8 error snapshots; four installed-entry demo
+  PTY runs rendered and restored terminals on quit/Ctrl-C. Installed-CLI real-PTY
+  proof exercised unchanged decline/cancel/non-TTY paths, affirmative mixed-config
+  migration, file-backed edit/reconnect, enable/disable and empty-live/account
+  flows. Isolated installed account listing exited 0 with no accounts; installed
+  help passed. Four implementation reviews and two final split reviews were clean,
+  requiring no fixes. No real auth files, user secrets, network or keyring were
+  used. These completed offline security/behavior proofs do not establish a
+  supported public API or same-account live quota comparison; authorized live
+  acceptance remains unexercised. Historical ordinary-chat blockers are not active
+  Codex blockers.
 
 ## Implemented C08 scheduler boundary
 

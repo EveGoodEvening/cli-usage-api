@@ -2,13 +2,13 @@
 
 ## 0. Status, purpose, and scheduling authority
 
-Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex task has implemented and integrated-verified its single atomic cutover under §11; green draft, implementation review and closure remain pending. Other providers' live prerequisites remain open.
+Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex single atomic cutover under §11 is closed for implementation, verification, documentation and independent review at green draft `2d7ea6b`; final tracker-snapshot commit follows and its hash is not yet known. Authorized live acceptance remains unexercised.
 
 Original goal: **终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。**
 
 **Current corrected goal:** the user explicitly means **Codex quota**, not ordinary ChatGPT chat-model usage. §11 is the bounded authoritative cutover amendment: it supersedes the old GPT scope, blocked-capability contract, scheduling/acceptance instructions and “only accounting remains” conclusions wherever they conflict. Other providers and all recorded C01–C14 evidence retain their original meaning. Do not restart C01–C14 or claim their checks verify Codex.
 
-Independent planning reviews `agent://codex-plan-review-1` and `agent://codex-plan-review-2` were clean; reviewed planning commit `e3190b9` exists. All eight §11 units have landed and their integrated offline/local proof, including post-cleanup checks, passed. Code verification and authenticated metric acceptance remain separate: green draft, independent implementation reviews and closure are pending; authorized live observations remain unexercised. No worker checks, browser activity or real credential reads are authorized.
+Independent planning reviews `agent://codex-plan-review-1` and `agent://codex-plan-review-2` were clean; reviewed planning commit `e3190b9` exists. All eight §11 units, bounded docs/Lessons, integrated offline/local proof, green draft `2d7ea6b`, four independent implementation reviews and two final split reviews are complete and clean; no review fixes were required. The final orchestrator gate passed **1098 tests in 30.20s**, Ruff check and **44 files already formatted**. Code closure is not authenticated metric acceptance: the 12 current unchecked live/integration prerequisites are quoted in §11.8. No worker checks, browser activity or real credential reads are authorized.
 
 ### Durable progress convention
 
@@ -18,10 +18,10 @@ A checked chunk heading records implementation/documentation landed and orchestr
 
 | Field | Current value |
 |---|---|
-| Planning | §11 independently reviewed clean by both planning reviewers; planning commit `e3190b9` exists. All eight atomic-cutover units implemented and integrated-verified; draft/review/closure pending. No live acceptance claimed; historical C01–C14/final-fix evidence unchanged |
+| Planning | §11 planning reviews clean; planning commit `e3190b9`. All eight atomic-cutover units, docs/Lessons, verification and implementation/final reviews complete; scoped chunk closed at green draft `2d7ea6b`. No live acceptance claimed; historical C01–C14/final-fix evidence unchanged |
 | Planning commit | `6f731df57990b6512387ec481ccb693a214d1617` — `docs(plan): record reviewed usage implementation plan` |
-| Last closed implementation chunk | C14 — scoped verification/acceptance-record chunk only; green draft `1d23bfb`, independent static per-chunk reviews `agent://c14-review-1` and `agent://c14-review-2` clean; no review fixes or separate fix verification required. Final accounting commit not yet recorded; original goal not complete |
-| Next runnable action | Record green draft and obtain independent implementation reviews of the one §11 atomic cutover; separately verify any resulting fixes before closure. No draft/review/closure hash or outcome yet supplied; no C01–C14 restart or intermediate unit gates |
+| Last closed implementation chunk | §11 atomic Codex cutover — S1/S2/W/T/U/V/D/R implementation, integrated verification, bounded docs/Lessons and independent reviews closed at green draft `2d7ea6b`; no review fixes required. Final tracker-snapshot commit not yet recorded; live acceptance not complete |
+| Next runnable action | Commit this completed tracker snapshot; hash not yet known. No implementation, docs, review, gate or smoke work remains runnable. Next user action is externally configuring/authorizing an existing file-backed Codex login and selecting that account in normal TUI configuration, then permitting same-account live/UI comparison; never send secrets through chat |
 | Implementation / docs / Lessons | C01-A package/domain and C01-B initial `uv.lock` landed; D(C01) and review follow-on completed bounded docs and Lessons. C02 implementation and D(C02) completed `README.md`, `CHANGELOG.md`, `SECURITY.md`, and repo-root `AGENTS.md`; recorded Lessons cover stable sibling locking/reread-under-lock mutation and exact secure-backend policy with explicit session-only isolation. C03 transport/credential-resolution implementation and bounded documentation/Lessons completed in green draft `5a9cc60`. C04 Claude subscription adapter implementation and D(C04) completed `README.md`, `CHANGELOG.md`, `SECURITY.md`, and repo-root `AGENTS.md`; Lessons preserve quota/window independence, scoped Fable identity/inactive/conflict semantics, provider-local timestamp heuristics, and quota/reset independence clarified by review |
 | C05 implementation / docs | Console balance adapter, organization discovery, fixtures/tests, and bounded documentation landed. Closed with full green gates, Console LSP diagnostics, actual component smoke, green draft `98e0c6d`, and clean independent reviews; no review fixes required; closure commit `8e74532` |
 | C06 implementation / docs | Grok billing adapter, product-share fixtures/tests, and bounded documentation/Lessons landed. Approved detail-only product consumption representation avoids implicit independent quota remaining. Review-fix documentation/Lessons record direct Decimal HTTP decoding and raw-numeric boundary tests. Closed with final green gates, actual component/regression smoke, green draft `515b4f4`, separately verified fix `9df9232`, and clean independent rereviews; closure commit `6cf9386` |
@@ -72,8 +72,8 @@ A checked chunk heading records implementation/documentation landed and orchestr
 | Final split review / finding / evidence | Four independent slices completed: `agent://final-split-review-1`, `agent://final-split-review-3`, and `agent://final-split-review-4` clean; `agent://final-split-review-2` found one P2 producer/consumer defect. Grok emits sanitized additional product metrics and the scheduler retains them, but the TUI enumerated only required IDs. Supplied actual UsageApp/Pilot synthetic-extra-snapshot reproduction emitted four Grok metrics while overall visible rows stayed **10 → 10**, omitting the extra product. This is exercised offline UI evidence, not authenticated-provider acceptance |
 | Final review correction / docs / Lessons / verification | Separately verified fix `d653397` retains every required row first, then deduplicated snapshot extras in emission order; refresh adds/removes extras while preserving selected metric identity, account filtering and existing details/provenance/shared-pool semantics. Coordinated PLAN/README/CHANGELOG and repo-root Lessons record consumer visibility. Initial post-correction **851 passed in 29.59s** and **2 ISC004 findings** at `tests/test_app.py:215` and `tests/test_app.py:220` are superseded by the corrected final green gate: `uv sync --locked --group dev` succeeded; `uv run pytest -q`: **851 passed in 28.90s**; `uv run ruff check .`: passed; `uv run ruff format --check .`: **43 files already formatted**; all **17 source LSP diagnostics clean**. Installed `usage --help`, four healthy/errors installed-entry real-PTY runs (`x`→`q` / Ctrl-C, rendered metrics/restoration true), installed CLI real-PTY CRUD/cancel/non-TTY refusal without writes, and empty-live manager Back→dashboard→`q` / Ctrl-C passed. Additional actual real-PTY regression displayed Other `10` and provenance, refresh removed the extra while retaining required rows, and exited cleanly. Independent static rereviews `agent://final-fix-rereview-1` and `agent://final-fix-rereview-2` both clean. No unresolved finding, lint correction, verification, or rereview remains; final tracker/accounting commit pending. All 13 blocked acceptance tasks unchanged |
 | Live checks exercised | No-credential live-mode empty state/account dialogs passed. No authenticated provider request, user-secret import, real external-login import, or real keyring persistence exercised; no user secrets provided |
-| Current Codex prerequisite | Official read/auth/window contract established by static first-party source (§11); atomic implementation and integrated offline/local proof passed, including cleanup. Draft/review/closure pending. Live acceptance requires a locally authorized file-backed login, selected account/plan, permitted read and same-account first-party usage UI comparison; unavailable/unexercised, not an upstream-contract blocker |
-| Next scheduling action | Green draft, independent implementation reviews and closure of §11's integrated-verified atomic cutover; separately verify any review fixes. Old §9 ordinary-ChatGPT tasks are historical and superseded by Codex code/live acceptance in §11. Other providers' live prerequisites unchanged |
+| Current Codex prerequisite | Official read/auth/window contract established by static first-party source (§11); atomic code/docs/verification/review scope closed at `2d7ea6b`. Live acceptance requires a locally authorized file-backed login, selected account/plan, permitted read and same-account first-party usage UI comparison; unavailable/unexercised, not an upstream-contract blocker |
+| Next scheduling action | Commit this tracker snapshot; no fabricated final hash. Thereafter only authorized local user configuration/live observations remain. Old §9 ordinary-ChatGPT code/live tasks are explicitly superseded, not active blockers. Non-Codex historical live prerequisites remain unexercised and unchecked |
 
 ## 1. Historical scope and truthfulness matrix — Codex replacement in §11
 
@@ -652,7 +652,7 @@ Scheduling order: planning Conventional Commit → C01-A → C01-B → D(C01) �
 
 ### Next exact bounded assignment
 
-Current bounded assignment: finish the draft/review/closure lifecycle of the single atomic Codex cutover in §11 following reviewed planning commit `e3190b9`. All eight units and required integrated offline/local component/terminal proof have passed, including the post-cleanup gate. Closed C01–C14 and fix `d653397` are historical and must not be redispatched or rechecked for bookkeeping. No user secrets, authenticated provider requests or real keyring persistence are established. Workers must not run tests, lint, formatters, gates, smoke, browser or commits; only the orchestrator exercises any separately required review-fix verification.
+Current bounded assignment: §11's single atomic Codex cutover is closed for implementation, integrated verification, bounded docs/Lessons and independent review, following planning commit `e3190b9` and green draft `2d7ea6b`. All eight units, four implementation reviews, two final split reviews and the final gate/component/terminal proof are complete; no fixes were required. Only commit of this completed tracker snapshot remains runnable; its hash is not yet known. Closed C01–C14 and fix `d653397` stay historical and must not be redispatched or rechecked for bookkeeping. The next user action is external file-backed Codex login authorization and normal TUI account configuration, not sharing secrets through chat. Authorized live comparison and non-Codex historical live prerequisites remain unexercised. Workers must not run tests, lint, formatters, gates, smoke, browser or commits.
 
 Resource rule for any later browser-capable or >2 GiB command: browser remains forbidden for this assignment. If an authorized later task changes that restriction, use `~/.omp/bin/heavy-gate`, inspect `free -m` and gate status before fan-out, width ≤2, finite gated commands async with timeout 0, and close owned processes. Ordinary Python unit tests and this stdlib PTY harness do not require a browser launch or heavyweight gate.
 
@@ -662,7 +662,7 @@ Resource rule for any later browser-capable or >2 GiB command: browser remains f
 
 The user corrected “GPT weekly” to **Codex weekly quota**. This is a scope correction, not discovery of ordinary-chat quota. Replace the blocked ordinary-ChatGPT capability cleanly; do not add a second provider or keep runtime aliases. Sections 1/3/4.4/7/8/9/10 and their old scheduling conclusions are historical wherever they assert GPT identities, prohibit Codex, or say no implementation remains. Preserve C01–C14 checks/commits as historical evidence, not Codex verification. No other provider requirement changes. This appendix is the only new plan/tracker; no competing plan or new C01–C14 sequence.
 
-Current status: **independent planning reviews clean; planning commit `e3190b9` exists; S1/S2/W/T/U/V/D/R implemented and integrated-verified, including cleanup; green draft, independent implementation reviews and closure pending; authenticated Codex acceptance unexercised**. Reviews `agent://codex-plan-review-1` and `agent://codex-plan-review-2` checked scope/contracts and were clean. Required component/terminal proof and the corrected Scheduler fixture passed; the final supplied gate is 1098 tests, Ruff check/44-file format check and all 17 source-file LSP diagnostics clean (§11.7). No implementation-review outcome, draft/closure commit or unknown hash is claimed. Workers ran no checks; browser, real credential reads and real upstream/keyring access were not used.
+Current status: **atomic Codex cutover closed for implementation, integrated verification, documentation/Lessons and independent review; planning commit `e3190b9`, green draft `2d7ea6b`; final tracker-snapshot commit pending with no known hash; authenticated Codex acceptance unexercised**. Planning reviews `agent://codex-plan-review-1` and `agent://codex-plan-review-2` were clean. Four implementation reviews `agent://codex-cutover-review-1`, `agent://codex-cutover-review-2`, `agent://codex-cutover-review-3`, `agent://codex-cutover-review-4` and final split reviews `agent://codex-final-split-review-1`, `agent://codex-final-split-review-2` were clean; no fixes or separate fix verification required. Final supplied gate: 1098 tests in 30.20s, Ruff check passed, 44 files already formatted; earlier 17 source-file LSP diagnostics remain clean with no source changes since. Required component/terminal proof passed (§11.7). Workers ran no checks; browser, real credential reads and real upstream/keyring access were not used.
 
 Primary-source contract anchors (static research, not authenticated observation):
 
@@ -751,9 +751,9 @@ Acceptance replacement: old §9's ordinary-ChatGPT **code** task is replaced by 
 
 ### 11.7 Atomic-cutover progress and proof ledger
 
-Only supplied/exercised evidence is recorded. The eight unit checkboxes below now
-record implementation plus integrated orchestrator verification, not worker checks,
-implementation review, commit or lifecycle closure.
+Only supplied/exercised evidence is recorded. All eight unit checkboxes record
+implementation plus integrated orchestrator verification. Draft, review, final gate
+and scoped lifecycle closure are separately backed below; no live success is implied.
 
 - [x] Independent planning reviews: `agent://codex-plan-review-1` and
   `agent://codex-plan-review-2` clean; reviewed planning commit `e3190b9` exists.
@@ -770,10 +770,17 @@ implementation review, commit or lifecycle closure.
   LSP diagnostics clean. No separate successful LSP references-query evidence supplied.
 - [x] Synthetic auth/resolver/provider/transport, corrected Scheduler, offline demo,
   migration/file-only installed CLI and installed-entry real-PTY proof.
-- [ ] Green draft commit: pending; no hash supplied.
-- [ ] Independent implementation reviews and any separately verified review fixes:
-  pending; clean planning reviews are not implementation reviews.
-- [ ] Atomic-cutover closure/accounting commit: pending; no hash supplied.
+- [x] Green draft commit: `2d7ea6b`, following reviewed planning commit `e3190b9`.
+- [x] Independent implementation reviews: `agent://codex-cutover-review-1`,
+  `agent://codex-cutover-review-2`, `agent://codex-cutover-review-3` and
+  `agent://codex-cutover-review-4` clean; no review fixes required.
+- [x] Final split reviews: `agent://codex-final-split-review-1` and
+  `agent://codex-final-split-review-2` clean; no fixes required.
+- [x] Final orchestrator gate: locked dev sync passed; 1098 tests in 30.20s;
+  Ruff check passed; 44 files already formatted. Earlier 17-source LSP clean
+  evidence remains applicable: source unchanged since that diagnostic check.
+- [x] Atomic-cutover scoped implementation/verification/docs/review closure recorded
+  at green draft `2d7ea6b`; final tracker-snapshot commit follows, hash not yet known.
 - [ ] Live Codex acceptance: locally authorized existing file-backed Codex login,
   explicit selected account/plan, successful permitted WHAM read and weekly
   utilization/reset comparison with that same account's first-party Codex usage UI
@@ -787,13 +794,13 @@ implementation review, commit or lifecycle closure.
 | Initial `uv run pytest -q` / Ruff check | **2 failed, 1085 passed in 30.83s**; **2 lint findings**. API-key UI fixture used an invalid Codex source; duplicate weekly usage conflict needed planned recognized-identity `UNKNOWN`/`PARTIAL` behavior rather than `SCHEMA_ERROR`. Corrections landed; this is historical failure evidence, not the current gate |
 | Pre-cleanup `uv run pytest -q` | **1099 passed in 29.01s**; superseded by the post-cleanup result below, not evidence for later edits |
 | Pre-cleanup `uv run ruff check .` / `uv run ruff format --check .` | Passed / **44 files already formatted**; historical pre-cleanup result |
-| Final post-cleanup `uv run pytest -q` | **1098 passed in 28.59s**. One obsolete capability test was removed; the older 1099 count is not the final count |
-| Final post-cleanup `uv run ruff check .` | **All checks passed** |
-| Final post-cleanup `uv run ruff format --check .` | **44 files already formatted** |
-| Source LSP diagnostics | **All 17 source-file diagnostics clean**; earlier workers' unavailable-device reports do not negate this later orchestrator evidence. No separate references-query success claimed |
-| `uv run usage --help` | Passed installed CLI help |
-| `uv run python scripts/tui_smoke.py --scenario healthy` and `uv run python scripts/tui_smoke.py --scenario errors` | Supplied four installed-entry real-PTY healthy/errors runs passed, covering normal `x` -> `q` and Ctrl-C; rendered metrics and terminal restoration true |
-| `uv sync --locked --group dev` / standalone `uv run usage accounts list` | No separate exact-command outcome supplied here; the command specification alone is not execution evidence |
+| Post-cleanup `uv run pytest -q` before final gate | **1098 passed in 28.59s**. One obsolete capability test was removed; historical intermediate result, superseded for final gate by 30.20s below |
+| Final `uv run pytest -q` | **1098 passed in 30.20s** |
+| Final `uv run ruff check .` / `uv run ruff format --check .` | **All checks passed** / **44 files already formatted** |
+| Source LSP diagnostics | **All 17 source-file diagnostics clean** at the earlier orchestrator check; source unchanged since. No separate references-query success claimed |
+| Installed `usage --help` | Passed; no fabricated wrapper/options |
+| `uv run python scripts/tui_smoke.py --scenario healthy` and `uv run python scripts/tui_smoke.py --scenario errors` | Four installed-entry real-PTY healthy/errors runs passed: normal `x` -> `q` and Ctrl-C; rendered metrics and terminal restoration true |
+| Final `uv sync --locked --group dev` / isolated installed `usage accounts list` | Locked dev sync passed; isolated installed accounts list exited **0**, no accounts. No real login or keyring used |
 
 #### Supplied actual offline component and terminal proof
 
@@ -835,12 +842,57 @@ SECURITY, CHANGELOG and repo-root AGENTS Lessons reconciliation. All eight bound
 unit reports landed; the integrated evidence above, not those reports alone,
 establishes their checked implementation/verification status. Workers ran no checks.
 
-Provider-neutral diagnostic cleanup and obsolete capability-test removal landed;
-the final **1098-test / Ruff / 44-file format / 17-source diagnostics** evidence is
-post-cleanup and all green. No known component-proof failure remains open. Green
-draft, independent implementation reviews, any required separately verified review
-fixes, and closure remain pending. No draft/closure hash or implementation-review
-success is invented. Historical 851-test evidence remains pre-Codex only. No real
-Codex auth files, user secrets, network, keyring, authenticated metric comparison or
-other-provider live success was used or claimed.
+Provider-neutral diagnostic cleanup and obsolete capability-test removal landed.
+The final **1098-test / 30.20s / Ruff / 44-file format** gate is green; earlier
+**17-source diagnostics** remain clean with source unchanged since that check.
+No component-proof failure remains open. Green draft `2d7ea6b`, four clean
+implementation reviews and two clean final split reviews close this atomic chunk
+for implementation, verification and documentation/Lessons. No fixes were required.
+Only commit of this completed tracker snapshot remains runnable; no final hash is
+invented. Historical 851-test evidence remains pre-Codex only. No real Codex auth
+files, user secrets, network, keyring, authenticated metric comparison or other-
+provider live success was used or claimed.
 
+### 11.8 Exact remaining current-scope acceptance and final closeout
+
+**12 current unchecked acceptance items remain: one Codex live prerequisite and
+11 retained non-Codex/live-integration prerequisites from the historical §9 matrix.**
+There are **zero unchecked current implementation, documentation, review or gate
+tasks**. The two old ordinary-ChatGPT code/live cells remain visibly unchecked only
+as historical records: §11 explicitly supersedes both; neither is an active blocker,
+and neither is falsely marked done. Thus the document retains 14 literal unchecked
+checkboxes (13 historical matrix cells plus the current Codex live checkbox), but
+only the following 12 are applicable to current scope. Quoted wording is verbatim;
+retained historical checks are not marked complete by offline or synthetic proof.
+
+| Requirement | Exact remaining unchecked wording | Concrete prerequisite, not implementation work |
+|---|---|---|
+| Codex / live | “Live Codex acceptance: locally authorized existing file-backed Codex login, explicit selected account/plan, successful permitted WHAM read and weekly utilization/reset comparison with that same account's first-party Codex usage UI at the same observation. This prerequisite is unavailable/unexercised, **not an upstream-contract blocker**; no credentials are requested through chat.” | Locally authorized existing file-backed Codex login, selected identity/eligible plan, normal TUI account configuration, permission for the read and corresponding same-account first-party UI observation. Keyring-only auth is unsupported, not a completed import |
+| Claude 5h / retained live | “Eligible credential; compare used/remaining/reset” | Locally authorized eligible Claude Code login or supported bearer/profile-read scope, private reference and matching first-party UI observation |
+| Claude weekly / retained live | “Same account/window matches first-party UI” | Same authorized eligible Claude account and corresponding weekly first-party UI observation |
+| Claude Fable / retained live | “Eligible plan returns validated scoped data; otherwise plan-specific unavailable recorded, not global completion” | Authorized eligible plan/seat and positively identified scoped response, or positive plan-specific exclusion evidence; absence alone is insufficient |
+| Platform purchased / retained live | “Selected org session returns purchased array; compare billing balance” | Authorized local Console session, selected billing-readable organization, purchased-array/explicit-empty evidence and matching billing UI |
+| Platform promotional / retained live | “Selected org returns promo array/explicit empty; compare included/promotional billing grants” | Authorized local Console session/selected billing-readable organization, promo-array/explicit-empty evidence and corresponding grant UI; no subtraction inference |
+| Grok aggregate / retained live | “Logged-in direct proxy matches account period/pool” | Authorized eligible Grok file login with selected scope/profile or supported bearer, billing permission, observed period/pool and same-account UI |
+| GrokBuild / retained live | “Actual product share and pool relationship observed” | Authorized selected Grok account and same-payload validated Build share/established pool relationship with first-party comparison |
+| GrokChat / retained live | “Actual product share and pool relationship observed” | Authorized selected Grok account and independent same-payload validated Chat share/established pool relationship with first-party comparison |
+| Accounts/keys / retained integration | “Actual secure keyring save/replace/delete or clearly session-only; external login import exercised” | Authorized available/unlocked supported encrypted backend or explicit session-only choice, plus authorized local external-login import with selected account/scope; now includes Codex file-backed import where claimed. Synthetic CRUD/import does not complete real integration |
+| Poll/stale/error / retained live | “Poll over at least two intervals without rate-limit bypass; last-known errors visibly stale” | Authorized configured live account and permitted observation across two real intervals with observed error/stale state, preserving retry deadlines; never deliberately provoke rate limiting |
+| Secret safety / retained integration | “No raw live captures; local keyring backend supported” | Authorized local supported encrypted-backend availability/unlock and secret lifecycle observation without raw secret captures; no real backend success yet claimed |
+
+**All-chunk close:** historical C01–C14 and `d653397` retain their scoped closures;
+the one §11 atomic Codex chunk (S1/S2/W/T/U/V/D/R) is now closed for code,
+integrated verification, docs/changelog/security/Lessons and independent review at
+green draft `2d7ea6b`. Four implementation and two final split reviews were clean;
+no fixes required. Final gate and actual offline component/installed terminal proof
+are recorded in §11.7. No newly doable implementation task, review, gate, smoke or
+documentation work remains. Only committing this completed tracker snapshot is
+runnable; its final hash is not yet known and is not fabricated.
+
+**Next user action:** configure/authorize an existing file-backed Codex login
+externally, select its private file reference and account in normal TUI
+configuration, then authorize a read and same-account Codex usage UI comparison.
+Do not send tokens, auth files, account IDs, raw responses or other secrets through
+chat. The 12 unchecked items require concrete local authorization, eligible
+account/plan/UI evidence or user backend/configuration, not an ordinary-ChatGPT
+upstream-contract repair. No authenticated or real-keyring success is claimed.

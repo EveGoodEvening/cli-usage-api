@@ -76,11 +76,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   edit/reconnect and enable/disable. Disabled/detached replacements must never
   resolve or transmit retained legacy secrets. Synthetic backend evidence is not
   real OS-keyring acceptance.
-- The atomic Codex implementation's current post-cleanup gate is 1,098 tests in
-  28.59 seconds, with Ruff lint, 44-file formatting and all 17 source diagnostics
-  clean. Keep this exercised baseline separate from historical 851-test results,
-  independent implementation review/draft closure and authorized live comparison;
-  those remaining review/live steps do not mean implementation is still in progress.
+- The atomic Codex cutover's final gate is 1,098 tests in 30.20 seconds after
+  locked dev sync, with Ruff lint and 44-file formatting passed. Earlier clean
+  diagnostics for all 17 source files apply to unchanged source. Four independent
+  implementation reviews and two final split reviews were clean, with no fixes
+  required. Keep this completed offline baseline separate from historical 851-test
+  evidence and unexercised authorized live/keyring acceptance; ordinary-chat
+  blockers do not apply to the current Codex contract.
 - A local message counter/custom cap or credential storage cannot repair absent
   quota semantics. Model a genuinely unresolved capability honestly; that historical
   C07 lesson does not make current Codex credential-free or upstream-blocked.
