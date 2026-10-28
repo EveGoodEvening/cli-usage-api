@@ -22,8 +22,8 @@ from usage_tui.domain import (
     SourceKind,
     SourceRef,
 )
-from usage_tui.providers.chatgpt import ChatGPTProvider
 from usage_tui.providers.claude import ClaudeProvider
+from usage_tui.providers.codex import CodexProvider
 from usage_tui.transport import Transport
 
 
@@ -37,7 +37,8 @@ async def test_all_required_provider_rows_values_and_details():
             "Fable",
             "购买余额",
             "赠送余额",
-            "ChatGPT",
+            "Codex weekly (7d)",
+            "Codex 5h",
             "GrokBuild",
             "GrokChat",
             "Grok 共享池",
@@ -101,21 +102,63 @@ def test_numeric_overage_and_unknown_never_become_zero():
     assert "未知" in metric_value(replace(metric, state=MetricState.UNKNOWN, quota=None))
 
 
-async def test_live_blocked_chatgpt_is_not_synthetic_success():
+async def test_live_codex_duration_rows_provenance_and_missing_weekly():
     account = Account(
         id="11111111-1111-4111-8111-111111111111",
-        provider=ProviderId.CHATGPT_SUBSCRIPTION,
-        label="Blocked",
+        provider=ProviderId.CODEX_SUBSCRIPTION,
+        label="Synthetic Codex",
+        credential_kind=CredentialKind.CODEX_AUTH_FILE,
+        credential_ref="synthetic-auth.json",
     )
-    snapshot = await ChatGPTProvider().fetch(account, None, DEMO_NOW)
-    # Rendering can be exercised before mounting; no scheduler or network needed.
-    app = UsageApp(mode="live", accounts=(account,), scheduler_factory=lambda *args, **kwargs: None)
-    app.snapshots[account.id] = snapshot
-    text = app._row_text(account, snapshot.metrics[0].id)
-    assert "blocked" in text and "upstream_contract_missing" in text
-    assert "不使用 Codex/Work" in text
-    assert "已用" not in text
-    assert "unresolved" in app.details(account, snapshot.metrics[0].id)
+    credential = ResolvedCredential(
+        account.provider,
+        CredentialKind.CODEX_AUTH_FILE,
+        "synthetic-secret",
+        "generation-1",
+        codex_account_id="synthetic-account",
+    )
+    bodies = [
+        {
+            "rate_limit": {
+                "primary_window": {"limit_window_seconds": 18000, "used_percent": 20},
+                "secondary_window": {"limit_window_seconds": 604800, "used_percent": 35},
+            }
+        },
+        {
+            "rate_limit": {
+                "primary_window": {"limit_window_seconds": 300, "used_percent": 8},
+            }
+        },
+    ]
+    http_transport = httpx.MockTransport(lambda _: httpx.Response(200, json=bodies.pop(0)))
+    transport = Transport(http_transport=http_transport)
+    provider = CodexProvider(transport)
+    app = UsageApp(mode="live", accounts=(account,), scheduler_factory=lambda *a, **kw: None)
+    try:
+        async with app.run_test() as pilot:
+            app.publish_snapshot(await provider.fetch(account, credential, DEMO_NOW))
+            assert [metric_id for _, metric_id in app.rows] == [
+                "codex.subscription.weekly",
+                "codex.subscription.five_hour",
+            ]
+            weekly = app._row_text(account, "codex.subscription.weekly")
+            five_hour = app._row_text(account, "codex.subscription.five_hour")
+            assert "Codex weekly (7d)" in weekly and "35%" in weekly
+            assert "Codex 5h" in five_hour and "20%" in five_hour
+            details = app.details(account, "codex.subscription.weekly")
+            assert "private_http" in details and "codex.wham.usage.v1" in details
+            app.publish_snapshot(await provider.fetch(account, credential, DEMO_NOW))
+            assert [metric_id for _, metric_id in app.rows] == [
+                "codex.subscription.weekly",
+                "codex.subscription.window.300",
+            ]
+            weekly = app._row_text(account, "codex.subscription.weekly")
+            assert "未知 / no data" in weekly and "已用 0" not in weekly
+            assert "300" in app._row_text(account, "codex.subscription.window.300")
+            assert "8%" in app._row_text(account, "codex.subscription.window.300")
+            await pilot.press("q")
+    finally:
+        await http_transport.aclose()
 
 
 async def test_untrusted_labels_remain_plain_and_no_credential_reference_rendered():

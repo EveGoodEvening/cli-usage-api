@@ -2,11 +2,11 @@
 
 A local terminal dashboard for subscription usage and Claude Platform credit
 balances. The installed `usage` CLI opens a live dashboard, deterministic offline
-demo, or interactive account/key management. **The terminal application and local
-account workflows have passed offline acceptance; ordinary ChatGPT weekly retrieval
-remains blocked by an unresolved upstream contract. Saving a credential does not
-enable it. Authenticated provider compatibility and real OS-keyring persistence
-remain unexercised.** This is a terminal TUI, not a web application.
+demo, or interactive account/key management. **The user-corrected GPT requirement
+means Codex weekly quota, not ordinary ChatGPT chat usage. The atomic cutover is
+implemented and its integrated offline checks and synthetic/terminal proofs passed.
+Draft review and closure remain pending under PLAN.md §11, as does authorized live
+Codex comparison. Real OS-keyring persistence remains unexercised.** This is a terminal TUI.
 
 To try it, run `uv sync --locked` then `uv run usage --demo`. To configure your
 own accounts, run `uv run usage` and press `a`; enter credentials only in the
@@ -14,11 +14,11 @@ application's masked prompts, never in chat. See the provider connection guidanc
 below. Exercised evidence and remaining live-acceptance boundaries are recorded in
 [PLAN.md](PLAN.md).
 
-## Original goal and scope
+## Current goal and scope
 
 终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform
-普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与
-重置时间；支持连接账号或管理密钥。不做网页或 statusline。
+普通购买余额和赠送余额；Codex 每周（7 天窗口）用量；GrokBuild / GrokChat
+用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。
 
 The application is read-only and local: one terminal dashboard, not a web
 server, statusline, inference client, or spending dashboard. Near-real-time means
@@ -45,9 +45,10 @@ value. C01 verification and closure are recorded in PLAN.md.
 C02 adds library-level account/config persistence and credential storage. C03 adds
 read-only Linux credential-file resolution and guarded HTTP transport. C04 adds the
 Claude subscription adapter; C05 adds Console balances and organization discovery;
-C06 adds the Grok billing adapter described below. C07 adds the explicit provider
-registry and a truthful blocked ChatGPT capability, **not** an ordinary-chat quota
-adapter. C08 adds the library-level scheduler and freshness state described below.
+C06 adds the Grok billing adapter described below. Historically, C07 added the
+explicit provider registry and blocked ordinary-ChatGPT capability. The current
+Codex cutover replaces that capability, not its historical evidence. C08 adds the
+library-level scheduler and freshness state described below.
 C09 adds the deterministic offline source; C10 adds the reusable Textual account
 manager. C11 connects terminal rendering, help, account-management callbacks, and
 source lifecycle through `UsageApp`. C12 composes those components behind the
@@ -58,17 +59,41 @@ installed `usage` entry point and matching account/key prompts:
 | Claude 5h / weekly | Subscription used/remaining percentages and server reset from private OAuth usage | Library adapter implemented; no authenticated acceptance |
 | Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Library parser implemented; availability is plan/response dependent, no authenticated acceptance |
 | Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Console library adapter implemented; private version-sensitive contract, no authenticated acceptance |
-| Ordinary ChatGPT weekly | Actual chat-model subscription usage/remaining/reset | Required row retained by blocked capability; **upstream contract unresolved**, not just missing credentials |
+| Codex weekly (7d) | Main Codex quota selected by 604800-second duration; private WHAM read using file-backed Codex login | Implemented; integrated offline proof passed, implementation review and authenticated acceptance pending |
 | Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Library adapter implemented; private version-sensitive contract, no authenticated acceptance |
 
 Grok product shares must not become independent `100 - share` allowances. Remaining
 and reset refer to the shared pool only when unified billing is established. Credit
 grants expire rather than reset weekly. Missing fields are unknown, not zero. API
-spend is not credit balance; API usage is not subscription allowance. WHAM/Codex is
-not a fallback for ordinary ChatGPT weekly chat usage. No requested live metric is
-currently claimed as working or accepted.
+spend is not credit balance; API usage is not subscription allowance. Codex quota
+is not ordinary ChatGPT chat-model usage. No requested live metric is currently
+claimed as working or accepted.
 
-## Exercised offline acceptance
+## Current exercised Codex offline acceptance
+
+The orchestrator's post-cleanup integrated gate recorded **1,098 tests passed in
+28.59 seconds**, Ruff lint passed, the **44-file** formatting check passed, and all
+**17 source files** had clean language-server diagnostics. Installed `usage --help`
+passed. This is the current cutover result, not the historical 851-test gate below.
+
+- A synthetic private auth file passed through the real resolver, Codex provider
+  and transport with an injected HTTP transport; no live request was made.
+- Actual Scheduler proof passed initial/manual refresh, two scheduled intervals,
+  retry embargo, stale state, replacement/removal and stop behavior.
+- Offline demo component smoke passed **4 healthy / 8 errors snapshots**. Four
+  installed-entry healthy/errors real-PTY runs rendered successfully and restored
+  the terminal on normal quit and Ctrl-C.
+- Actual installed-CLI real-PTY migration proof passed decline/cancel and non-TTY
+  unchanged paths, affirmative mixed-config migration, file-backed edit/reconnect,
+  enable/disable and isolated empty-live/account flows.
+
+No real Codex auth files, user secrets, network or real keyring were used. These
+results verify the implemented offline cutover, not authenticated quota accuracy,
+supported-public-API availability or live compatibility. Independent implementation
+review/draft closure and same-account authorized weekly/reset comparison remain
+pending; the latter must use a locally authorized file-backed Codex login.
+
+## Historical exercised offline acceptance — before Codex cutover
 
 The orchestrator's post-fix offline acceptance for correction `d653397` recorded:
 
@@ -93,8 +118,8 @@ account workflows—not authenticated metric retrieval or real secret persistenc
 No authenticated provider requests or real OS-keyring persistence were exercised;
 no user secrets were supplied or imported. Claude and Grok private-provider
 compatibility still needs authenticated comparison with the user's eligible
-account. Ordinary ChatGPT additionally lacks the upstream request/authentication
-and metric contract, so credentials alone cannot unblock it.
+account. Codex's implemented official-source read/auth/window contract has current
+integrated offline proof above; authorized live comparison remains pending.
 
 ### Final split review correction — verified offline
 
@@ -111,9 +136,10 @@ visible and selectable through the existing details/provenance surface, without
 inventing independent remaining allowances; refresh adds/removes extras while
 preserving selected metric identity and account filtering. The post-fix offline
 checks above passed, and both independent rereviews were clean.
-All 13 blocked acceptance tasks in PLAN.md retain their original scope and exact
-prerequisites; neither this correction nor offline acceptance completes the full
-original goal.
+PLAN.md §11 supersedes the old ordinary-ChatGPT acceptance tasks with the implemented,
+offline-verified Codex cutover and a separate authorized live comparison. Independent
+implementation review/closure and providers' live prerequisites remain open; full
+goal completion is not claimed.
 
 ## Install and run
 
@@ -124,8 +150,8 @@ credential-import and persistence target. Run from the repository root:
 ### 中文快速开始（仅终端 TUI）
 
 先执行 `uv sync --locked`，再运行 `uv run usage --demo` 查看离线演示；
-这不是网页，也不会启动浏览器或 Web 服务。演示中的 GPT 数值是虚构样例，
-**真实 GPT / ChatGPT 每周用量仍因上游接口契约缺失而阻塞**。
+这不是网页，也不会启动浏览器或 Web 服务。当前 GPT 需求已更正为 **Codex 配额**，
+不是普通 ChatGPT 聊天用量；原子切换已实现并通过集成离线检查，独立实现审查、收尾及真实账号验收仍待完成。
 运行 `uv run usage` 打开实时模式，按 `a` 管理账号、按 `r` 请求刷新、按 `?`
 查看帮助、按 `q` 退出。无账号时先显示配置引导；连接步骤见下方说明。
 Claude/Grok 须先在官方工具登录；Console 只手动输入自己的 `sessionKey` 值并
@@ -149,7 +175,7 @@ one. `--scenario` requires `--demo`; demo cannot be combined with account comman
 It selects a deterministic scenario, not a live error fallback. Demo constructs
 no live stores, resolver, providers or HTTP clients and does not read account
 configuration or credentials. Its account screen is
-read-only. Synthetic ChatGPT samples do not demonstrate live ChatGPT support.
+read-only. Synthetic Codex samples do not demonstrate authenticated Codex support.
 
 For development dependencies use `uv sync --locked --group dev`. The final offline
 acceptance above identifies what was exercised; the other commands are usage
@@ -161,12 +187,13 @@ instructions, not additional live-provider acceptance claims.
 uv run usage accounts list
 uv run usage accounts add --provider claude-subscription
 uv run usage accounts add --provider claude-platform
-uv run usage accounts add --provider chatgpt-subscription
+uv run usage accounts add --provider codex-subscription
 uv run usage accounts add --provider grok-subscription
 uv run usage accounts edit ACCOUNT_ID
 uv run usage accounts remove ACCOUNT_ID
 uv run usage accounts key set ACCOUNT_ID
 uv run usage accounts key delete ACCOUNT_ID
+uv run usage accounts migrate-chatgpt-to-codex
 ```
 
 Use the opaque account ID from `accounts list`, not a secret, for `ACCOUNT_ID`.
@@ -243,7 +270,7 @@ component API is `UsageApp(mode="demo", scenario="healthy").run()`.
 Demo constructs `DemoSource` directly and ignores injected live
 accounts/factories/stores. Its clock starts from the fixture time and advances
 one second per UI tick, not from the machine date. The DEMO banner and synthetic
-ChatGPT explanation distinguish samples from support.
+Codex explanation distinguish samples from authenticated support.
 
 Live startup is explicit. An empty `UsageApp(mode="live").run()` shows the
 no-account guidance without implicit configuration reads; it cannot edit accounts.
@@ -309,7 +336,7 @@ and needs no shared-client close hook. The production CLI supplies this composit
 | Ctrl-C | Unconditional exit, including from help, details, or account screens |
 | `r` | Request selected-account or all-account refresh; scheduler deadlines and coalescing still apply |
 | `a` | Account manager; read-only fictional accounts in demo |
-| `?` | Help, including freshness, shared pools, credential guidance and ChatGPT blocker |
+| `?` | Help, including freshness, shared pools and provider-specific credential guidance |
 | Tab / Shift-Tab, arrows | Move focus, select accounts/metrics, and scroll |
 | Enter on a metric | Details: provenance/contract, version sensitivity, UTC timestamps, grants and shared pools |
 | Escape | Return from help/details or cancel/return within account management |
@@ -329,8 +356,8 @@ example, a saturated retry deadline in a positive-offset timezone), display the
 UTC timestamp instead. One-second ticks update countdowns without provider requests:
 passed resets say `awaiting refresh`, never zero usage or invent a new window.
 Live refresh inherits scheduler backoff, origin spacing and retry embargoes.
-See freshness below for the stale threshold. Live ChatGPT remains blocked on its
-missing upstream contract, not merely a missing credential.
+See freshness below for the stale threshold. Codex uses the normal credentialed
+scheduler path; no credential or a missing weekly window is not a zero quota.
 
 ## Textual account management (C10)
 
@@ -354,8 +381,8 @@ app.push_screen(screen)
 
 `on_changed(accounts)` receives the committed `tuple[Account, ...]`;
 `on_reconnect(account_id)` receives the local opaque account ID after local
-credential resolution succeeds. Either callback may return an awaitable. ChatGPT
-reconnect only shows its blocked-contract guidance and does not resolve its key.
+credential resolution succeeds. Either callback may return an awaitable. Codex
+reconnect requires its file-backed login; it does not run login or renew tokens.
 `console_discovery` is an async callable, not a provider object:
 `Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]]`.
 Pass the bound `console_provider.discover_organizations` method as above; the screen
@@ -439,20 +466,58 @@ Service only; plaintext, alternative/chained, and null backends are rejected.
   identity; the saved nonsecret selector binds future reads. A supported manual
   bearer is also available. The tool never runs login, refreshes credentials,
   changes file permissions, or deletes the external login file.
-- **ChatGPT:** a labeled local profile may have no credential, or an optional
-  bearer/API key for local management only. It remains blocked by the missing
-  ordinary-chat weekly contract; storage does not enable retrieval. No sensitive
-  cookie/password prompt or WHAM/Codex fallback is offered.
+- **Codex:** configure an existing file-backed login in official Codex outside this
+  app, add `codex-subscription`, and choose **External Codex auth file**. `default`
+  reads `$CODEX_HOME/auth.json` when CODEX_HOME is nonempty, otherwise
+  `~/.codex/auth.json`; an explicit private file may select another login. Only
+  `codex_auth_file` is supported: no manual bearer or API key. Keyring-only,
+  auto-without-file and ephemeral Codex login are unavailable; configure file-backed
+  storage externally. The app never launches Codex, probes its keyring or refreshes
+  or rewrites the login file.
 
-API keys are local storage only, not substitutes for provider OAuth/session
-credentials. Reconnect does not perform browser login or remote token renewal.
+For other providers, API keys are local storage only, not substitutes for provider
+OAuth/session credentials. Codex rejects API-key storage. Reconnect does not perform
+browser login or remote token renewal.
 Removing an account deletes its local metadata and this tool's stored secret only;
 deleting a key leaves the account profile available for reconnection. Neither
-action revokes a remote session or removes Claude/Grok credential files. Account
+action revokes a remote session or removes Claude/Grok/Codex credential files. Account
 metadata and keyring are separate stores, so failures are reported rather than
 promising a cross-store atomic transaction. The final offline acceptance above
 includes dashboard and local account workflows, but not real credentials,
 real-keyring persistence, or authenticated providers.
+
+### Explicit legacy profile migration
+
+Legacy `chatgpt_subscription` profiles require the sole repair command
+`usage accounts migrate-chatgpt-to-codex`; normal startup/list do not rewrite them.
+In a real TTY it lists sanitized local profiles and requires explicit affirmative
+confirmation for the complete set; there is no `--yes` or non-TTY consent. Migration
+preserves local IDs/labels/poll intervals and other providers, converts to Codex
+**disabled**, and detaches all credentials, selectors and organizations. Old keyring
+secrets are **retained but detached/unmanaged**, never read, reused, transmitted or
+deleted. Deliberate owner/backend deletion is separate. Decline/cancel leaves config
+and secrets untouched. Restart, edit/reconnect with a Codex file reference, then
+enable the replacement. Ordinary edit cannot change a provider or perform migration.
+
+### Codex quota contract — implemented and verified offline
+
+`CodexProvider` uses one GET to `https://chatgpt.com/backend-api/wham/usage` with
+Bearer access token and the selected `ChatGPT-Account-Id` from one stable file read.
+The only required row is `codex.subscription.weekly` (**Codex weekly (7d)**), selected
+by `limit_window_seconds == 604800`, never primary/secondary position or plan name.
+Reported 18000-second windows appear as optional **Codex 5h**; other durations and
+feature pools stay distinct and never fill the main weekly row or get summed.
+Missing usage remains unknown; >100% stays visible and remaining clamps at zero.
+Absolute `reset_at` Unix seconds is canonical; relative reset is not converted into
+a fabricated timestamp. Invalid reset does not erase valid usage. This seven-day
+window does not promise a calendar-week boundary. Source contract is private,
+version-sensitive `codex.wham.usage.v1`; DEMO data is synthetic, not a live fallback.
+
+Static primary sources: official Codex [usage routing and normalization](https://github.com/openai/codex/blob/f802f0a3/codex-rs/backend-client/src/client.rs#L284-L301),
+[auth-file schema](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs#L47-L75)
+and [window fields](https://github.com/openai/codex/blob/main/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs#L14-L23).
+These establish a version-sensitive private contract, not a successful authorized
+request; PLAN.md §11 records pinned references and the separate live prerequisite.
 
 ## Claude subscription provider library (C04)
 
@@ -640,36 +705,17 @@ accounts. Typed ACP responses may omit product breakdown and are not a fallback.
 No CLI/TUI behavior, live request, or authenticated Grok acceptance is claimed;
 exercised verification remains separately recorded in PLAN.md.
 
-## Provider registry and unresolved ChatGPT capability (C07)
+## Provider registry — implemented Codex clean cutover
 
-`build_providers(transport, resolver)` explicitly constructs the registry for
-`claude_subscription`, `claude_platform`, `grok_subscription`, and
-`chatgpt_subscription`. Provider construction/imports do not fetch data, probe the
-environment, or read secrets. Each provider enumerates its required metric IDs;
-the live Claude, Console, and Grok adapters require credentials.
-
-The ChatGPT entry is a capability object, not a network adapter. It retains the
-required `chatgpt.subscription.weekly` row and returns the structured
-`upstream_contract_missing` result with unresolved provenance
-(`SourceRef(kind="unresolved")`) and a safe Chinese/English explanation. Its
-`requires_credential` is false: it does not resolve saved credentials, access
-transport, or make a request. The C08 scheduler honors that flag rather than
-opening a saved secret before publishing the blocked result, and does not
-periodically poll the unresolved capability.
-
-The blocker is a defensible ordinary-chat read-only request/authentication and
-model/window/reset contract, not merely a missing token. Static research and its
-remaining prerequisites are recorded in [PLAN.md](PLAN.md) §§4.4 and 7. A
-`conversation/init` feature-limit field alone does not establish ordinary GPT
-weekly quota or authorize a potentially state-changing POST. WHAM/Codex quotas,
-OpenAI API consumption, local message counts, and user-entered caps are not
-fallbacks. Returning this blocked state does not complete the requested metric.
-
-A local labeled ChatGPT account profile may exist without a credential. Optional
-user-provided bearer/API-key storage through the account screen does **not** enable
-weekly retrieval; there is no ChatGPT setup command. Do not supply a cookie or
-password, extract browser sessions, or invent an OAuth client to unblock it.
-No ordinary ChatGPT live quota integration or authenticated acceptance is claimed.
+`build_providers(transport, resolver)` explicitly constructs `claude_subscription`,
+`claude_platform`, `codex_subscription` and `grok_subscription`. Imports/construction
+perform no credential reads, environment probing or requests. All live providers
+require credentials; Codex uses only `codex_auth_file`, the required main weekly row
+and the fixed WHAM contract described above. The ordinary-ChatGPT capability/module,
+enum/metric identity and CLI choice are removed, not retained as runtime aliases.
+Legacy provider spelling is recognized only by the explicit storage migration.
+Historical C07's blocked-capability proof remains in PLAN.md; it is not current
+Codex implementation or live evidence.
 
 ## Deterministic offline-source library (C09)
 
@@ -701,13 +747,13 @@ advancing time does not zero quota or fabricate a new allowance.
 
 | Scenario | Synthetic display inputs |
 |---|---|
-| `healthy` | Four fictional provider accounts, all ten required metric rows, subscription windows, credit balances/grants, shared-pool product consumption, and an explicitly synthetic GPT weekly sample |
-| `errors` | Eight fictional accounts covering auth required, permission denied, rate limit/retry, network failure with stale last-known data, schema error, partial/unknown Fable, missing Grok product breakdown, and synthetic GPT sample data |
+| `healthy` | Four fictional provider accounts, all required rows, credit grants, shared-pool consumption, and synthetic Codex weekly plus optional reported windows |
+| `errors` | Fictional accounts covering auth required, permission denied, retry, stale network failure, schema/partial/unknown fields and synthetic Codex data |
 
 **Every account, value, timestamp, and scenario is fictional.** All metric
-provenance is `offline_demo`; a ready ChatGPT sample is explicitly labeled
-synthetic demonstration, **not a working adapter or evidence of live support**.
-Ordinary ChatGPT retrieval remains blocked by the missing upstream contract.
+provenance is `offline_demo`; ready Codex samples are fictional, **not evidence of
+authenticated support**. Current integrated offline proof is recorded above;
+authorized live comparison remains pending.
 Error scenarios are not actual service failures. Domain test/source assertions
 and this library documentation do not establish exercised verification; the
 orchestrator records component smoke and checks separately in PLAN.md.
@@ -747,9 +793,8 @@ implementation, and the RNG supplies `uniform(a, b)`.
   cap. Retry presentation timestamps saturate at the largest representable UTC
   datetime rather than overflowing; this must not shorten the monotonic embargo.
   Compatible successful fetches reset failure backoff.
-- Credential-free unresolved ChatGPT accounts publish their blocked capability once
-  per account generation, without resolving a saved secret or making a request.
-  They are not periodically polled, and manual refresh does not poll them.
+- Codex uses credential resolution and normal periodic/manual refresh, retry,
+  stale-state and cancellation semantics; no credential-free blocked exception.
 - Account updates invalidate prior in-flight generations, including updates using
   the same credential reference. Removal, disabling, replacement, and shutdown
   cancel obsolete work; a late result from an obsolete generation is not published.
@@ -844,9 +889,9 @@ provider and credential kind. The secret is excluded from its representation;
 identity, expiry, selected organization, and a nonsecret generation fingerprint
 are separate metadata. A fingerprint is not a token suffix for display or logging.
 Manual credentials are retrieved through `CredentialStore` opaque references,
-not treated as inline account configuration. Local API-key storage does not enable
-subscription metrics or Console balances, and the unresolved ChatGPT capability
-must not resolve a saved credential or invoke transport.
+not treated as inline account configuration. Other providers' local API-key storage
+does not enable subscription metrics or Console balances; Codex rejects API-key
+storage and accepts only its external file reference.
 
 Linux first-party imports are literal local paths (absolute or relative), not
 commands or URLs. The explicit `default` reference selects these default files
@@ -863,6 +908,13 @@ only when resolving an account, not when constructing the resolver:
   unambiguous. Multiple matching identities require a saved nonsecret scope
   selector; no account is silently chosen. An optional `user_id` comes from that
   same selected entry. Unknown expiry is not evidence of freshness.
+- Codex: nonempty `$CODEX_HOME/auth.json`, otherwise `~/.codex/auth.json`, or an
+  explicit private file. Read only access bearer and selected account from one
+  stable read; explicit account ID wins, ID-token fallback only when absent.
+  Access JWT `exp` is a seconds-based staleness hint; absent means unknown,
+  malformed/expired requires reauthentication. Decoding is not signature checking.
+  Do not use refresh tokens, `last_refresh` as expiry, scopes from another schema,
+  manual/API-key auth or keyring-only/ephemeral login.
 
 Imported files must be regular, effective-user-owned files with exact `0600` mode
 on supported Linux, with bounded reads of at most 1 MiB. Unsafe permissions,
@@ -885,7 +937,7 @@ the resolved provider binding, credential kind, and exact allowlisted path:
 | Claude subscription | `https://api.anthropic.com/api/oauth/usage` | `claude_code_file` or `manual_bearer`; Bearer plus `anthropic-beta: oauth-2025-04-20` |
 | Claude Platform | `https://platform.claude.com/api/organizations` and `/api/organizations/{id}/prepaid/credits`, with ID `[A-Za-z0-9-]{1,64}` | `console_session` only; `Cookie: sessionKey=<value>` |
 | Grok subscription | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` | `grok_auth_file` or `manual_bearer`; Bearer, `x-xai-token-auth: xai-grok-cli`, and `x-userid` only from the same resolved credential when present |
-| Ordinary ChatGPT | None | No transport request; upstream contract unresolved |
+| Codex | `https://chatgpt.com/backend-api/wham/usage` | `codex_auth_file` only; Bearer and `ChatGPT-Account-Id`, never Grok headers or cookies |
 
 All other paths, origins, credential-kind/provider combinations, and API keys are
 rejected for these reads. There is no user-configurable base URL. Console accepts
@@ -911,8 +963,8 @@ Do not paste credentials into chat, issues, documentation, or fixtures. No
 browser extraction, token refresh protocol, live-provider acceptance, or real
 OS-keyring acceptance is claimed. Private HTTP routes and product fields remain
 version-sensitive, not official public API guarantees. Researched sources and
-exact contracts are in PLAN.md §§4 and 7; ordinary ChatGPT weekly quota still needs
-a defensible read-only request/authentication and metric contract.
+exact contracts are in PLAN.md §§4 and 11; Codex's fixed private read is separately
+documented there, without a public-API or authenticated-compatibility guarantee.
 
 See [SECURITY.md](SECURITY.md) for implemented controls and current limitations,
 [CHANGELOG.md](CHANGELOG.md) for delivered changes, and PLAN.md for the only progress

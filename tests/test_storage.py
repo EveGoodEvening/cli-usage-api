@@ -112,7 +112,13 @@ def test_external_reference_is_not_read_or_mutated(store, tmp_path):
 )
 def test_bad_config_cannot_be_overwritten(store, content):
     write_config(store, content)
-    for operation in (store.load, lambda: store.save(()), lambda: store.mutate(lambda _: ())):
+    for operation in (
+        store.load,
+        lambda: store.save(()),
+        lambda: store.mutate(lambda _: ()),
+        store.legacy_chatgpt_profiles,
+        lambda: store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=()),
+    ):
         with pytest.raises(ConfigError) as error:
             operation()
         assert "synthetic" not in str(error.value)
@@ -319,3 +325,286 @@ def test_unencodable_config_text_is_safe_and_non_destructive(store):
             )
         )
     assert store.load() == (account(),)
+
+
+def legacy_record(**changes):
+    return {
+        **account().to_dict(),
+        "provider": "chatgpt_subscription",
+        "credential_kind": "manual_bearer",
+        "credential_ref": f"keyring:{ACCOUNT_ID}:00000000-0000-4000-8000-000000000002",
+        **changes,
+    }
+
+
+def write_records(store, records):
+    write_config(store, json.dumps({"schema_version": 1, "accounts": records}).encode())
+
+
+def _concurrent_migrate(path, ready, start, confirmed):
+    store = AccountStore(path)
+    ready.put(store.legacy_chatgpt_profiles())
+    if not start.wait(timeout=10):
+        raise RuntimeError("synthetic timeout")
+    try:
+        store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=confirmed)
+    except ConfigError:
+        ready.put("selection_changed")
+    else:
+        ready.put("committed")
+
+
+def test_codex_file_reference_round_trip_does_not_read_file(store):
+    item = Account(
+        ACCOUNT_ID,
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Codex",
+        "/nonexistent/synthetic-auth.json",
+        CredentialKind.CODEX_AUTH_FILE,
+    )
+    store.save((item,))
+    assert store.load() == (item,)
+
+
+def test_legacy_normal_operations_direct_explicit_migration_without_write(store):
+    write_records(store, [legacy_record()])
+    before = store.path.read_bytes()
+    for operation in (store.load, lambda: store.save(()), lambda: store.mutate(lambda _: ())):
+        with pytest.raises(ConfigError, match="usage accounts migrate-chatgpt-to-codex") as error:
+            operation()
+        assert ACCOUNT_ID not in str(error.value)
+        assert store.path.read_bytes() == before
+
+
+def test_migration_mixed_profiles_detaches_and_preserves_all_secrets(store, monkeypatch):
+    from usage_tui.storage import CredentialStore
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("migration must not access credential backends")
+
+    for name in ("get", "put", "delete"):
+        monkeypatch.setattr(CredentialStore, name, forbidden)
+    second_id = new_account_id()
+    unchanged = account(
+        id=new_account_id(),
+        credential_kind=CredentialKind.CLAUDE_CODE_FILE,
+        credential_ref="/nonexistent/synthetic-claude.json",
+    )
+    old = legacy_record(label="[bold]First[/bold]\n", poll_interval_seconds=90)
+    second = legacy_record(
+        id=second_id,
+        credential_kind="api_key",
+        credential_ref=f"keyring:{second_id}:{new_account_id()}",
+    )
+    write_records(store, [old, unchanged.to_dict(), second])
+    before = store.path.read_bytes()
+    assert store.legacy_chatgpt_profiles() == (
+        (ACCOUNT_ID, "boldFirst/bold"),
+        (second_id, "Synthetic"),
+    )
+    assert store.path.read_bytes() == before
+    migrated = store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(second_id, ACCOUNT_ID))
+    assert migrated[1] == unchanged
+    for item, original in ((migrated[0], old), (migrated[2], second)):
+        assert item.id == original["id"]
+        assert item.provider == ProviderId.CODEX_SUBSCRIPTION
+        assert item.poll_interval_seconds == original["poll_interval_seconds"]
+        assert not item.enabled
+        assert item.credential_kind is item.credential_ref is None
+        assert item.organization_id is item.credential_selector is None
+        assert original["credential_ref"] not in store.path.read_text()
+    assert store.load() == migrated
+    assert store.legacy_chatgpt_profiles() == ()
+    after = store.path.read_bytes()
+    assert store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=()) == migrated
+    assert store.path.read_bytes() == after
+    with pytest.raises(ConfigError):
+        store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(ACCOUNT_ID, second_id))
+    assert store.path.read_bytes() == after
+
+
+@pytest.mark.parametrize(
+    "confirmed", [(), (ACCOUNT_ID, ACCOUNT_ID), ("unknown",), [ACCOUNT_ID], (1,)]
+)
+def test_migration_requires_explicit_complete_unique_confirmation(store, confirmed):
+    write_records(store, [legacy_record()])
+    before = store.path.read_bytes()
+    with pytest.raises(ConfigError):
+        store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=confirmed)
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"credential_kind": "claude_code_file", "credential_ref": "/synthetic"},
+        {"credential_kind": "console_session"},
+        {"credential_kind": "codex_auth_file", "credential_ref": "/synthetic"},
+        {"credential_kind": None},
+        {"credential_ref": "synthetic-secret-not-a-reference"},
+        {"credential_ref": f"keyring:{new_account_id()}:{new_account_id()}"},
+        {"credential_selector": "synthetic"},
+        {"organization_id": "synthetic"},
+        {"enabled": 1},
+        {"poll_interval_seconds": True},
+        {"id": "synthetic"},
+        {"label": ""},
+        {"unknown": "synthetic"},
+    ],
+)
+def test_all_legacy_records_are_strictly_validated_before_listing_or_migration(store, changes):
+    write_records(store, [legacy_record(), legacy_record(**{"id": new_account_id(), **changes})])
+    before = store.path.read_bytes()
+    for operation in (
+        store.legacy_chatgpt_profiles,
+        lambda: store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(ACCOUNT_ID,)),
+    ):
+        with pytest.raises(ConfigError) as error:
+            operation()
+        assert "synthetic" not in str(error.value)
+        assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [legacy_record(), legacy_record()],
+        [legacy_record(), {"provider": "unknown"}],
+        [legacy_record(), {**account(id=new_account_id()).to_dict(), "unexpected": True}],
+    ],
+)
+def test_migration_validates_entire_config_including_nonlegacy_records(store, records):
+    write_records(store, records)
+    before = store.path.read_bytes()
+    with pytest.raises(ConfigError):
+        store.legacy_chatgpt_profiles()
+    with pytest.raises(ConfigError):
+        store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(ACCOUNT_ID,))
+    assert store.path.read_bytes() == before
+
+
+def test_cancelled_migration_write_retains_original_config(store, monkeypatch):
+    write_records(store, [legacy_record()])
+    before = store.path.read_bytes()
+
+    def cancel(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", cancel)
+        with pytest.raises(KeyboardInterrupt):
+            store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(ACCOUNT_ID,))
+    assert store.path.read_bytes() == before
+    assert store.legacy_chatgpt_profiles() == ((ACCOUNT_ID, "Synthetic"),)
+
+
+@pytest.mark.parametrize("stage", ["replace", "fsync"])
+def test_migration_precommit_failure_preserves_bytes(store, monkeypatch, stage):
+    write_records(store, [legacy_record()])
+    before = store.path.read_bytes()
+
+    def fail(*args, **kwargs):
+        raise OSError("synthetic-sensitive-failure")
+
+    monkeypatch.setattr(os, stage, fail)
+    with pytest.raises(ConfigError) as error:
+        store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(ACCOUNT_ID,))
+    assert "synthetic" not in str(error.value)
+    assert store.path.read_bytes() == before
+
+
+def test_migration_directory_sync_failure_returns_committed_accounts(store, monkeypatch):
+    write_records(store, [legacy_record()])
+    fsync = os.fsync
+
+    def fail_directory(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("synthetic-sensitive-failure")
+        fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_directory)
+    with pytest.raises(ConfigCommittedError) as error:
+        store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(ACCOUNT_ID,))
+    assert error.value.accounts == store.load()
+    assert error.value.accounts[0].provider == ProviderId.CODEX_SUBSCRIPTION
+    assert not error.value.accounts[0].enabled
+    assert error.value.accounts[0].credential_ref is None
+    assert "synthetic" not in str(error.value)
+
+
+def test_migration_rereads_concurrently_changed_confirmation_set(store):
+    write_records(store, [legacy_record()])
+    context = multiprocessing.get_context("spawn")
+    ready = context.Queue()
+    start = context.Event()
+    child = context.Process(
+        target=_concurrent_migrate,
+        args=(str(store.path), ready, start, (ACCOUNT_ID,)),
+    )
+    try:
+        child.start()
+        assert ready.get(timeout=10) == ((ACCOUNT_ID, "Synthetic"),)
+        with store._locked():
+            write_records(
+                store,
+                [
+                    legacy_record(),
+                    legacy_record(id=new_account_id(), credential_kind=None, credential_ref=None),
+                ],
+            )
+        before = store.path.read_bytes()
+        start.set()
+        assert ready.get(timeout=10) == "selection_changed"
+        child.join(timeout=10)
+        assert child.exitcode == 0
+        assert store.path.read_bytes() == before
+    finally:
+        start.set()
+        if child.is_alive():
+            child.terminate()
+        child.join(timeout=5)
+        ready.close()
+        ready.join_thread()
+
+
+def test_migration_preserves_concurrent_nonlegacy_edits(store):
+    other = account(id=new_account_id(), label="Original")
+    write_records(store, [legacy_record(), other.to_dict()])
+    context = multiprocessing.get_context("spawn")
+    ready = context.Queue()
+    start = context.Event()
+    child = context.Process(
+        target=_concurrent_migrate,
+        args=(str(store.path), ready, start, (ACCOUNT_ID,)),
+    )
+    try:
+        child.start()
+        assert ready.get(timeout=10) == ((ACCOUNT_ID, "Synthetic"),)
+        updated = replace(other, label="Concurrent edit", enabled=False)
+        with store._locked():
+            write_records(store, [legacy_record(), updated.to_dict()])
+        start.set()
+        assert ready.get(timeout=10) == "committed"
+        child.join(timeout=10)
+        assert child.exitcode == 0
+        assert store.load()[1] == updated
+    finally:
+        start.set()
+        if child.is_alive():
+            child.terminate()
+        child.join(timeout=5)
+        ready.close()
+        ready.join_thread()
+
+
+@pytest.mark.parametrize("kind", [None, "manual_bearer", "api_key"])
+def test_migration_accepts_only_supported_legacy_credential_shapes(store, kind):
+    record = legacy_record(credential_kind=kind)
+    if kind is None:
+        record["credential_ref"] = None
+    write_records(store, [record])
+    assert store.legacy_chatgpt_profiles() == ((ACCOUNT_ID, "Synthetic"),)
+    (converted,) = store.migrate_legacy_chatgpt_to_codex(confirmed_account_ids=(ACCOUNT_ID,))
+    assert converted == Account(
+        ACCOUNT_ID, ProviderId.CODEX_SUBSCRIPTION, "Synthetic", enabled=False
+    )

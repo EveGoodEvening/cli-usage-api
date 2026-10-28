@@ -1,14 +1,18 @@
 """All scheduling tests use virtual time and in-memory providers, never sockets."""
 
 import asyncio
+import base64
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import nextafter
 from uuid import UUID
 
+import httpx
 import pytest
 
+from usage_tui.credentials import CredentialResolver
 from usage_tui.domain import (
     Account,
     CredentialKind,
@@ -24,8 +28,9 @@ from usage_tui.domain import (
     SourceRef,
     TransportError,
 )
-from usage_tui.providers.chatgpt import ChatGPTProvider
-from usage_tui.scheduler import Scheduler
+from usage_tui.providers.codex import CodexProvider
+from usage_tui.scheduler import Scheduler, freshness
+from usage_tui.transport import Transport
 
 
 class FakeClock:
@@ -374,34 +379,100 @@ async def test_disabled_and_missing_provider_and_duplicate_accounts():
     await scheduler.stop()
 
 
-async def test_chatgpt_never_resolves_or_repolls():
+async def test_codex_resolves_initial_manual_periodic_retry_and_last_known(tmp_path):
     clock = FakeClock()
-    item = Account(str(UUID(int=1)), ProviderId.CHATGPT_SUBSCRIPTION, "ChatGPT", None)
+    payload = base64.urlsafe_b64encode(b'{"exp":4102444800}').decode().rstrip("=")
+    path = tmp_path / "auth.json"
+    path.write_text(
+        json.dumps(
+            {"tokens": {"access_token": f"e30.{payload}.c2ln", "account_id": "synthetic-account"}}
+        )
+    )
+    path.chmod(0o600)
+    item = Account(
+        str(UUID(int=1)),
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Synthetic Codex",
+        str(path),
+        CredentialKind.CODEX_AUTH_FILE,
+    )
+    calls = []
+    resolver = CredentialResolver(clock=clock.now)
 
-    class ForbiddenResolver:
+    class CountingResolver:
         def resolve(self, account):
-            raise AssertionError("Credential-free capability must never resolve.")
+            calls.append(clock.monotonic())
+            return resolver.resolve(account)
+
+    requests = []
+    reset_at = int((clock.now() + timedelta(seconds=200)).timestamp())
+
+    def respond(request):
+        requests.append(clock.monotonic())
+        assert request.headers["ChatGPT-Account-Id"] == "synthetic-account"
+        assert "x-xai-token-auth" not in request.headers
+        if len(requests) == 5:
+            return httpx.Response(429, headers={"Retry-After": "120"})
+        return httpx.Response(
+            200,
+            json={
+                "rate_limit": {
+                    "primary_window": {
+                        "limit_window_seconds": 604800,
+                        "used_percent": 23.5,
+                        "reset_at": reset_at,
+                    }
+                }
+            },
+        )
 
     published = []
+    http_transport = httpx.MockTransport(respond)
     scheduler = Scheduler(
         (item,),
-        {item.provider: ChatGPTProvider()},
-        ForbiddenResolver(),
+        {item.provider: CodexProvider(Transport(http_transport=http_transport, clock=clock.now))},
+        CountingResolver(),
         clock=clock,
         rng=FixedRng(),
         publish=published.append,
     )
-    await scheduler.start()
-    await settle()
-    assert published[0].fetch_state == FetchState.UPSTREAM_CONTRACT_MISSING
-    assert published[0].metrics[0].state == MetricState.BLOCKED
-    await scheduler.refresh()
-    await clock.advance(100000)
-    assert len(published) == 1
-    await scheduler.update_accounts((item,))
-    await settle()
-    assert len(published) == 2
-    await scheduler.stop()
+    try:
+        await scheduler.start()
+        await settle()
+        assert len(calls) == len(published) == 1
+        assert published[-1].metrics[0].id == "codex.subscription.weekly"
+        await scheduler.refresh(item.id)
+        await clock.advance(4)
+        assert requests == [0]
+        await clock.advance(1)
+        await clock.advance(60)
+        await clock.advance(60)
+        assert requests == [0, 5, 65, 125]
+        good = published[-1]
+        await clock.advance(60)
+        failed = published[-1]
+        assert failed.fetch_state == FetchState.RATE_LIMITED
+        assert failed.metrics == good.metrics and failed.fetched_at == good.fetched_at
+        await clock.advance(16)
+        state = freshness(failed, clock.now(), metric=failed.metrics[0])
+        assert state.last_known and state.stale and state.reset_passed
+        assert failed.metrics[0].quota.used_percent == Decimal("23.5")
+        await scheduler.refresh(item.id)
+        await clock.advance(103)
+        assert len(requests) == 5
+        await clock.advance(1)
+        assert len(requests) == len(calls) == 6
+        assert published[-1].fetch_state == FetchState.OK
+        await scheduler.update_accounts(())
+        count = len(published)
+        await clock.advance(1000)
+        assert len(published) == count
+    finally:
+        await scheduler.stop()
+        await http_transport.aclose()
+    await clock.advance(1000)
+    assert len(published) == count
+    assert not clock.sleepers and not scheduler._active
 
 
 @pytest.mark.parametrize("fraction, deadline", ((0, 54), (0.5, 60), (1, 66)))

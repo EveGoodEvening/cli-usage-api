@@ -21,6 +21,14 @@ SECRET = "synthetic-never-real-secret"
 
 
 def source(provider=ProviderId.CLAUDE_SUBSCRIPTION, kind=CredentialKind.MANUAL_BEARER, **kwargs):
+    if provider == ProviderId.CODEX_SUBSCRIPTION:
+        kwargs.setdefault("codex_account_id", "synthetic-selected-account")
+        credential = ResolvedCredential(
+            provider, CredentialKind.CODEX_AUTH_FILE, SECRET, "synthetic-generation", **kwargs
+        )
+        # Bypass the domain only to exercise Transport's independent kind guard.
+        object.__setattr__(credential, "credential_kind", kind)
+        return credential
     return ResolvedCredential(provider, kind, SECRET, "synthetic-generation", **kwargs)
 
 
@@ -148,16 +156,16 @@ async def test_api_keys_enable_no_reads(provider):
     assert caught.value.code == "credential_mismatch"
 
 
-async def test_chatgpt_bearer_cannot_enable_a_request():
+async def test_codex_manual_bearer_cannot_enable_a_request():
     def handler(_):
-        pytest.fail("Unresolved ChatGPT reached HTTP boundary")
+        pytest.fail("Non-file Codex credential reached HTTP boundary")
 
     transport = Transport(http_transport=httpx.MockTransport(handler))
     with pytest.raises(TransportError) as caught:
         await transport.get_json(
-            ProviderId.CHATGPT_SUBSCRIPTION,
+            ProviderId.CODEX_SUBSCRIPTION,
             "/backend-api/wham/usage",
-            credential=source(ProviderId.CHATGPT_SUBSCRIPTION),
+            credential=source(ProviderId.CODEX_SUBSCRIPTION),
         )
     assert caught.value.code == "credential_mismatch"
 
@@ -372,3 +380,76 @@ async def test_unsupported_kind_is_independently_rejected_before_http():
             ProviderId.CLAUDE_SUBSCRIPTION, "/api/oauth/usage", credential=credential
         )
     assert caught.value.code == "credential_mismatch"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "https://attacker.invalid/backend-api/wham/usage",
+        "https://chatgpt.com/backend-api/wham/usage",
+        "http://chatgpt.com/backend-api/wham/usage",
+        "//chatgpt.com/backend-api/wham/usage",
+        "/backend-api/wham/usage?account=synthetic-selected-account",
+        "/backend-api/wham/usage#fragment",
+        "/backend-api/wham/usage/",
+        "/backend-api/wham/../wham/usage",
+        "/backend-api/%77ham/usage",
+        "/backend-api/wham/usage\r\nX-Evil: yes",
+        "/backend-api/wham/usage\\@attacker.invalid",
+        "/backend-api/conversations",
+        "/auth/refresh",
+        "",
+    ],
+)
+async def test_codex_fixed_route_refuses_alternatives_before_http(path):
+    def handler(_):
+        pytest.fail("Forbidden Codex request reached HTTP boundary")
+
+    transport = Transport(http_transport=httpx.MockTransport(handler))
+    with pytest.raises(TransportError) as caught:
+        await transport.get_json(
+            ProviderId.CODEX_SUBSCRIPTION,
+            path,
+            credential=source(ProviderId.CODEX_SUBSCRIPTION, CredentialKind.CODEX_AUTH_FILE),
+        )
+    assert caught.value.code == "forbidden_request"
+    assert SECRET not in str(caught.value)
+    assert "synthetic-selected-account" not in repr(caught.value)
+
+
+@pytest.mark.parametrize(
+    "value", [None, "", "has space", "has\tcontrol", "has\r\nheader", "非ASCII", "x" * 257]
+)
+async def test_codex_selected_account_header_revalidated_before_http(value):
+    def handler(_):
+        pytest.fail("Unsafe Codex account header reached HTTP boundary")
+
+    credential = source(ProviderId.CODEX_SUBSCRIPTION, CredentialKind.CODEX_AUTH_FILE)
+    object.__setattr__(credential, "codex_account_id", value)
+    transport = Transport(http_transport=httpx.MockTransport(handler))
+    with pytest.raises(TransportError) as caught:
+        await transport.get_json(
+            ProviderId.CODEX_SUBSCRIPTION, "/backend-api/wham/usage", credential=credential
+        )
+    assert caught.value.code == "credential_mismatch"
+    assert SECRET not in "".join(traceback.format_exception(caught.value))
+
+
+@pytest.mark.parametrize("status", [200, 401, 403, 429, 500])
+async def test_codex_body_and_identity_never_enter_diagnostics(status, caplog):
+    identity = "synthetic-selected-account"
+    transport = Transport(
+        http_transport=httpx.MockTransport(
+            lambda _: httpx.Response(status, content=f"{SECRET} {identity}".encode())
+        )
+    )
+    with pytest.raises(TransportError) as caught:
+        await transport.get_json(
+            ProviderId.CODEX_SUBSCRIPTION,
+            "/backend-api/wham/usage",
+            credential=source(ProviderId.CODEX_SUBSCRIPTION, CredentialKind.CODEX_AUTH_FILE),
+        )
+    rendered = "".join(traceback.format_exception(caught.value)) + caplog.text
+    assert SECRET not in rendered
+    assert identity not in rendered
+    assert caught.value.__cause__ is caught.value.__context__ is None

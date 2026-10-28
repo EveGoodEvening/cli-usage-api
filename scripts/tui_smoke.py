@@ -53,6 +53,7 @@ def isolated_environment(home: str) -> dict[str, str]:
     environment = {
         "HOME": home,
         "XDG_CONFIG_HOME": home + "/config",
+        "CODEX_HOME": home + "/codex",
         "XDG_DATA_HOME": home + "/data",
         "XDG_CACHE_HOME": home + "/cache",
         "XDG_STATE_HOME": home + "/state",
@@ -217,7 +218,8 @@ def scenario_run(scenario: str, quit_key: str = "q") -> dict[str, str | bool | i
             "购买余额",
             "赠送余额",
             "总余额",
-            "ChatGPT",
+            "Codex weekly (7d)",
+            "Codex 5h",
             "Grok 共享池",
             "GrokBuild",
             "GrokChat",
@@ -249,6 +251,7 @@ def scenario_run(scenario: str, quit_key: str = "q") -> dict[str, str | bool | i
             terminal.send(b"?")
             terminal.send(b"\x03")
         else:
+            terminal.send(b"x")
             terminal.send(b"q")
         terminal.wait_exit()
         terminal.assert_restored()

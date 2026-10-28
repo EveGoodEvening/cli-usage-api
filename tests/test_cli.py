@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import getpass
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
@@ -26,6 +27,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "config"))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("GROK_HOME", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(home / "codex"))
     return home
 
 
@@ -195,6 +197,7 @@ def test_list_empty_and_nonsecret_metadata(monkeypatch, capsys, terminal_boundar
         ["add", "--provider", "claude-platform"],
         ["key", "set", "local-id"],
         ["remove", "local-id"],
+        ["migrate-chatgpt-to-codex"],
     ],
 )
 @pytest.mark.parametrize("stream", ["stdin", "stdout"])
@@ -213,9 +216,9 @@ def test_mutations_refuse_non_tty_without_getpass(
 
 def test_profile_add_edit_remove(monkeypatch, credentials):
     answers(monkeypatch, "My profile", "90", "no", "1", "yes")
-    assert cli.main(["accounts", "add", "--provider", "chatgpt-subscription"]) == 0
+    assert cli.main(["accounts", "add", "--provider", "codex-subscription"]) == 0
     (item,) = AccountStore().load()
-    assert item.provider == ProviderId.CHATGPT_SUBSCRIPTION
+    assert item.provider == ProviderId.CODEX_SUBSCRIPTION
     assert item.label == "My profile" and not item.enabled
     assert item.poll_interval_seconds == 90 and item.credential_ref is None
     answers(monkeypatch, "Renamed", "30", "yes", "no", "yes")
@@ -472,3 +475,142 @@ def test_module_entrypoint_uses_same_main(monkeypatch):
         runpy.run_module("usage_tui", run_name="__main__")
     assert error.value.code == 3
     assert calls == [True]
+
+
+def legacy_config():
+    other = account()
+    AccountStore().save((other,))
+    path = AccountStore().path
+    records = []
+    for kind in (CredentialKind.MANUAL_BEARER, CredentialKind.API_KEY):
+        item = account()
+        record = replace(
+            item, credential_kind=kind, credential_ref=f"keyring:{item.id}:{uuid4()}"
+        ).to_dict()
+        record["provider"] = "chatgpt_subscription"
+        records.append(record)
+    path.write_text(json.dumps({"schema_version": 1, "accounts": [other.to_dict(), *records]}))
+    return path, other, records
+
+
+def forbid_credentials(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Migration must not construct or use a credential store")
+
+    monkeypatch.setattr(cli, "CredentialStore", forbidden)
+
+
+@pytest.mark.parametrize("reply", ["no", "\x1b", KeyboardInterrupt(), EOFError()])
+def test_migration_decline_cancel_preserves_bytes(monkeypatch, reply):
+    path, _, _ = legacy_config()
+    before = path.read_bytes()
+    forbid_credentials(monkeypatch)
+
+    def respond(_prompt):
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(builtins, "input", respond)
+    assert cli.main(["accounts", "migrate-chatgpt-to-codex"]) == 0
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("stream", ["stdin", "stdout"])
+def test_migration_non_tty_preserves_bytes(monkeypatch, terminal_boundary, stream):
+    path, _, _ = legacy_config()
+    before = path.read_bytes()
+    forbid_credentials(monkeypatch)
+    monkeypatch.setattr(cli, "_tty", terminal_boundary)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: stream != "stdin")
+    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: stream != "stdout")
+    assert cli.main(["accounts", "migrate-chatgpt-to-codex"]) == 2
+    assert path.read_bytes() == before
+
+
+def test_migration_affirms_whole_set_without_credentials(monkeypatch, capsys):
+    _, other, records = legacy_config()
+    forbid_credentials(monkeypatch)
+    answers(monkeypatch, "yes")
+    assert cli.main(["accounts", "migrate-chatgpt-to-codex"]) == 0
+    current = AccountStore().load()
+    assert current[0] == other
+    assert {item.id for item in current[1:]} == {record["id"] for record in records}
+    for item in current[1:]:
+        assert item.provider == ProviderId.CODEX_SUBSCRIPTION and not item.enabled
+        assert item.credential_kind is None and item.credential_ref is None
+        assert item.organization_id is None and item.credential_selector is None
+    output = capsys.readouterr().out
+    assert "retained" in output and "disabled" in output and "detached" in output
+    assert "keyring:" not in output
+    assert cli.main(["accounts", "migrate-chatgpt-to-codex"]) == 0
+
+
+def test_migration_changed_set_is_not_written(monkeypatch):
+    path, _, _ = legacy_config()
+    forbid_credentials(monkeypatch)
+    changed = None
+
+    def respond(_prompt):
+        nonlocal changed
+        data = json.loads(path.read_text())
+        record = dict(data["accounts"][-1], id=str(uuid4()))
+        record["credential_ref"] = f"keyring:{record['id']}:{uuid4()}"
+        data["accounts"].append(record)
+        path.write_text(json.dumps(data))
+        changed = path.read_bytes()
+        return "yes"
+
+    monkeypatch.setattr(builtins, "input", respond)
+    assert cli.main(["accounts", "migrate-chatgpt-to-codex"]) == 2
+    assert path.read_bytes() == changed
+
+
+def test_migration_committed_warning_is_truthful(monkeypatch, capsys):
+    legacy_config()
+    forbid_credentials(monkeypatch)
+    migrate = AccountStore.migrate_legacy_chatgpt_to_codex
+
+    def committed(self, **kwargs):
+        raise ConfigCommittedError(migrate(self, **kwargs))
+
+    monkeypatch.setattr(AccountStore, "migrate_legacy_chatgpt_to_codex", committed)
+    answers(monkeypatch, "yes")
+    assert cli.main(["accounts", "migrate-chatgpt-to-codex"]) == 2
+    assert all(
+        item.provider != ProviderId.CLAUDE_SUBSCRIPTION for item in AccountStore().load()[1:]
+    )
+    error = capsys.readouterr().err
+    assert "Migration saved" in error and "durability" in error
+
+
+def test_codex_key_set_uses_file_only(monkeypatch, credentials, tmp_path, capsys):
+    root = tmp_path / "codex-private"
+    root.mkdir(mode=0o700)
+    path = root / "auth.json"
+    path.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {"access_token": "e30.e30.c2ln", "account_id": "synthetic-account"},
+            }
+        )
+    )
+    path.chmod(0o600)
+    monkeypatch.setenv("CODEX_HOME", str(root))
+    item = account(ProviderId.CODEX_SUBSCRIPTION, enabled=False)
+    seed(item)
+    answers(monkeypatch, "2", "", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (saved,) = AccountStore().load()
+    assert saved.credential_kind == CredentialKind.CODEX_AUTH_FILE
+    assert saved.credential_ref == "default" and not saved.enabled
+    assert not credentials.values and not credentials.deleted and not credentials.persisted
+    output = capsys.readouterr().out
+    assert "Manual bearer" not in output and "API key —" not in output
+    assert "e30.e30.c2ln" not in output
+
+
+def test_old_provider_spelling_is_rejected(capsys):
+    assert cli.main(["accounts", "add", "--provider", "chatgpt-subscription"]) == 2
+    assert "Invalid command" in capsys.readouterr().err

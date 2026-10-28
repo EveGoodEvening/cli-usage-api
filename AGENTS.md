@@ -11,7 +11,7 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   session-only credentials work for the lifetime of that app.
 - Branch demo before constructing live stores, resolvers, providers or clients.
   Installed-entry PTY evidence and Python component-host evidence are different;
-  a runnable CLI, harness source or synthetic ChatGPT sample proves no live quota
+  a runnable CLI, harness source or synthetic Codex sample proves no live quota
   compatibility. Keep exercised acceptance in PLAN.md.
 - Secrets belong in masked interactive prompts, never command arguments or
   environment-variable examples. Refuse non-TTY secret operations; persistent CLI
@@ -33,8 +33,8 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   Account replacement/removal must reach scheduler generation cancellation before
   stale callbacks can be presented as the new connection's observations.
 - A demo account manager must be an injected read-only view, not an excuse to
-  construct real stores or a resolver. A synthetic ready ChatGPT row needs an
-  explicit demo warning; it cannot erase the live blocked-contract distinction.
+  construct real stores or a resolver. Synthetic ready quota rows need explicit
+  demo provenance; they cannot establish authenticated provider compatibility.
 - Printable dashboard shortcuts must not preempt focused text entry: keep `q`
   nonpriority so account labels, paths, selectors and masked credentials can contain
   it; reserve priority quit dispatch for unconditional Ctrl-C.
@@ -51,16 +51,39 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   Anthropic Admin cost/usage reports do not establish purchased/promotional balance;
   Console credit grants supply distinct balance evidence. OpenAI/xAI API consumption
   does not establish consumer subscription quota. Keep these source meanings intact.
-- WHAM/Codex allowance evidence does not prove ordinary ChatGPT chat-model weekly
-  usage. A local message counter or custom cap is not a remote quota contract. Leave
-  the ordinary ChatGPT metric unresolved until request/auth/model/window evidence exists.
-- Model an unresolved metric as a visible capability result, not a fabricated
-  network adapter: retain required rows and unresolved provenance, use a fixed
-  upstream-contract diagnostic, and explicitly declare no credential requirement.
-  Registry membership is not live support. Orchestration must skip secret resolution
-  for that capability even when an account holds an optional credential reference.
-  Credential storage cannot repair absent read/auth/model/window/reset semantics;
-  never solicit cookies/passwords or substitute Codex to make the row appear ready.
+- The user-corrected target is Codex quota, not ordinary ChatGPT chat-model usage.
+  Match weekly by the main window's 604800-second duration, never slot position,
+  plan name or feature pool. Optional 5h/other windows remain reported extras;
+  absolute reset seconds and relative duration are not interchangeable.
+- Keep file-backed login selection and bearer together in one stable secure read.
+  Codex's selected account header is distinct from Grok user ID and Console
+  organization. Unverified JWT decoding supplies local expiry/provenance hints,
+  not signature verification or an authentication trust boundary. No refresh-token
+  auth, Codex-keyring probing, auto-without-file fallback or manual/API-key bypass.
+- Semantic migration requires explicit whole-set consent and lock/reread validation,
+  not a runtime provider alias or ordinary account edit. Disable and detach legacy
+  replacements; retain old keyring secrets untouched and document that they are
+  detached/unmanaged. Migration must never resolve, transmit or clean them up.
+- S1's Codex selected-account contract is a redacted, Codex-only credential field,
+  not a label, organization or reusable cross-provider selector. Preserve its
+  same-stable-read binding to the access bearer through resolver, provider and
+  transport; never reconstruct the selected account from local profile identity.
+  The current integrated gate and synthetic resolver → provider → transport proof
+  passed; this does not establish JWT signature verification or live compatibility.
+- Record migration proof at the actual storage/installed-CLI boundary, not just
+  prompt construction: the current real-PTY proof exercised unchanged decline,
+  cancel and non-TTY paths, affirmative mixed-config migration, then file-backed
+  edit/reconnect and enable/disable. Disabled/detached replacements must never
+  resolve or transmit retained legacy secrets. Synthetic backend evidence is not
+  real OS-keyring acceptance.
+- The atomic Codex implementation's current post-cleanup gate is 1,098 tests in
+  28.59 seconds, with Ruff lint, 44-file formatting and all 17 source diagnostics
+  clean. Keep this exercised baseline separate from historical 851-test results,
+  independent implementation review/draft closure and authorized live comparison;
+  those remaining review/live steps do not mean implementation is still in progress.
+- A local message counter/custom cap or credential storage cannot repair absent
+  quota semantics. Model a genuinely unresolved capability honestly; that historical
+  C07 lesson does not make current Codex credential-free or upstream-blocked.
 - Fable is a model-scoped weekly subset, not an additional weekly allowance. GrokBuild
   and GrokChat product shares are not independent quotas: shared remaining/reset needs
   positive same-payload shared-pool evidence. Missing data is unknown, not zero.
@@ -196,8 +219,8 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   keyring, resolver, provider registry, or live transport. Forbid those construction
   paths in tests; do not use demo fixtures as live-fetch fallback. Fixed/injected
   demo time and `offline_demo` provenance must accompany fictional labels and all
-  samples, especially ready ChatGPT data, so a useful display scenario cannot be
-  mistaken for a working upstream contract or authenticated metric acceptance.
+  samples, including ready Codex data, so a useful display scenario cannot be
+  mistaken for authenticated metric acceptance.
 - Treat account editing as staged user intent, not immediate credential mutation.
   Keep saved secrets out of prefilled inputs and display text; use masked keyboard
   input, explicit replacement/removal confirmation, and clear pending secrets on

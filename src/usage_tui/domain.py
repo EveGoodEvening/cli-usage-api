@@ -25,13 +25,14 @@ class DomainError(ValueError):
 class ProviderId(StrEnum):
     CLAUDE_SUBSCRIPTION = "claude_subscription"
     CLAUDE_PLATFORM = "claude_platform"
-    CHATGPT_SUBSCRIPTION = "chatgpt_subscription"
+    CODEX_SUBSCRIPTION = "codex_subscription"
     GROK_SUBSCRIPTION = "grok_subscription"
 
 
 class CredentialKind(StrEnum):
     CLAUDE_CODE_FILE = "claude_code_file"
     GROK_AUTH_FILE = "grok_auth_file"
+    CODEX_AUTH_FILE = "codex_auth_file"
     CONSOLE_SESSION = "console_session"
     MANUAL_BEARER = "manual_bearer"
     API_KEY = "api_key"
@@ -44,7 +45,8 @@ class MetricId(StrEnum):
     CLAUDE_PURCHASED_BALANCE = "claude.platform.purchased_balance"
     CLAUDE_PROMOTIONAL_BALANCE = "claude.platform.promotional_balance"
     CLAUDE_TOTAL_BALANCE = "claude.platform.total_balance"
-    CHATGPT_WEEKLY = "chatgpt.subscription.weekly"
+    CODEX_WEEKLY = "codex.subscription.weekly"
+    CODEX_FIVE_HOUR = "codex.subscription.five_hour"
     GROK_SHARED_POOL = "grok.subscription.shared_pool"
     GROK_BUILD = "grok.product.build"
     GROK_CHAT = "grok.product.chat"
@@ -62,7 +64,7 @@ REQUIRED_METRIC_IDS = MappingProxyType(
             MetricId.CLAUDE_PROMOTIONAL_BALANCE,
             MetricId.CLAUDE_TOTAL_BALANCE,
         ),
-        ProviderId.CHATGPT_SUBSCRIPTION: (MetricId.CHATGPT_WEEKLY,),
+        ProviderId.CODEX_SUBSCRIPTION: (MetricId.CODEX_WEEKLY,),
         ProviderId.GROK_SUBSCRIPTION: (
             MetricId.GROK_SHARED_POOL,
             MetricId.GROK_BUILD,
@@ -80,7 +82,7 @@ READ_CREDENTIAL_KINDS = MappingProxyType(
             }
         ),
         ProviderId.CLAUDE_PLATFORM: frozenset({CredentialKind.CONSOLE_SESSION}),
-        ProviderId.CHATGPT_SUBSCRIPTION: frozenset(),
+        ProviderId.CODEX_SUBSCRIPTION: frozenset({CredentialKind.CODEX_AUTH_FILE}),
         ProviderId.GROK_SUBSCRIPTION: frozenset(
             {
                 CredentialKind.GROK_AUTH_FILE,
@@ -144,7 +146,7 @@ DIAGNOSTIC_MESSAGES = MappingProxyType(
         "response_too_large": "The provider response exceeded the supported size limit.",
         "partial_data": "Some values are unavailable; inspect the individual metric details.",
         "unconfigured": "Connect an account to retrieve live usage.",
-        "upstream_contract_missing": "Ordinary ChatGPT weekly usage has no verified read contract.",
+        "upstream_contract_missing": "A verified read contract is unavailable for this usage data.",
     }
 )
 
@@ -296,10 +298,8 @@ def validate_credential_kind(
     provider = _enum(ProviderId, provider)
     kind = _enum(CredentialKind, kind)
     allowed = READ_CREDENTIAL_KINDS[provider]
-    if not for_read:
+    if not for_read and provider != ProviderId.CODEX_SUBSCRIPTION:
         allowed = allowed | {CredentialKind.API_KEY}
-        if provider == ProviderId.CHATGPT_SUBSCRIPTION:
-            allowed = allowed | {CredentialKind.MANUAL_BEARER}
     if kind not in allowed:
         raise DomainError("Credential kind is not supported by this provider.")
 
@@ -508,6 +508,7 @@ class ResolvedCredential:
     user_id: str | None = field(default=None, repr=False)
     expires_at: datetime | None = None
     organization_id: str | None = None
+    codex_account_id: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "provider", _enum(ProviderId, self.provider))
@@ -516,7 +517,15 @@ class ResolvedCredential:
         _text(self.secret, maximum=1_048_576)
         _identifier(self.generation_fingerprint)
         if self.user_id is not None:
+            if self.provider != ProviderId.GROK_SUBSCRIPTION:
+                _fail()
             _text(self.user_id)
+        if self.provider == ProviderId.CODEX_SUBSCRIPTION:
+            _text(self.codex_account_id)
+            if any(not 33 <= ord(char) <= 126 for char in self.codex_account_id):
+                _fail()
+        elif self.codex_account_id is not None:
+            _fail()
         object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
         _organization(self.organization_id)
         if self.organization_id is not None and self.provider != ProviderId.CLAUDE_PLATFORM:

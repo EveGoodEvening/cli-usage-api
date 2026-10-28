@@ -33,13 +33,19 @@ from usage_tui.domain import (
 )
 from usage_tui.providers.base import build_providers
 from usage_tui.scheduler import Scheduler
-from usage_tui.storage import AccountStore, ConfigError, CredentialError, CredentialStore
+from usage_tui.storage import (
+    AccountStore,
+    ConfigCommittedError,
+    ConfigError,
+    CredentialError,
+    CredentialStore,
+)
 from usage_tui.transport import Transport, TransportError, _cookie_value, _header_token
 
 PROVIDER_NAMES = {
     "claude-subscription": ProviderId.CLAUDE_SUBSCRIPTION,
     "claude-platform": ProviderId.CLAUDE_PLATFORM,
-    "chatgpt-subscription": ProviderId.CHATGPT_SUBSCRIPTION,
+    "codex-subscription": ProviderId.CODEX_SUBSCRIPTION,
     "grok-subscription": ProviderId.GROK_SUBSCRIPTION,
 }
 
@@ -102,6 +108,10 @@ def _parser() -> Parser:
     accounts = commands.add_parser("accounts", help="Manage local accounts and secure credentials")
     actions = accounts.add_subparsers(dest="action", required=True)
     actions.add_parser("list", help="List local nonsecret account metadata")
+    actions.add_parser(
+        "migrate-chatgpt-to-codex",
+        help="Explicitly migrate all legacy profiles, disabled and detached",
+    )
     add = actions.add_parser("add", help="Interactively add an account")
     add.add_argument("--provider", required=True, choices=tuple(PROVIDER_NAMES))
     for name in ("edit", "remove"):
@@ -172,9 +182,9 @@ def _secret(kind: CredentialKind) -> str:
 
 
 def _source(account: Account, credentials: CredentialStore) -> tuple[Account, str | None]:
-    allowed = set(READ_CREDENTIAL_KINDS[account.provider]) | {CredentialKind.API_KEY}
-    if account.provider == ProviderId.CHATGPT_SUBSCRIPTION:
-        allowed.add(CredentialKind.MANUAL_BEARER)
+    allowed = set(READ_CREDENTIAL_KINDS[account.provider])
+    if account.provider != ProviderId.CODEX_SUBSCRIPTION:
+        allowed.add(CredentialKind.API_KEY)
     kind = _choose(
         "Credential source number",
         [("No credential / local profile", None)]
@@ -257,6 +267,34 @@ def _metadata(account: Account) -> Account:
 
 def _accounts(args) -> int:
     store = AccountStore()
+    if args.action == "migrate-chatgpt-to-codex":
+        _tty()
+        profiles = store.legacy_chatgpt_profiles()
+        if not profiles:
+            print("No legacy ChatGPT profiles to migrate.")
+            return 0
+        print("Migrate every listed legacy ChatGPT profile to Codex:")
+        for account_id, label in profiles:
+            print(f"{account_id}  {sanitize_text(label, max_length=120)}")
+        print(
+            "All listed profiles will be disabled and their credential references detached. "
+            "Old keyring secrets are retained, never read or deleted. Configure a file-backed "
+            "Codex login before enabling them; other accounts are unchanged."
+        )
+        if not _confirm("Migrate the complete listed set?"):
+            raise Cancelled
+        try:
+            store.migrate_legacy_chatgpt_to_codex(
+                confirmed_account_ids=tuple(account_id for account_id, _ in profiles)
+            )
+        except ConfigCommittedError:
+            raise CommandError(
+                "Migration saved, but crash durability could not be confirmed. Profiles are "
+                "disabled and detached; old secrets were retained. Reopen accounts list before retrying.",
+                2,
+            ) from None
+        print("Migration saved. Profiles are disabled and detached; old secrets were retained.")
+        return 0
     accounts = store.load()
     if args.action == "list":
         if not accounts:
@@ -372,7 +410,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2 if isinstance(error.__context__, (ConfigError, AccountFlowError)) else 3
     except ConfigError:
         print(
-            "Cannot read/write config. Check private directory/file permissions and schema.",
+            "Cannot read/write config. Check private directory/file permissions and schema. "
+            "For legacy ChatGPT profiles run usage accounts migrate-chatgpt-to-codex in a terminal; "
+            "migration disables and detaches profiles and retains old secrets.",
             file=sys.stderr,
         )
         return 2

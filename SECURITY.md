@@ -5,11 +5,12 @@
 This repository supplies package/domain, local storage, credential-resolution,
 fixed-origin HTTP transport, Claude subscription, Console balance/discovery, Grok
 billing, provider-registry, polling/freshness and offline-source libraries, a
-Textual account manager/dashboard, and the C12 production `usage` CLI. **Ordinary
-ChatGPT weekly quota retrieval remains blocked by the missing upstream contract.**
-Saving credentials or displaying synthetic ChatGPT demo values does not unblock
-it. No authenticated provider or real OS-keyring acceptance is claimed by this
-documentation task; exact exercised verification remains in [PLAN.md](PLAN.md).
+Textual account manager/dashboard, and the production `usage` CLI. The corrected
+scope is **Codex quota**, not ordinary ChatGPT chat usage. The atomic Codex cutover
+is implemented and integrated offline verification passed under PLAN.md §11;
+independent implementation review and draft closure remain pending. No authenticated
+provider or real OS-keyring acceptance is claimed. Exact exercised evidence remains
+in [PLAN.md](PLAN.md).
 
 Domain records are not a secure storage service. A credential value excluded from a
 representation is not encrypted or erased from process memory. Do not serialize
@@ -67,7 +68,7 @@ exposed, revoke or replace it through the relevant first-party service.
   the provider/transport restrictions above. The CLI supplies production composition.
 - Demo mode constructs the packaged offline source, not live stores, credential
   resolution, transport, or clients. Its account screen is read-only. The DEMO
-  banner and synthetic ChatGPT warning distinguish examples from live support;
+  banner and synthetic Codex warning distinguish examples from authenticated support;
   demo samples are never a fallback for a failed live request.
 - Rendered labels, diagnostic/detail text, organization/grant identifiers, and
   provenance must be treated as display data, with control-character removal,
@@ -108,13 +109,13 @@ exposed, revoke or replace it through the relevant first-party service.
   newly discovered explicit selection rather than fallback to the previous scope.
   Grok scope choices use numbered display labels, not arbitrary auth-file key names,
   and bind the intended imported identity instead of guessing among ambiguous profiles.
-- Local API-key management does not authorize OAuth/session reads; optional
-  ChatGPT bearer/API-key storage does not repair its missing weekly contract.
-  No ChatGPT cookie/password, browser login, refresh protocol, or login subprocess
-  is supplied. Reconnect guidance directs users to first-party login outside the app.
+- Local API-key management does not authorize OAuth/session reads. Codex permits
+  only `codex_auth_file`, not manual bearer or API-key storage. No cookie/password,
+  browser login, refresh protocol or login subprocess is supplied. Reconnect directs
+  renewal to the first-party tool outside the app.
 - Confirmed removal affects only this tool's account metadata and locally stored
   secret. Key deletion can retain the local account for reconnect. External
-  Claude/Grok login files are never removed, and no action revokes remote sessions.
+  Claude/Grok/Codex login files are never removed; no action revokes remote sessions.
   Config and keyring are separate stores, not an atomic transaction; errors must
   remain visible. A post-replacement directory-sync failure raises
   `ConfigCommittedError` with the committed accounts, not a rejection or rollback.
@@ -210,15 +211,21 @@ exposed, revoke or replace it through the relevant first-party service.
   | Claude subscription | `https://api.anthropic.com` | `/api/oauth/usage` | `claude_code_file`, `manual_bearer` |
   | Claude Platform | `https://platform.claude.com` | `/api/organizations`, `/api/organizations/{id}/prepaid/credits` | `console_session` |
   | Grok subscription | `https://cli-chat-proxy.grok.com` | `/v1/billing?format=credits` | `grok_auth_file`, `manual_bearer` |
+  | Codex | `https://chatgpt.com` | `/backend-api/wham/usage` | `codex_auth_file` only |
 
   Console IDs must match `[A-Za-z0-9-]{1,64}`. No arbitrary origin/path, URL
-  override, API-key substitution, or ChatGPT request is permitted. The injected
+  override, API-key substitution or ordinary-ChatGPT quota request is permitted. The injected
   in-memory HTTP test transport does not relax production URL/path checks.
 - Claude subscription sends Bearer plus `anthropic-beta: oauth-2025-04-20`.
   Console sends only `Cookie: sessionKey=<value>` authentication, never that cookie
   to another Anthropic service. Grok sends Bearer plus
   `x-xai-token-auth: xai-grok-cli`; optional `x-userid` belongs to the same resolved
   credential. No guessed upstream client-version headers are added.
+- Codex has an explicit authentication branch: Bearer from `tokens.access_token`
+  and `ChatGPT-Account-Id` from the same stable file read, never Grok headers,
+  cookies or query parameters. Provider and transport independently enforce binding
+  before constructing headers or opening a socket. Neither selected ID nor bearer
+  is copied into config, provenance, diagnostics or public representations.
 - A Console value is a high-sensitivity session credential, not a limited API key.
   Invalid cookie controls/delimiters are rejected; full Cookie headers, passwords,
   and HAR imports are not supported. Console discovery returns candidates, not an
@@ -343,26 +350,55 @@ exposed, revoke or replace it through the relevant first-party service.
   acceptance, or private-proxy compatibility. No live or CLI/TUI acceptance follows
   from this library or documentation.
 
-## Implemented C07 registry and unresolved-capability boundary
+## Implemented Codex security contract — verified offline, live unknown
 
-- `build_providers(transport, resolver)` explicitly constructs the four provider
-  entries; construction/imports do not read credentials, probe the environment, or
-  issue network requests. Registry membership is not evidence of live support.
-- The ordinary ChatGPT capability keeps its required weekly row visible with
-  `upstream_contract_missing` and unresolved provenance. It declares
-  `requires_credential=False` and does not invoke credential resolution or
-  transport. The C08 scheduler publishes that blocked result without reading a
-  saved secret, even if the local account has an optional credential reference.
-- A labeled ChatGPT profile needs no credential. Optional user-provided bearer or
-  API-key storage does not establish an authentication contract or enable weekly
-  retrieval. Do not solicit ChatGPT cookies/passwords, extract browser sessions,
-  or invent a third-party OAuth client as a remedy for missing upstream semantics.
-- WHAM/Codex OAuth and API consumption cannot substitute for ordinary chat-model
-  weekly usage. Static `conversation/init` feature-limit evidence does not prove
-  model/window semantics or authorize a potentially state-changing POST. No live
-  requests or authenticated metric acceptance follow from the blocked capability.
-  The exact unresolved read/authentication/metric prerequisite remains in PLAN.md
-  §§4.4, 7, and 9; a finished error result is not completion of the requested quota.
+- Registry construction/imports do not read credentials, probe the environment or
+  issue requests. `CodexProvider.requires_credential=True` uses the ordinary
+  credentialed scheduler path; historical C07's blocked capability is removed.
+- Read only an existing private file: `$CODEX_HOME/auth.json` when CODEX_HOME is
+  nonempty, otherwise `~/.codex/auth.json`, or an explicit selected file. Preserve
+  owner/mode/no-follow/size/stability checks. Keyring-only, auto-without-file and
+  ephemeral Codex storage are unavailable; configure file-backed login externally.
+  The app does not probe Codex keyring or launch Codex; verification used only
+  synthetic private auth files, never real Codex auth files or user secrets.
+- Bearer is only `tokens.access_token`; selected account is `tokens.account_id`,
+  falling back only when absent to decoded ID-token payload
+  `["https://api.openai.com/auth"]["chatgpt_account_id"]`. Invalid explicit ID is
+  an error, not permission to fall back. Reject missing/malformed bearer/account,
+  wrong types, `auth_mode="api_key"` and nonempty `OPENAI_API_KEY`. No scope-list
+  requirement, organization/label/local-ID inference or Grok identity reuse.
+- Unverified JWT decoding extracts provenance/expiry hints, **not signature
+  verification or an authentication trust boundary**. Access-token `exp` is Unix
+  seconds; expired/malformed expiry requires reauthentication, missing expiry is
+  unknown. Server rejection remains authoritative. Never use `last_refresh` as
+  expiry, use refresh tokens for auth, rewrite/refresh the file or log claims/errors.
+- Weekly is the main 604800-second window regardless of slot; optional 18000-second
+  and other windows/pools remain separate. Missing usage is unknown; enforcement
+  flags do not imply 100%. Absolute `reset_at` seconds is canonical; no timestamp
+  from relative reset, no milliseconds guessing. Preserve valid usage independently
+  of invalid reset and retain valid siblings when others are malformed/conflicting.
+  Credits/spend/code-review/reset-credit quantities are not the main quota.
+- The source is private/version-sensitive `codex.wham.usage.v1`, not a public API
+  guarantee. Static official-source evidence and synthetic fixtures do not establish
+  an authorized live read or same-account weekly/reset comparison.
+- Legacy `chatgpt_subscription` config fails closed with repair guidance, not silent
+  relabel/reset. Only real-TTY `usage accounts migrate-chatgpt-to-codex` with explicit
+  whole-set confirmation performs the lock/reread/atomic migration. Preserve local
+  identity/polling and other providers; replacements are **disabled and detached**.
+  No `--yes`, non-TTY consent or startup/TUI auto-migration. Decline/cancel writes
+  nothing. Old keyring secrets stay **retained, detached and unmanaged**: migration
+  never reads, reuses, transmits or deletes them, calls the secret backend or deletes
+  external files. Separate deliberate owner/backend deletion is not migration
+  cleanup. Configure file-backed auth before enable.
+- The orchestrator recorded 1,098 passing tests (28.59 seconds), Ruff lint, 44-file
+  formatting and clean diagnostics for all 17 source files. Synthetic resolver →
+  provider → transport, actual Scheduler lifecycle, offline demo component and
+  installed-entry PTY proofs passed. Installed-CLI real-PTY proof exercised
+  unchanged decline/cancel/non-TTY paths, affirmative mixed-config migration and
+  file-backed edit/reconnect and enable/disable. No real auth files, user secrets,
+  network or keyring were used. These are offline security/behavior proofs, not a
+  supported public API or successful same-account live quota comparison; independent
+  implementation review/closure and authorized live acceptance remain pending.
 
 ## Implemented C08 scheduler boundary
 
@@ -382,9 +418,8 @@ exposed, revoke or replace it through the relevant first-party service.
   not truncated by the local exponential-backoff cap, and same-provider account
   updates do not erase an embargo. Retries remain read-only provider fetches,
   never token refreshes, login subprocesses, purchases, or reset actions.
-- Credential-free unresolved ChatGPT profiles publish the blocked result once per
-  generation without resolver/transport access; neither periodic polling nor
-  manual refresh reads their optional stored secret.
+- Codex uses normal credentialed polling, manual refresh, stale-state, retry and
+  cancellation semantics; no historical credential-free blocked exception remains.
 - Error snapshots retain last-good values with their old success time and new
   safe error/attempt metadata. Compatible responses (including partial ones)
   replace current fields; absence cannot masquerade as current old usage. Stale
@@ -409,9 +444,8 @@ remains the orchestrator's separate PLAN.md record.
   failed live fetch. Packaged fixture access is not a claim of zero file I/O.
 - Both `healthy` and `errors` scenarios use fictional account labels/IDs, normalized
   domain snapshots, `offline_demo` provenance, and a fixed demo observation time.
-  All samples are synthetic, including any ready ChatGPT weekly sample. These
-  samples do not demonstrate a working ordinary ChatGPT adapter or remove its
-  missing upstream read/authentication/model/window/reset contract.
+  All samples are synthetic, including ready Codex weekly and optional windows.
+  They demonstrate neither an authorized WHAM read nor authenticated compatibility.
 - Error, partial, retry, unknown, and stale last-known samples are display inputs,
   not actual provider responses or authenticated observations. Advancing a demo
   clock does not renew an allowance, retry a provider, or access a saved secret.
@@ -425,8 +459,8 @@ remains the orchestrator's separate PLAN.md record.
 The implemented CLI/dashboard composition preserves these controls. Its local
 verification does not establish authenticated provider or real-keyring acceptance:
 
-- Do not resolve saved secrets or request transport for the unresolved ChatGPT
-  capability. API-key storage does not enable subscription or balance retrieval.
+- Codex accepts only its file-backed login and selected account; no manual/API-key
+  substitution. Other providers' API-key storage does not enable subscription/balance reads.
 - Require explicit organization/profile selection and warn before accepting only a
   Console `sessionKey` value. Provider adapters validate response semantics.
 - Present secure persistence versus session-only choices honestly and provide
@@ -442,6 +476,6 @@ verification does not establish authenticated provider or real-keyring acceptanc
 
 No live metric or credential-safety acceptance follows from fixtures, installation,
 or the offline source. Private provider contracts can change without notice.
-Ordinary ChatGPT weekly usage remains blocked by an unresolved read/authentication/
-metric contract, not merely missing credentials; WHAM/Codex is not a substitute.
-See PLAN.md §§4–5 and §9 for exact boundaries and separate live acceptance.
+Codex's official-source contract makes implementation actionable, not live-accepted.
+See PLAN.md §11 for exact current scope, integrated proof and separate live acceptance;
+other providers' existing security and live prerequisites remain unchanged.

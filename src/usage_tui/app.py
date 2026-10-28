@@ -34,7 +34,8 @@ METRIC_LABELS = {
     "claude.platform.purchased_balance": "Claude Platform 购买余额",
     "claude.platform.promotional_balance": "Claude Platform 赠送余额",
     "claude.platform.total_balance": "Claude Platform 总余额",
-    "chatgpt.subscription.weekly": "ChatGPT 每周用量",
+    "codex.subscription.weekly": "Codex weekly (7d)",
+    "codex.subscription.five_hour": "Codex 5h",
     "grok.subscription.shared_pool": "Grok 共享池用量",
     "grok.product.build": "GrokBuild 共享池消耗",
     "grok.product.chat": "GrokChat 共享池消耗",
@@ -239,7 +240,7 @@ class UsageApp(App[None]):
         if self.screen_stack:
             self.screen_stack[0].set_class(compact, "compact")
         self.banner.update(
-            "DEMO 离线合成演示 — 不代表真实账号或 ChatGPT 已支持"
+            "DEMO 离线合成演示 — 不代表真实账号或已验证的 Codex 实时额度"
             if demo
             else "LIVE 实时账号用量（有界轮询）"
         )
@@ -471,7 +472,7 @@ class UsageApp(App[None]):
         self.push_screen(
             InformationScreen(
                 "帮助 / Help",
-                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。GrokBuild / GrokChat 消耗同一共享池。\nLIVE ChatGPT 每周契约仍阻塞；DEMO ChatGPT 是合成样例，不是支持证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
+                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
             )
         )
 

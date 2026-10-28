@@ -30,6 +30,7 @@ _ORIGINS = {
     ProviderId.CLAUDE_SUBSCRIPTION: "https://api.anthropic.com",
     ProviderId.CLAUDE_PLATFORM: "https://platform.claude.com",
     ProviderId.GROK_SUBSCRIPTION: "https://cli-chat-proxy.grok.com",
+    ProviderId.CODEX_SUBSCRIPTION: "https://chatgpt.com",
 }
 
 
@@ -46,6 +47,8 @@ def _allowed_path(provider: ProviderId, path: str) -> bool:
         return False
     if provider == ProviderId.CLAUDE_SUBSCRIPTION:
         return path == "/api/oauth/usage"
+    if provider == ProviderId.CODEX_SUBSCRIPTION:
+        return path == "/backend-api/wham/usage"
     if provider == ProviderId.GROK_SUBSCRIPTION:
         return path == "/v1/billing?format=credits"
     if provider == ProviderId.CLAUDE_PLATFORM:
@@ -130,6 +133,12 @@ class Transport:
             raise TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch")
         if credential.user_id is not None and not _header_token(credential.user_id):
             raise TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch")
+        if provider == ProviderId.CODEX_SUBSCRIPTION:
+            selected = credential.codex_account_id
+            if not isinstance(selected, str) or len(selected) > 256 or not _header_token(selected):
+                raise TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch")
+            if credential.expires_at is not None and credential.expires_at <= self._clock():
+                raise TransportError(FetchState.AUTH_REQUIRED, "credential_expired")
 
         headers = {
             "Accept": "application/json",
@@ -138,14 +147,17 @@ class Transport:
         }
         if provider == ProviderId.CLAUDE_PLATFORM:
             headers["Cookie"] = f"sessionKey={credential.secret}"
-        else:
+        elif provider == ProviderId.CODEX_SUBSCRIPTION:
             headers["Authorization"] = f"Bearer {credential.secret}"
-            if provider == ProviderId.CLAUDE_SUBSCRIPTION:
-                headers["anthropic-beta"] = "oauth-2025-04-20"
-            else:
-                headers["x-xai-token-auth"] = "xai-grok-cli"
-                if credential.user_id is not None:
-                    headers["x-userid"] = credential.user_id
+            headers["ChatGPT-Account-Id"] = credential.codex_account_id
+        elif provider == ProviderId.CLAUDE_SUBSCRIPTION:
+            headers["Authorization"] = f"Bearer {credential.secret}"
+            headers["anthropic-beta"] = "oauth-2025-04-20"
+        elif provider == ProviderId.GROK_SUBSCRIPTION:
+            headers["Authorization"] = f"Bearer {credential.secret}"
+            headers["x-xai-token-auth"] = "xai-grok-cli"
+            if credential.user_id is not None:
+                headers["x-userid"] = credential.user_id
 
         # Raise outside exception handlers: even __context__ must not retain the
         # original upstream exception (which may contain credentials or bodies).

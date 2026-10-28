@@ -3,6 +3,7 @@
 import asyncio
 import builtins
 import io
+import json
 import socket
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -102,9 +103,15 @@ async def test_packaged_fixture_fictional_identity_and_required_rows(scenario):
             assert account.credential_kind is None
             assert account.credential_selector is None
             assert snapshot.account_id == account.id
-            assert (
-                tuple(row.id for row in snapshot.metrics) == REQUIRED_METRIC_IDS[account.provider]
-            )
+            required = REQUIRED_METRIC_IDS[account.provider]
+            metric_ids = tuple(row.id for row in snapshot.metrics)
+            assert metric_ids[: len(required)] == required
+            assert len(set(metric_ids)) == len(metric_ids)
+            if account.provider == ProviderId.CODEX_SUBSCRIPTION:
+                assert required == (MetricId.CODEX_WEEKLY,)
+                assert metric_ids == (MetricId.CODEX_WEEKLY, MetricId.CODEX_FIVE_HOUR)
+            else:
+                assert metric_ids == required
             assert all(row.source.kind == SourceKind.OFFLINE_DEMO for row in snapshot.metrics)
             assert all("SYNTHETIC" in row.label for row in snapshot.metrics)
             assert snapshot.attempted_at == DEMO_NOW
@@ -114,14 +121,14 @@ async def test_packaged_fixture_fictional_identity_and_required_rows(scenario):
 
 
 @pytest.mark.asyncio
-async def test_healthy_values_balances_grants_and_synthetic_gpt_warning():
+async def test_healthy_values_balances_grants_and_fictional_codex_windows():
     published = []
     source = DemoSource(publish=published.append)
     await source.start()
     try:
         assert all(snapshot.fetch_state == FetchState.OK for snapshot in published)
         rows = {row.id: row for snapshot in published for row in snapshot.metrics}
-        assert len(rows) == 10
+        assert len(rows) == 11
         assert all(row.state == MetricState.READY for row in rows.values())
         fable = rows[MetricId.CLAUDE_FABLE_WEEKLY]
         assert fable.quota.used_percent == Decimal("110.25")
@@ -133,16 +140,72 @@ async def test_healthy_values_balances_grants_and_synthetic_gpt_warning():
         assert console.grants[0].expires_at is None
         assert console.grants[1].expires_at == DEMO_NOW + timedelta(days=7)
         assert all(row.reset_at is None for row in console.metrics)
-        gpt = rows[MetricId.CHATGPT_WEEKLY]
-        assert "SYNTHETIC ONLY" in gpt.label
-        assert "ordinary ChatGPT weekly live retrieval is unsupported" in gpt.detail
-        assert "Not evidence of live support" in gpt.detail
+        weekly = rows[MetricId.CODEX_WEEKLY]
+        five_hour = rows[MetricId.CODEX_FIVE_HOUR]
+        assert weekly.label == "Codex weekly (7d) · SYNTHETIC"
+        assert weekly.quota.used_percent == Decimal(24)
+        assert weekly.reset_at == DEMO_NOW + timedelta(days=4)
+        assert five_hour.label == "Codex 5h · SYNTHETIC"
+        assert five_hour.quota.used_percent == Decimal("12.5")
+        assert five_hour.reset_at == DEMO_NOW + timedelta(hours=3)
+        for row in (weekly, five_hour):
+            assert row.source.kind == SourceKind.OFFLINE_DEMO
+            assert row.detail == "Fictional synthetic demonstration; not live account data."
         pool = rows[MetricId.GROK_SHARED_POOL]
         for product in (MetricId.GROK_BUILD, MetricId.GROK_CHAT):
             assert rows[product].quota is None
             assert rows[product].reset_at is None
             assert rows[product].shared_pool_id == pool.shared_pool_id
             assert "not an independent remaining allowance" in rows[product].detail
+    finally:
+        await source.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "inventory", ["weekly_only", "extra_duration", "missing_weekly", "duplicate"]
+)
+async def test_codex_fixture_preserves_required_weekly_and_optional_extras(
+    inventory, tmp_path, monkeypatch
+):
+    fixture = json.loads(files("usage_tui").joinpath("fixtures/demo.json").read_text())
+    metrics = fixture["providers"]["codex_subscription"]["metrics"]
+    if inventory == "weekly_only":
+        metrics.pop()
+    elif inventory == "extra_duration":
+        metrics.append(
+            {
+                "id": "codex.subscription.window.300",
+                "label": "Codex 300s · SYNTHETIC",
+                "used_percent": "8",
+                "reset_offset": 120,
+            }
+        )
+    elif inventory == "missing_weekly":
+        metrics.pop(0)
+    else:
+        metrics.append(dict(metrics[0]))
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    (fixture_dir / "demo.json").write_text(json.dumps(fixture))
+    monkeypatch.setattr("usage_tui.demo.files", lambda package: tmp_path)
+    published = []
+    source = DemoSource(publish=published.append)
+    try:
+        if inventory in {"missing_weekly", "duplicate"}:
+            with pytest.raises(ValueError, match="required metrics first, then unique extras"):
+                await source.start()
+        else:
+            await source.start()
+            snapshot = next(item for item in published if item.account_id == source.accounts[2].id)
+            assert snapshot.fetch_state == FetchState.OK
+            assert tuple(row.id for row in snapshot.metrics) == tuple(
+                item["id"] for item in metrics
+            )
+            assert all(row.state == MetricState.READY for row in snapshot.metrics)
+            assert all(row.source.kind == SourceKind.OFFLINE_DEMO for row in snapshot.metrics)
+            if inventory == "weekly_only":
+                assert tuple(row.id for row in snapshot.metrics) == (MetricId.CODEX_WEEKLY,)
     finally:
         await source.stop()
 

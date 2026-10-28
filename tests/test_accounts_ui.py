@@ -250,20 +250,39 @@ async def test_claude_default_reference_missing_profile_reconnect_guidance(
         assert source.exists()
 
 
-async def test_chatgpt_honestly_blocked_local_key_only(manager):
+async def test_codex_file_only_default_save_and_missing_login_guidance(manager, monkeypatch):
     calls = []
     manager.on_reconnect = calls.append
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Codex file management must not touch stored secrets")
+
+    monkeypatch.setattr(manager.credential_store, "put", forbidden)
+    monkeypatch.setattr(manager.credential_store, "get", forbidden)
+    monkeypatch.setattr(manager.credential_store, "delete", forbidden)
+    monkeypatch.setenv("CODEX_HOME", str(manager.account_store.path.parent / "missing-codex"))
     async with Host(manager).run_test() as pilot:
         form = await open_form(pilot.app, pilot)
-        await set_source(form, pilot, ProviderId.CHATGPT_SUBSCRIPTION, CredentialKind.API_KEY)
-        assert "does not enable" in str(form.query_one("#guidance", Static).render())
-        form.query_one("#secret", Input).value = "synthetic-api-key"
+        form.query_one("#provider", Select).value = ProviderId.CODEX_SUBSCRIPTION
+        await pilot.pause()
+        assert form.query_one("#kind", Select).value == CredentialKind.CODEX_AUTH_FILE
+        assert {kind for _, kind in form._kinds(ProviderId.CODEX_SUBSCRIPTION)} == {
+            "none",
+            CredentialKind.CODEX_AUTH_FILE,
+        }
+        assert not form.query_one("#secret").display
+        assert not form.query_one("#persist").display
+        assert "codex login" in str(form.query_one("#guidance", Static).render())
+        form.query_one("#label", Input).value = "Codex synthetic"
         await form.save()
         await pilot.pause()
+        (saved,) = manager.account_store.load()
+        assert saved.credential_kind == CredentialKind.CODEX_AUTH_FILE
+        assert saved.credential_ref == "default"
         await pilot.press("r")
         await pilot.pause()
         assert not calls
-        assert "blocked" in str(manager.query_one("#account-status", Static).render())
+        assert "codex login" in str(manager.query_one("#account-status", Static).render())
 
 
 async def test_readonly_demo_never_touches_services():
@@ -324,7 +343,9 @@ async def test_service_failure_clears_input_and_redacts_error(manager, monkeypat
         assert manager.accounts == ()
 
 
-@pytest.mark.parametrize("provider", list(ProviderId))
+@pytest.mark.parametrize(
+    "provider", [provider for provider in ProviderId if provider != ProviderId.CODEX_SUBSCRIPTION]
+)
 async def test_api_key_storage_never_discovers_or_implies_reads(manager, provider):
     class ForbiddenDiscovery:
         async def discover_organizations(self, _credential):
@@ -516,3 +537,55 @@ async def test_committed_cleanup_failure_notifies_host_once(manager, monkeypatch
             manager.query_one("#account-status", Static).render()
         )
         assert manager.credential_store.get(saved.credential_ref) == "synthetic-old"
+
+
+async def test_live_empty_dialog_cancels_without_writes(manager):
+    async with Host(manager).run_test() as pilot:
+        assert "No accounts" in str(manager.query_one("#account-status", Static).render())
+        await open_form(pilot.app, pilot)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert pilot.app.screen is manager
+        assert not manager.account_store.path.exists()
+
+
+async def test_legacy_config_guidance_never_migrates(manager):
+    manager.account_store.path.parent.mkdir(mode=0o700)
+    record = Account(str(uuid4()), ProviderId.CLAUDE_SUBSCRIPTION, "Legacy").to_dict()
+    record["provider"] = "chatgpt_subscription"
+    content = json.dumps({"schema_version": 1, "accounts": [record]})
+    manager.account_store.path.write_text(content)
+    manager.account_store.path.chmod(0o600)
+    async with Host(manager).run_test():
+        assert "usage accounts migrate-chatgpt-to-codex" in str(
+            manager.query_one("#account-status", Static).render()
+        )
+        assert manager.account_store.path.read_text() == content
+
+
+async def test_codex_file_reconnect_after_external_login(manager, tmp_path, monkeypatch):
+    root = tmp_path / "codex"
+    root.mkdir(mode=0o700)
+    source = root / "auth.json"
+    source.write_text(
+        json.dumps({"tokens": {"access_token": "e30.e30.c2ln", "account_id": "synthetic-account"}})
+    )
+    source.chmod(0o600)
+    monkeypatch.setenv("CODEX_HOME", str(root))
+    account = Account(
+        str(uuid4()),
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Codex",
+        credential_kind=CredentialKind.CODEX_AUTH_FILE,
+        credential_ref="default",
+        enabled=False,
+    )
+    manager.account_store.save((account,))
+    calls = []
+    manager.on_reconnect = calls.append
+    async with Host(manager).run_test() as pilot:
+        await pilot.press("r")
+        await pilot.pause()
+        assert calls == [account.id]
+        assert manager.account_store.load() == (account,)
+        assert source.exists()

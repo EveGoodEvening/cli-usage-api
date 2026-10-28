@@ -219,3 +219,31 @@ def test_directory_sync_failure_preserves_committed_credentials(services, monkey
         assert credentials.get(original.credential_ref) == "synthetic-old"
     assert "synthetic-new" not in store.path.read_text()
     assert "synthetic-old" not in store.path.read_text()
+
+
+def test_codex_external_file_never_uses_secret_store(services, tmp_path):
+    store, _, service = services
+
+    class ForbiddenCredentials:
+        def __getattr__(self, _name):
+            pytest.fail("Codex external-file flow touched the secret store")
+
+    service.credentials = ForbiddenCredentials()
+    external = tmp_path / "auth.json"
+    external.write_text("synthetic external data")
+    original = Account(
+        str(uuid4()),
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Codex",
+        credential_kind=CredentialKind.CODEX_AUTH_FILE,
+        credential_ref=str(external),
+        enabled=False,
+    )
+    service.save(original)
+    enabled = replace(original, enabled=True)
+    service.save(enabled, original=original)
+    detached = replace(enabled, credential_kind=None, credential_ref=None)
+    service.save(detached, original=enabled)
+    service.remove(detached)
+    assert store.load() == ()
+    assert external.read_text() == "synthetic external data"

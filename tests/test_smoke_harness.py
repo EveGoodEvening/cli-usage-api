@@ -37,13 +37,17 @@ def test_installed_entry_uses_current_environment(tmp_path, monkeypatch):
 def test_isolation_does_not_forward_credentials_or_driver(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-not-for-child")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/unwanted/config")
+    monkeypatch.setenv("CODEX_HOME", "/unwanted/codex")
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-not-for-child")
     monkeypatch.setenv("TEXTUAL_DRIVER", "unwanted.driver")
     environment = smoke.isolated_environment(str(tmp_path))
     assert environment["HOME"] == str(tmp_path)
     assert environment["XDG_CONFIG_HOME"] == str(tmp_path / "config")
+    assert environment["CODEX_HOME"] == str(tmp_path / "codex")
     assert environment["USAGE_SMOKE_SYNTHETIC_SECRET"] == smoke.SECRET_SENTINEL
     assert "ANTHROPIC_API_KEY" not in environment
     assert "CLAUDE_CONFIG_DIR" not in environment
+    assert "OPENAI_API_KEY" not in environment
     assert "TEXTUAL_DRIVER" not in environment
 
 

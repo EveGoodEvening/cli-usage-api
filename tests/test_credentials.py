@@ -1,5 +1,6 @@
 """All first-party files and identities below are synthetic and temporary."""
 
+import base64
 import json
 import os
 from dataclasses import replace
@@ -25,6 +26,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("GROK_HOME", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
 
 
 @pytest.fixture
@@ -339,7 +341,6 @@ def test_import_checks_descriptor_again_after_read(tmp_path, samples, monkeypatc
         (ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.MANUAL_BEARER),
         (ProviderId.GROK_SUBSCRIPTION, CredentialKind.MANUAL_BEARER),
         (ProviderId.CLAUDE_PLATFORM, CredentialKind.CONSOLE_SESSION),
-        (ProviderId.CHATGPT_SUBSCRIPTION, CredentialKind.MANUAL_BEARER),
         (ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.API_KEY),
     ],
 )
@@ -406,3 +407,210 @@ def test_grok_rejects_unsafe_identity_header(tmp_path):
         grok=True,
     )
     assert_error(account, "schema_error")
+
+
+def jwt(claims):
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"eyJhbGciOiJub25lIn0.{payload}.c3ludGhldGlj"
+
+
+def codex_data(**claims):
+    return {
+        "auth_mode": "chatgpt",
+        "OPENAI_API_KEY": None,
+        "tokens": {
+            "access_token": jwt({"exp": int(FUTURE.timestamp()), **claims}),
+            "account_id": "synthetic-selected-account",
+            "refresh_token": "synthetic-refresh-never-used",
+        },
+        "last_refresh": "1900-01-01T00:00:00Z",
+    }
+
+
+def codex_import(tmp_path, data):
+    path = tmp_path / "synthetic-codex-auth.json"
+    path.write_text(json.dumps(data))
+    path.chmod(0o600)
+    return Account(
+        ACCOUNT_ID,
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Synthetic Codex",
+        str(path),
+        CredentialKind.CODEX_AUTH_FILE,
+    )
+
+
+@pytest.mark.parametrize("override", [False, True, "empty"])
+def test_codex_default_path(tmp_path, monkeypatch, override):
+    root = tmp_path / ("override" if override is True else ".codex")
+    root.mkdir()
+    path = root / "auth.json"
+    path.write_text(json.dumps(codex_data()))
+    path.chmod(0o600)
+    if override is True:
+        monkeypatch.setenv("CODEX_HOME", str(root))
+    elif override == "empty":
+        monkeypatch.setenv("CODEX_HOME", "")
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "must-not-use-grok"))
+    account = Account(
+        ACCOUNT_ID,
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Synthetic",
+        "default",
+        CredentialKind.CODEX_AUTH_FILE,
+    )
+    assert resolver().resolve(account).expires_at == FUTURE
+
+
+def test_codex_capture_redaction_and_selected_account_generation(tmp_path):
+    data = codex_data()
+    account = codex_import(tmp_path, data)
+    path = Path(account.credential_ref)
+    before = path.read_bytes()
+    instance = resolver()
+    first = instance.resolve(account)
+    assert first.secret == data["tokens"]["access_token"]
+    assert first.codex_account_id == "synthetic-selected-account"
+    assert first.user_id is None
+    assert first.expires_at == FUTURE
+    assert first.generation_fingerprint == instance.resolve(account).generation_fingerprint
+    for private in (first.secret, first.codex_account_id, first.generation_fingerprint):
+        assert private not in repr(first)
+    assert "synthetic-refresh" not in repr(first)
+    assert path.read_bytes() == before
+    data["tokens"]["account_id"] = "synthetic-other-account"
+    path.write_text(json.dumps(data))
+    second = instance.resolve(account)
+    assert second.secret == first.secret
+    assert second.codex_account_id != first.codex_account_id
+    assert second.generation_fingerprint != first.generation_fingerprint
+
+
+def test_codex_documented_id_token_fallback_only(tmp_path):
+    data = codex_data()
+    del data["tokens"]["account_id"]
+    data["tokens"]["id_token"] = jwt(
+        {
+            "https://api.openai.com/auth": {"chatgpt_account_id": "synthetic-fallback"},
+        }
+    )
+    assert resolver().resolve(codex_import(tmp_path, data)).codex_account_id == "synthetic-fallback"
+    data["tokens"]["account_id"] = "synthetic-explicit"
+    data["tokens"]["id_token"] = "malformed-unused-id-token"
+    assert resolver().resolve(codex_import(tmp_path, data)).codex_account_id == "synthetic-explicit"
+
+
+@pytest.mark.parametrize("value", [None, "", True, [], "a b", "a\r\nInjected:yes", "a" * 257])
+def test_codex_invalid_explicit_account_never_falls_back(tmp_path, value):
+    data = codex_data()
+    data["tokens"]["account_id"] = value
+    data["tokens"]["id_token"] = jwt(
+        {
+            "https://api.openai.com/auth": {"chatgpt_account_id": "synthetic-valid"},
+        }
+    )
+    assert_error(codex_import(tmp_path, data), "schema_error")
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {},
+        {"chatgpt_account_id": "synthetic-wrong-level"},
+        {"https://api.openai.com/auth": []},
+        {"https://api.openai.com/auth": {"chatgpt_account_id": ""}},
+    ],
+)
+def test_codex_missing_documented_identity(tmp_path, claims):
+    data = codex_data()
+    del data["tokens"]["account_id"]
+    data["tokens"]["id_token"] = jwt(claims)
+    assert_error(codex_import(tmp_path, data), "schema_error")
+
+
+@pytest.mark.parametrize(
+    "field,value,code",
+    [
+        ("auth_mode", "api_key", "credential_mismatch"),
+        ("OPENAI_API_KEY", "synthetic-api-key", "credential_mismatch"),
+        ("OPENAI_API_KEY", True, "schema_error"),
+        ("auth_mode", [], "schema_error"),
+        ("tokens", None, "schema_error"),
+        ("tokens", [], "schema_error"),
+    ],
+)
+def test_codex_rejects_api_key_and_malformed_schema(tmp_path, field, value, code):
+    data = codex_data()
+    data[field] = value
+    assert_error(codex_import(tmp_path, data), code)
+
+
+@pytest.mark.parametrize("value", [None, "", True, [], "synthetic\naccess", "not-a-jwt", "a.!.b"])
+def test_codex_rejects_malformed_access_token(tmp_path, value):
+    data = codex_data()
+    data["tokens"]["access_token"] = value
+    assert_error(codex_import(tmp_path, data), "schema_error")
+
+
+@pytest.mark.parametrize("value", [None, True, "1893456000", [], 0, -1, float("inf"), 10**1000])
+def test_codex_rejects_malformed_expiry_as_auth_required(tmp_path, value):
+    assert_error(
+        codex_import(tmp_path, codex_data(exp=value)),
+        "schema_error",
+        state=FetchState.AUTH_REQUIRED,
+    )
+
+
+def test_codex_expired_and_absent_expiry(tmp_path):
+    assert_error(
+        codex_import(tmp_path, codex_data(exp=int(NOW.timestamp()))),
+        "credential_expired",
+        state=FetchState.AUTH_REQUIRED,
+    )
+    data = codex_data()
+    data["tokens"]["access_token"] = jwt({})
+    assert resolver().resolve(codex_import(tmp_path, data)).expires_at is None
+
+
+def test_codex_file_only_never_reads_secret_store(tmp_path):
+    class ForbiddenStore:
+        def get(self, ref):
+            pytest.fail("Codex file auth must not consult keyring")
+
+    assert resolver(ForbiddenStore()).resolve(codex_import(tmp_path, codex_data())).codex_account_id
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o400])
+def test_codex_preserves_private_file_requirement(tmp_path, mode):
+    account = codex_import(tmp_path, codex_data())
+    Path(account.credential_ref).chmod(mode)
+    assert_error(account, "unsafe_credential_file")
+
+
+def test_codex_does_not_fall_back_to_grok_schema(tmp_path):
+    assert_error(codex_import(tmp_path, {SCOPE: {"key": "synthetic-grok"}}), "schema_error")
+
+
+@pytest.mark.parametrize(
+    "token", ["e30.bm90LWpzb24.c2ln", "e30.W10.c2ln", "e30.eyJleHAiOjEsImV4cCI6Mn0.c2ln"]
+)
+def test_codex_rejects_malformed_or_ambiguous_jwt_payload(tmp_path, token):
+    data = codex_data()
+    data["tokens"]["access_token"] = token
+    assert_error(codex_import(tmp_path, data), "schema_error")
+
+
+def test_codex_missing_file_never_uses_grok_or_keyring(tmp_path, monkeypatch):
+    grok = tmp_path / "grok"
+    grok.mkdir()
+    (grok / "auth.json").write_text(json.dumps({SCOPE: {"key": "synthetic-grok"}}))
+    (grok / "auth.json").chmod(0o600)
+    monkeypatch.setenv("GROK_HOME", str(grok))
+    account = Account(
+        ACCOUNT_ID,
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Synthetic",
+        "default",
+        CredentialKind.CODEX_AUTH_FILE,
+    )
+    assert_error(account, "credential_unavailable")

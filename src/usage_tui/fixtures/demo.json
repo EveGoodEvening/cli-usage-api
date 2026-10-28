@@ -20,9 +20,10 @@
         {"category": "promotional", "granted_minor": 2000, "remaining_minor": 1250, "name": "Fictional promotional grant", "expiry_offset": 604800}
       ]
     },
-    "chatgpt_subscription": {
+    "codex_subscription": {
       "metrics": [
-        {"id": "chatgpt.subscription.weekly", "label": "GPT weekly · SYNTHETIC ONLY", "used_percent": "24", "reset_offset": 345600, "detail": "Synthetic demonstration only; ordinary ChatGPT weekly live retrieval is unsupported: no verified upstream read contract. Not evidence of live support."}
+        {"id": "codex.subscription.weekly", "label": "Codex weekly (7d) · SYNTHETIC", "used_percent": "24", "reset_offset": 345600},
+        {"id": "codex.subscription.five_hour", "label": "Codex 5h · SYNTHETIC", "used_percent": "12.5", "reset_offset": 10800}
       ]
     },
     "grok_subscription": {
@@ -37,7 +38,7 @@
     "healthy": [
       {"id": "00000000-0000-4000-8000-000000000001", "provider": "claude_subscription", "label": "FICTIONAL DEMO · Claude"},
       {"id": "00000000-0000-4000-8000-000000000002", "provider": "claude_platform", "label": "FICTIONAL DEMO · Console"},
-      {"id": "00000000-0000-4000-8000-000000000003", "provider": "chatgpt_subscription", "label": "FICTIONAL DEMO · GPT synthetic, NOT live support"},
+      {"id": "00000000-0000-4000-8000-000000000003", "provider": "codex_subscription", "label": "FICTIONAL DEMO · Codex"},
       {"id": "00000000-0000-4000-8000-000000000004", "provider": "grok_subscription", "label": "FICTIONAL DEMO · Grok"}
     ],
     "errors": [
@@ -48,7 +49,7 @@
       {"id": "00000000-0000-4000-8000-000000000015", "provider": "claude_platform", "label": "FICTIONAL DEMO · malformed response", "fetch_state": "schema_error", "diagnostic": "schema_error", "unknown_all": true, "retry_offset": 60},
       {"id": "00000000-0000-4000-8000-000000000016", "provider": "claude_subscription", "label": "FICTIONAL DEMO · unknown Fable", "fetch_state": "partial", "diagnostic": "partial_data", "unknown_metrics": ["claude.subscription.fable_weekly"]},
       {"id": "00000000-0000-4000-8000-000000000017", "provider": "grok_subscription", "label": "FICTIONAL DEMO · missing products", "fetch_state": "partial", "diagnostic": "partial_data", "unknown_metrics": ["grok.product.build", "grok.product.chat"]},
-      {"id": "00000000-0000-4000-8000-000000000018", "provider": "chatgpt_subscription", "label": "FICTIONAL DEMO · GPT synthetic, NOT live support"}
+      {"id": "00000000-0000-4000-8000-000000000018", "provider": "codex_subscription", "label": "FICTIONAL DEMO · Codex"}
     ]
   }
 }

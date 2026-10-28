@@ -100,7 +100,7 @@ def test_ids_and_required_metric_inventory():
         "claude.platform.purchased_balance",
         "claude.platform.promotional_balance",
         "claude.platform.total_balance",
-        "chatgpt.subscription.weekly",
+        "codex.subscription.weekly",
         "grok.subscription.shared_pool",
         "grok.product.build",
         "grok.product.chat",
@@ -143,8 +143,8 @@ def test_account_invalid_values(changes):
         replace(account(), **changes)
 
 
-def test_no_credential_required_for_blocked_chatgpt_profile():
-    value = Account(ACCOUNT_ID, ProviderId.CHATGPT_SUBSCRIPTION, "ChatGPT")
+def test_detached_codex_profile_round_trips_without_credential():
+    value = Account(ACCOUNT_ID, ProviderId.CODEX_SUBSCRIPTION, "Codex")
     assert value.credential_ref is None
     assert loads(dumps(value)) == value
 
@@ -173,7 +173,7 @@ def test_read_credentials_preserve_explicit_provider_binding(provider, kind):
         validate_credential_binding(other, value)
 
 
-@pytest.mark.parametrize("provider", list(ProviderId))
+@pytest.mark.parametrize("provider", [p for p in ProviderId if p != ProviderId.CODEX_SUBSCRIPTION])
 def test_api_keys_can_be_stored_but_never_enable_reads(provider):
     value = ResolvedCredential(provider, CredentialKind.API_KEY, "synthetic", "generation-1")
     with pytest.raises(DomainError):
@@ -186,14 +186,84 @@ def test_incompatible_imports_and_console_bearer_are_rejected():
         (ProviderId.CLAUDE_PLATFORM, CredentialKind.MANUAL_BEARER),
         (ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.CONSOLE_SESSION),
         (ProviderId.GROK_SUBSCRIPTION, CredentialKind.CLAUDE_CODE_FILE),
-        (ProviderId.CHATGPT_SUBSCRIPTION, CredentialKind.GROK_AUTH_FILE),
+        (ProviderId.CODEX_SUBSCRIPTION, CredentialKind.GROK_AUTH_FILE),
     ):
         with pytest.raises(DomainError):
             validate_credential_kind(provider, kind)
-    validate_credential_kind(ProviderId.CHATGPT_SUBSCRIPTION, CredentialKind.MANUAL_BEARER)
+    validate_credential_kind(ProviderId.CODEX_SUBSCRIPTION, CredentialKind.CODEX_AUTH_FILE)
+    validate_credential_kind(
+        ProviderId.CODEX_SUBSCRIPTION, CredentialKind.CODEX_AUTH_FILE, for_read=True
+    )
+
+
+def test_codex_identity_has_only_one_required_row_and_no_active_legacy_alias():
+    assert REQUIRED_METRIC_IDS[ProviderId.CODEX_SUBSCRIPTION] == (MetricId.CODEX_WEEKLY,)
+    assert MetricId.CODEX_FIVE_HOUR not in REQUIRED_METRIC_IDS[ProviderId.CODEX_SUBSCRIPTION]
+    with pytest.raises(ValueError):
+        ProviderId("chatgpt_subscription")
+    with pytest.raises(ValueError):
+        MetricId("chatgpt.subscription.weekly")
+
+
+@pytest.mark.parametrize("kind", [k for k in CredentialKind if k != CredentialKind.CODEX_AUTH_FILE])
+@pytest.mark.parametrize("for_read", [False, True])
+def test_codex_rejects_every_other_credential_kind(kind, for_read):
     with pytest.raises(DomainError):
-        validate_credential_kind(
-            ProviderId.CHATGPT_SUBSCRIPTION, CredentialKind.MANUAL_BEARER, for_read=True
+        validate_credential_kind(ProviderId.CODEX_SUBSCRIPTION, kind, for_read=for_read)
+    with pytest.raises(DomainError):
+        Account(ACCOUNT_ID, ProviderId.CODEX_SUBSCRIPTION, "Codex", "synthetic", kind)
+
+
+def test_codex_resolved_selection_is_bound_redacted_and_not_serializable():
+    value = ResolvedCredential(
+        ProviderId.CODEX_SUBSCRIPTION,
+        CredentialKind.CODEX_AUTH_FILE,
+        "synthetic-bearer",
+        "selection-generation",
+        codex_account_id="synthetic-selected-account",
+    )
+    validate_credential_binding(ProviderId.CODEX_SUBSCRIPTION, value)
+    assert value.codex_account_id == "synthetic-selected-account"
+    for hidden in (value.secret, value.codex_account_id, value.generation_fingerprint):
+        assert hidden not in repr(value)
+    with pytest.raises(DomainError):
+        dumps(value)
+
+
+@pytest.mark.parametrize("selected", [None, "", " ", "a b", "a\r\nb", "a\x00b", "é", "x" * 257, 1])
+def test_codex_selection_requires_a_nonempty_header_safe_id(selected):
+    with pytest.raises(DomainError):
+        ResolvedCredential(
+            ProviderId.CODEX_SUBSCRIPTION,
+            CredentialKind.CODEX_AUTH_FILE,
+            "synthetic",
+            "generation",
+            codex_account_id=selected,
+        )
+
+
+@pytest.mark.parametrize(
+    "provider,kind",
+    [
+        (ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.MANUAL_BEARER),
+        (ProviderId.CLAUDE_PLATFORM, CredentialKind.CONSOLE_SESSION),
+        (ProviderId.GROK_SUBSCRIPTION, CredentialKind.MANUAL_BEARER),
+    ],
+)
+def test_codex_selection_is_forbidden_on_other_providers(provider, kind):
+    with pytest.raises(DomainError):
+        ResolvedCredential(provider, kind, "synthetic", "generation", codex_account_id="selected")
+
+
+def test_codex_selection_cannot_be_substituted_with_grok_user_id():
+    with pytest.raises(DomainError):
+        ResolvedCredential(
+            ProviderId.CODEX_SUBSCRIPTION,
+            CredentialKind.CODEX_AUTH_FILE,
+            "synthetic",
+            "generation",
+            user_id="synthetic-user",
+            codex_account_id="selected",
         )
 
 

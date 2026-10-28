@@ -7,6 +7,8 @@ No login commands, refreshes, credential writes, or permission repairs occur.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -88,6 +90,43 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def _jwt_payload(token: object) -> dict:
+    """Decode local hints only; this does not verify or authenticate a JWT."""
+    text = _text(token)
+    parts = text.split(".")
+    if len(parts) != 3 or any(
+        not part
+        or any(
+            char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for char in part
+        )
+        for part in parts
+    ):
+        raise _error("schema_error")
+    try:
+        payload = base64.b64decode(
+            parts[1] + "=" * (-len(parts[1]) % 4), altchars=b"-_", validate=True
+        )
+        claims = json.loads(payload, object_pairs_hook=_unique_object)
+    except (ValueError, UnicodeError, RecursionError, binascii.Error):
+        raise _error("schema_error") from None
+    if not isinstance(claims, dict):
+        raise _error("schema_error")
+    return claims
+
+
+def _codex_expiry(claims: dict) -> datetime | None:
+    if "exp" not in claims:
+        return None
+    value = claims["exp"]
+    try:
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError
+        return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=value)
+    except (OverflowError, ValueError, TypeError):
+        raise _error("schema_error") from None
+
+
 def _read_file(path: Path) -> bytes:
     if os.name != "posix":
         raise _error("unsafe_credential_file")
@@ -162,8 +201,13 @@ class CredentialResolver:
         if account.credential_kind == CredentialKind.CLAUDE_CODE_FILE:
             root = os.environ.get("CLAUDE_CONFIG_DIR")
             return (Path(root) if root else Path.home() / ".claude") / ".credentials.json"
-        root = os.environ.get("GROK_HOME")
-        return (Path(root) if root else Path.home() / ".grok") / "auth.json"
+        if account.credential_kind == CredentialKind.CODEX_AUTH_FILE:
+            root = os.environ.get("CODEX_HOME")
+            return (Path(root) if root else Path.home() / ".codex") / "auth.json"
+        if account.credential_kind == CredentialKind.GROK_AUTH_FILE:
+            root = os.environ.get("GROK_HOME")
+            return (Path(root) if root else Path.home() / ".grok") / "auth.json"
+        raise _error("credential_mismatch")
 
     def resolve(self, account: Account) -> ResolvedCredential:
         if not isinstance(account, Account):
@@ -175,10 +219,12 @@ class CredentialResolver:
         except DomainError:
             raise _error("credential_mismatch") from None
         user_id = None
+        codex_account_id = None
         expires_at = None
         if account.credential_kind in (
             CredentialKind.CLAUDE_CODE_FILE,
             CredentialKind.GROK_AUTH_FILE,
+            CredentialKind.CODEX_AUTH_FILE,
         ):
             raw = _read_file(self._path(account))
             try:
@@ -201,6 +247,30 @@ class CredentialResolver:
                         raise _schema()
                     if "user:profile" not in scopes:
                         raise _error("permission_denied", FetchState.PERMISSION_DENIED)
+            elif account.credential_kind == CredentialKind.CODEX_AUTH_FILE:
+                mode = data.get("auth_mode")
+                api_key = data.get("OPENAI_API_KEY")
+                if mode is not None and not isinstance(mode, str):
+                    raise _schema()
+                if api_key is not None and not isinstance(api_key, str):
+                    raise _schema()
+                if mode == "api_key" or api_key:
+                    raise _error("credential_mismatch")
+                entry = data.get("tokens")
+                if not isinstance(entry, dict):
+                    raise _schema()
+                secret = _text(entry.get("access_token"))
+                expires_at = _codex_expiry(_jwt_payload(secret))
+                if "account_id" in entry:
+                    codex_account_id = _text(entry["account_id"])
+                else:
+                    claims = _jwt_payload(entry.get("id_token"))
+                    auth = claims.get("https://api.openai.com/auth")
+                    if not isinstance(auth, dict):
+                        raise _schema()
+                    codex_account_id = _text(auth.get("chatgpt_account_id"))
+                if len(codex_account_id) > 256:
+                    raise _schema()
             else:
                 selector = account.credential_selector
                 modern = [
@@ -242,6 +312,7 @@ class CredentialResolver:
                 account.credential_ref,
                 account.credential_selector,
                 account.organization_id,
+                codex_account_id,
             ],
             separators=(",", ":"),
         ).encode("utf-8")
@@ -258,6 +329,7 @@ class CredentialResolver:
                 user_id=user_id,
                 expires_at=expires_at,
                 organization_id=account.organization_id,
+                codex_account_id=codex_account_id,
             )
         except DomainError:
             raise _schema() from None

@@ -22,12 +22,20 @@ NOW = datetime(2026, 10, 28, 12, tzinfo=UTC)
 
 def credential(provider=ProviderId.CLAUDE_SUBSCRIPTION, *, kind=None, user_id=None):
     if kind is None:
-        kind = (
-            CredentialKind.CONSOLE_SESSION
-            if provider == ProviderId.CLAUDE_PLATFORM
-            else CredentialKind.MANUAL_BEARER
-        )
-    return ResolvedCredential(provider, kind, "synthetic-secret", "generation-1", user_id=user_id)
+        kind = {
+            ProviderId.CLAUDE_PLATFORM: CredentialKind.CONSOLE_SESSION,
+            ProviderId.CODEX_SUBSCRIPTION: CredentialKind.CODEX_AUTH_FILE,
+        }.get(provider, CredentialKind.MANUAL_BEARER)
+    return ResolvedCredential(
+        provider,
+        kind,
+        "synthetic-secret",
+        "generation-1",
+        user_id=user_id,
+        codex_account_id="synthetic-selected-account"
+        if provider == ProviderId.CODEX_SUBSCRIPTION
+        else None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -52,6 +60,15 @@ def credential(provider=ProviderId.CLAUDE_SUBSCRIPTION, *, kind=None, user_id=No
             {"cookie": "sessionKey=synthetic-secret"},
         ),
         (
+            ProviderId.CODEX_SUBSCRIPTION,
+            "/backend-api/wham/usage",
+            "chatgpt.com",
+            {
+                "authorization": "Bearer synthetic-secret",
+                "chatgpt-account-id": "synthetic-selected-account",
+            },
+        ),
+        (
             ProviderId.GROK_SUBSCRIPTION,
             "/v1/billing?format=credits",
             "cli-chat-proxy.grok.com",
@@ -74,7 +91,14 @@ async def test_exact_routes_and_auth_headers(provider, path, host, expected_head
         assert request.headers["user-agent"].startswith("usage-tui/")
         for name, value in expected_headers.items():
             assert request.headers[name] == value
-        for name in ("authorization", "cookie", "anthropic-beta", "x-xai-token-auth", "x-userid"):
+        for name in (
+            "authorization",
+            "cookie",
+            "anthropic-beta",
+            "x-xai-token-auth",
+            "x-userid",
+            "chatgpt-account-id",
+        ):
             if name not in expected_headers:
                 assert name not in request.headers
         assert request.extensions["timeout"]["connect"] == 5.0
@@ -350,6 +374,11 @@ async def test_cancellation_propagates_and_closes_response():
             ProviderId.GROK_SUBSCRIPTION,
             CredentialKind.GROK_AUTH_FILE,
             "/v1/billing?format=credits",
+        ),
+        (
+            ProviderId.CODEX_SUBSCRIPTION,
+            CredentialKind.CODEX_AUTH_FILE,
+            "/backend-api/wham/usage",
         ),
     ],
 )

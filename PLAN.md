@@ -2,13 +2,13 @@
 
 ## 0. Status, purpose, and scheduling authority
 
-Planning baseline: 2026-10-28. The repository was empty when scoped; research sources were read without browser automation or account credentials, and no tests, lint, formatters, gates, or commits were run as part of planning. C01–C14 are closed within their recorded scopes; C12 closure is `6ac1409`, C13 closure is `48358ed` (green draft `bea8a56`, both independent reviews clean, no review fixes), and C14's scoped verification/acceptance-record draft is `1d23bfb` (both per-chunk reviews clean). Subsequent final split review completed four slices: three clean and one additional-Grok-product UI omission finding, resolved in separately verified fix `d653397`; both independent fix rereviews are clean. The supplied final post-fix cumulative gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four actual installed-entry healthy/errors PTY runs, actual installed CLI CRUD/cancel/non-TTY and no-credential live empty-state/account dialogs, and an extra-product real-PTY regression. **Offline/local deliverable verified; original full goal blocked.** Only the final tracker/accounting commit remains runnable; its hash is pending, not invented. Ordinary ChatGPT's actual weekly adapter and all 12 unchecked live/integration acceptance tasks remain blocked on the concrete §9 prerequisites.
+Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex task has implemented and integrated-verified its single atomic cutover under §11; green draft, implementation review and closure remain pending. Other providers' live prerequisites remain open.
 
 Original goal: **终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。**
 
 **Current corrected goal:** the user explicitly means **Codex quota**, not ordinary ChatGPT chat-model usage. §11 is the bounded authoritative cutover amendment: it supersedes the old GPT scope, blocked-capability contract, scheduling/acceptance instructions and “only accounting remains” conclusions wherever they conflict. Other providers and all recorded C01–C14 evidence retain their original meaning. Do not restart C01–C14 or claim their checks verify Codex.
 
-The orchestrator schedules the single atomic Codex cutover from §11 only after independent planning review. Code completion and authenticated metric acceptance remain separate: the official-source Codex contract is now available; implementation and authorized live observations are not yet established. This planning amendment executes no implementation, checks, formatting, commits, browser activity or credential reads.
+Independent planning reviews `agent://codex-plan-review-1` and `agent://codex-plan-review-2` were clean; reviewed planning commit `e3190b9` exists. All eight §11 units have landed and their integrated offline/local proof, including post-cleanup checks, passed. Code verification and authenticated metric acceptance remain separate: green draft, independent implementation reviews and closure are pending; authorized live observations remain unexercised. No worker checks, browser activity or real credential reads are authorized.
 
 ### Durable progress convention
 
@@ -18,10 +18,10 @@ A checked chunk heading records implementation/documentation landed and orchestr
 
 | Field | Current value |
 |---|---|
-| Planning | C01–C14 and final fix `d653397` remain closed within their historical scopes. User-corrected Codex cutover is newly actionable under §11; planning review required, implementation not started, no new checks/live acceptance claimed |
+| Planning | §11 independently reviewed clean by both planning reviewers; planning commit `e3190b9` exists. All eight atomic-cutover units implemented and integrated-verified; draft/review/closure pending. No live acceptance claimed; historical C01–C14/final-fix evidence unchanged |
 | Planning commit | `6f731df57990b6512387ec481ccb693a214d1617` — `docs(plan): record reviewed usage implementation plan` |
 | Last closed implementation chunk | C14 — scoped verification/acceptance-record chunk only; green draft `1d23bfb`, independent static per-chunk reviews `agent://c14-review-1` and `agent://c14-review-2` clean; no review fixes or separate fix verification required. Final accounting commit not yet recorded; original goal not complete |
-| Next runnable action | Independently review §11's corrected scope, frozen contracts, migration and file ownership; resolve findings in this plan, then implement one atomic cutover with dependency-ordered internal units. No C01–C14 restart |
+| Next runnable action | Record green draft and obtain independent implementation reviews of the one §11 atomic cutover; separately verify any resulting fixes before closure. No draft/review/closure hash or outcome yet supplied; no C01–C14 restart or intermediate unit gates |
 | Implementation / docs / Lessons | C01-A package/domain and C01-B initial `uv.lock` landed; D(C01) and review follow-on completed bounded docs and Lessons. C02 implementation and D(C02) completed `README.md`, `CHANGELOG.md`, `SECURITY.md`, and repo-root `AGENTS.md`; recorded Lessons cover stable sibling locking/reread-under-lock mutation and exact secure-backend policy with explicit session-only isolation. C03 transport/credential-resolution implementation and bounded documentation/Lessons completed in green draft `5a9cc60`. C04 Claude subscription adapter implementation and D(C04) completed `README.md`, `CHANGELOG.md`, `SECURITY.md`, and repo-root `AGENTS.md`; Lessons preserve quota/window independence, scoped Fable identity/inactive/conflict semantics, provider-local timestamp heuristics, and quota/reset independence clarified by review |
 | C05 implementation / docs | Console balance adapter, organization discovery, fixtures/tests, and bounded documentation landed. Closed with full green gates, Console LSP diagnostics, actual component smoke, green draft `98e0c6d`, and clean independent reviews; no review fixes required; closure commit `8e74532` |
 | C06 implementation / docs | Grok billing adapter, product-share fixtures/tests, and bounded documentation/Lessons landed. Approved detail-only product consumption representation avoids implicit independent quota remaining. Review-fix documentation/Lessons record direct Decimal HTTP decoding and raw-numeric boundary tests. Closed with final green gates, actual component/regression smoke, green draft `515b4f4`, separately verified fix `9df9232`, and clean independent rereviews; closure commit `6cf9386` |
@@ -72,10 +72,10 @@ A checked chunk heading records implementation/documentation landed and orchestr
 | Final split review / finding / evidence | Four independent slices completed: `agent://final-split-review-1`, `agent://final-split-review-3`, and `agent://final-split-review-4` clean; `agent://final-split-review-2` found one P2 producer/consumer defect. Grok emits sanitized additional product metrics and the scheduler retains them, but the TUI enumerated only required IDs. Supplied actual UsageApp/Pilot synthetic-extra-snapshot reproduction emitted four Grok metrics while overall visible rows stayed **10 → 10**, omitting the extra product. This is exercised offline UI evidence, not authenticated-provider acceptance |
 | Final review correction / docs / Lessons / verification | Separately verified fix `d653397` retains every required row first, then deduplicated snapshot extras in emission order; refresh adds/removes extras while preserving selected metric identity, account filtering and existing details/provenance/shared-pool semantics. Coordinated PLAN/README/CHANGELOG and repo-root Lessons record consumer visibility. Initial post-correction **851 passed in 29.59s** and **2 ISC004 findings** at `tests/test_app.py:215` and `tests/test_app.py:220` are superseded by the corrected final green gate: `uv sync --locked --group dev` succeeded; `uv run pytest -q`: **851 passed in 28.90s**; `uv run ruff check .`: passed; `uv run ruff format --check .`: **43 files already formatted**; all **17 source LSP diagnostics clean**. Installed `usage --help`, four healthy/errors installed-entry real-PTY runs (`x`→`q` / Ctrl-C, rendered metrics/restoration true), installed CLI real-PTY CRUD/cancel/non-TTY refusal without writes, and empty-live manager Back→dashboard→`q` / Ctrl-C passed. Additional actual real-PTY regression displayed Other `10` and provenance, refresh removed the extra while retaining required rows, and exited cleanly. Independent static rereviews `agent://final-fix-rereview-1` and `agent://final-fix-rereview-2` both clean. No unresolved finding, lint correction, verification, or rereview remains; final tracker/accounting commit pending. All 13 blocked acceptance tasks unchanged |
 | Live checks exercised | No-credential live-mode empty state/account dialogs passed. No authenticated provider request, user-secret import, real external-login import, or real keyring persistence exercised; no user secrets provided |
-| Current Codex prerequisite | Official read/auth/window contract established by static first-party source (§11). Implementation pending; actual file-backed authorized login and same-account quota comparison remain unavailable/unexercised |
-| Next scheduling action | §11 planning review, then its single cutover chunk. The old §9 ordinary-ChatGPT adapter/live tasks are superseded by Codex tasks, not completed. Other providers' live prerequisites remain unchanged |
+| Current Codex prerequisite | Official read/auth/window contract established by static first-party source (§11); atomic implementation and integrated offline/local proof passed, including cleanup. Draft/review/closure pending. Live acceptance requires a locally authorized file-backed login, selected account/plan, permitted read and same-account first-party usage UI comparison; unavailable/unexercised, not an upstream-contract blocker |
+| Next scheduling action | Green draft, independent implementation reviews and closure of §11's integrated-verified atomic cutover; separately verify any review fixes. Old §9 ordinary-ChatGPT tasks are historical and superseded by Codex code/live acceptance in §11. Other providers' live prerequisites unchanged |
 
-## 1. Scope and truthfulness matrix
+## 1. Historical scope and truthfulness matrix — Codex replacement in §11
 
 Every configured account gets persistent rows for the requested metric IDs, including unavailable rows. Missing values are never zero. Rows show provenance, last successful fetch, last attempt/error, and private-contract warning where applicable.
 
@@ -94,7 +94,7 @@ Every configured account gets persistent rows for the requested metric IDs, incl
 
 Grok Build/Chat remaining and reset refer to the **shared pool** when unified billing is positively established. Each product row explicitly says “剩余/重置：共享池” and references that pool, not an independent `100 - product share`. If a response cannot establish shared-pool semantics, do not attach an invented shared allowance; show the reported aggregate with “pool relationship unknown” and leave product remaining/reset unavailable. A weekly or monthly label follows the server period type, not the subscription's marketing name.
 
-Out of scope: web UI/server, statusline, browser automation/cookie extraction, local message counting as remote quota, model inference requests, purchases/top-ups, token refresh protocols, scraping conversation contents, reset-coupon redemption, telemetry, Codex quotas, OpenAI/xAI API spend dashboards, Claude subscription extra-usage billing. Public cost reports may be cited as non-solutions but are not extra implementation work.
+Historical out of scope (Codex exclusion superseded by §11): web UI/server, statusline, browser automation/cookie extraction, local message counting as remote quota, model inference requests, purchases/top-ups, token refresh protocols, scraping conversation contents, reset-coupon redemption, telemetry, OpenAI/xAI API spend dashboards, Claude subscription extra-usage billing. Public cost reports may be cited as non-solutions but are not extra implementation work.
 
 ## 2. Chosen boring implementation
 
@@ -479,7 +479,7 @@ Closed scope: supplied cumulative gate, actual production-entry PTY smoke, insta
 
 ## 9. Acceptance matrix — two independent dimensions
 
-Update these only from exercised evidence. Parser fixtures and demo are not live evidence.
+Historical pre-Codex matrix: update only from exercised evidence. Parser fixtures and demo are not live evidence. The ordinary-ChatGPT code/live rows and blocker language below are superseded by §11's Codex replacement; they are not active Codex blockers or current unchecked implementation work.
 
 | Requirement | Code acceptance | Live/authenticated acceptance |
 |---|---|---|
@@ -538,7 +538,7 @@ This supersedes the pre-fix C14 cumulative result for final code verification; i
 
 ### Full flat accounting of remaining unchecked acceptance tasks
 
-Every unchecked matrix task is quoted verbatim below: **13 tasks, comprising one contract-blocked adapter and 12 blocked live/integration checks**. All are concretely blocked, not silently dropped or accepted as complete. Live checks await locally authorized configuration and observations; no secret is requested in chat. No newly doable implementation task is established. Final tracker/accounting commit is the sole remaining runnable lifecycle action.
+Historical pre-Codex accounting only: the then-unchecked matrix comprised **13 tasks, one contract-blocked ordinary-ChatGPT adapter and 12 live/integration checks**. §11 supersedes that adapter and ordinary-ChatGPT live prerequisite with the user-corrected Codex scope. Codex implementation/integrated proof is now passed; authorized file-backed login and same-account UI comparison remain open, not upstream-contract-blocked. Other providers' live prerequisites below remain applicable. The old “only accounting remains” lifecycle conclusion below is historical, not current scheduling authority.
 
 | Requirement / dimension | Exact unchecked task wording | Classification and precise missing prerequisite |
 |---|---|---|
@@ -615,8 +615,9 @@ uv run usage --demo --scenario errors
 uv run usage
 uv run usage accounts add --provider claude-subscription
 uv run usage accounts add --provider claude-platform
-uv run usage accounts add --provider chatgpt-subscription
+uv run usage accounts add --provider codex-subscription
 uv run usage accounts add --provider grok-subscription
+uv run usage accounts migrate-chatgpt-to-codex
 ```
 
 For account CRUD checks, obtain local opaque `ACCOUNT_ID` from `usage accounts list`, then use the exact commands below with that value; no token is a shell argument:
@@ -651,7 +652,7 @@ Scheduling order: planning Conventional Commit → C01-A → C01-B → D(C01) �
 
 ### Next exact bounded assignment
 
-The orchestrator's final post-fix gate and actual terminal checks passed at separately verified fix `d653397`; both independent fix rereviews are clean. All C01–C14 chunks are closed within their recorded scopes, and the sole final split-review finding is resolved. Next commit the final tracker/documentation accounting; final tracker commit hash pending. Do not redispatch closed chunks or rerun completed reviews/checks for bookkeeping. After that, only §9's 13 concrete blocked acceptance tasks remain: the ordinary ChatGPT upstream read/auth/weekly-schema contract, then its real adapter and authenticated comparison; and locally authorized provider/login/backend configuration and live observations for the remaining checks. No new doable-now implementation is established, and no scope reduction is accepted. No user secrets have been provided/imported, authenticated provider requests or real keyring persistence exercised. Workers must not run tests, lint, formatters, gates, smoke, browser, or commits.
+Current bounded assignment: finish the draft/review/closure lifecycle of the single atomic Codex cutover in §11 following reviewed planning commit `e3190b9`. All eight units and required integrated offline/local component/terminal proof have passed, including the post-cleanup gate. Closed C01–C14 and fix `d653397` are historical and must not be redispatched or rechecked for bookkeeping. No user secrets, authenticated provider requests or real keyring persistence are established. Workers must not run tests, lint, formatters, gates, smoke, browser or commits; only the orchestrator exercises any separately required review-fix verification.
 
 Resource rule for any later browser-capable or >2 GiB command: browser remains forbidden for this assignment. If an authorized later task changes that restriction, use `~/.omp/bin/heavy-gate`, inspect `free -m` and gate status before fan-out, width ≤2, finite gated commands async with timeout 0, and close owned processes. Ordinary Python unit tests and this stdlib PTY harness do not require a browser launch or heavyweight gate.
 
@@ -661,7 +662,7 @@ Resource rule for any later browser-capable or >2 GiB command: browser remains f
 
 The user corrected “GPT weekly” to **Codex weekly quota**. This is a scope correction, not discovery of ordinary-chat quota. Replace the blocked ordinary-ChatGPT capability cleanly; do not add a second provider or keep runtime aliases. Sections 1/3/4.4/7/8/9/10 and their old scheduling conclusions are historical wherever they assert GPT identities, prohibit Codex, or say no implementation remains. Preserve C01–C14 checks/commits as historical evidence, not Codex verification. No other provider requirement changes. This appendix is the only new plan/tracker; no competing plan or new C01–C14 sequence.
 
-Current status: **planning amendment drafted; independent planning review required; implementation, cutover verification and authenticated Codex acceptance pending**. Planning reviewers must check exact identities, file-only auth and account binding, duration/reset semantics, non-destructive legacy handling, complete/disjoint ownership and proof boundaries before dispatch. Their findings amend this appendix before implementation. No command, browser, secret import, provider request, formatter, test or commit was executed for this amendment.
+Current status: **independent planning reviews clean; planning commit `e3190b9` exists; S1/S2/W/T/U/V/D/R implemented and integrated-verified, including cleanup; green draft, independent implementation reviews and closure pending; authenticated Codex acceptance unexercised**. Reviews `agent://codex-plan-review-1` and `agent://codex-plan-review-2` checked scope/contracts and were clean. Required component/terminal proof and the corrected Scheduler fixture passed; the final supplied gate is 1098 tests, Ruff check/44-file format check and all 17 source-file LSP diagnostics clean (§11.7). No implementation-review outcome, draft/closure commit or unknown hash is claimed. Workers ran no checks; browser, real credential reads and real upstream/keyring access were not used.
 
 Primary-source contract anchors (static research, not authenticated observation):
 
@@ -722,9 +723,9 @@ This callable **never calls CredentialStore.get/put/delete**, AccountService's r
 
 Intentionally unchanged production paths: `src/usage_tui/scheduler.py` (generic credentialed path), `src/usage_tui/providers/claude.py`, `src/usage_tui/providers/console.py`, `src/usage_tui/providers/grok.py`, `src/usage_tui/app.tcss`, `src/usage_tui/__main__.py`; unrelated provider tests and dependency/lock/package files have no established cutover change. Any discovered necessary change first receives explicit nonoverlapping ownership in this appendix; do not invent an adjacent refactor. R reconciles active scope/provider tables/security headers/credential setup/CLI/help examples/demo labels and removes stale current “ordinary ChatGPT remains blocked” claims, including old manual commands in this plan; historical C07 evidence stays truthful. Root Lessons must capture duration-not-position, explicit transport branch, unverified-JWT limits and consent/detached-secret migration.
 
-### 11.6 Exact future gates, smoke and live boundary
+### 11.6 Integrated gate specification, smoke and live boundary
 
-All commands below are **future orchestrator work, not exercised evidence**. After every internal unit and bounded docs update lands, run once for the integrated chunk:
+The following are the integrated orchestrator command specification, not worker commands. Supplied exercised outcomes and any unrecorded command evidence are distinguished in §11.7; do not infer execution merely from this list:
 
 ```sh
 uv sync --locked --group dev
@@ -746,5 +747,100 @@ Use isolated temporary HOME/XDG/CODEX_HOME for account commands and synthetic sm
 
 Record exact commands/outcomes, terminal observations, independent planning and implementation review dispositions, any separately verified fixes and docs/Lessons disposition here. Old 851-test/PTY results do not satisfy these gates. Resource rules in §10 still apply; no browser is needed or authorized.
 
-Acceptance replacement: old §9's ordinary-ChatGPT **code** task becomes “Codex weekly end-to-end file-backed adapter, explicit migration, fixtures/tests/UI/docs and integrated proof above”; currently unchecked but **actionable**, not upstream-blocked. Its **live** task becomes “locally authorized file-backed Codex login, selected account/plan, successful permitted WHAM read, compare weekly utilization/reset against same-account first-party Codex usage UI at the same observation”; currently unchecked/unexercised. Missing weekly response stays unknown and cannot be accepted from 5h/pool/demo. Optional windows are accepted only for the account/reporting behavior observed, not new universal mandatory requirements. All non-GPT live prerequisites remain open; account-import acceptance now includes Codex file-backed import where claimed. No real auth file, token, account ID or raw response is requested through chat or recorded. Keyring-only Codex auth is unsupported by design, not a successful import. Server-side/private-contract compatibility and first-party UI agreement remain unproven until separately authorized local observation; static sources, synthetic fixtures, PTY and a green suite cannot prove them.
+Acceptance replacement: old §9's ordinary-ChatGPT **code** task is replaced by “Codex weekly end-to-end file-backed adapter, explicit migration, fixtures/tests/UI/docs and integrated proof above”; **implemented and integrated-verified**, not upstream-blocked. Its **live** task is “locally authorized file-backed Codex login, selected account/plan, successful permitted WHAM read, compare weekly utilization/reset against same-account first-party Codex usage UI at the same observation”; **unchecked/unexercised**. Missing weekly response stays unknown and cannot be accepted from 5h/pool/demo. Optional windows are accepted only for the account/reporting behavior observed, not new universal mandatory requirements. All non-GPT live prerequisites remain open; account-import acceptance now includes Codex file-backed import where claimed. No real auth file, token, account ID or raw response is requested through chat or recorded. Keyring-only Codex auth is unsupported by design, not a successful import. Server-side/private-contract compatibility and first-party UI agreement remain unproven until separately authorized local observation; static sources, synthetic fixtures, PTY and a green suite cannot prove them.
+
+### 11.7 Atomic-cutover progress and proof ledger
+
+Only supplied/exercised evidence is recorded. The eight unit checkboxes below now
+record implementation plus integrated orchestrator verification, not worker checks,
+implementation review, commit or lifecycle closure.
+
+- [x] Independent planning reviews: `agent://codex-plan-review-1` and
+  `agent://codex-plan-review-2` clean; reviewed planning commit `e3190b9` exists.
+- [x] S1 identities/storage: shared contracts and narrow complete-set migration.
+- [x] S2 resolver: file-only selection, account binding and JWT hints.
+- [x] W wire/provider: fixed read/auth, duration/pool parser and clean registry cutover.
+- [x] T synthetic wire/security/capability/parser coverage; integrated suite passed.
+- [x] U account/CLI: file-only setup, explicit migration and safe reconnect guidance.
+- [x] V dashboard/scheduler tests: weekly/optional extras and credentialed lifecycle.
+- [x] D demo/installed-entry PTY: synthetic Codex and isolated terminal harness.
+- [x] R docs/security/Lessons/acceptance: active README/SECURITY/CHANGELOG/AGENTS
+  reconciliation landed; current ledger separates verified code from live acceptance.
+- [x] Orchestrator post-cleanup integrated pytest/Ruff gate and all 17 source-file
+  LSP diagnostics clean. No separate successful LSP references-query evidence supplied.
+- [x] Synthetic auth/resolver/provider/transport, corrected Scheduler, offline demo,
+  migration/file-only installed CLI and installed-entry real-PTY proof.
+- [ ] Green draft commit: pending; no hash supplied.
+- [ ] Independent implementation reviews and any separately verified review fixes:
+  pending; clean planning reviews are not implementation reviews.
+- [ ] Atomic-cutover closure/accounting commit: pending; no hash supplied.
+- [ ] Live Codex acceptance: locally authorized existing file-backed Codex login,
+  explicit selected account/plan, successful permitted WHAM read and weekly
+  utilization/reset comparison with that same account's first-party Codex usage UI
+  at the same observation. This prerequisite is unavailable/unexercised, **not an
+  upstream-contract blocker**; no credentials are requested through chat.
+
+#### Exact supplied integrated gate outcomes
+
+| Command / surface | Supplied exercised outcome and boundary |
+|---|---|
+| Initial `uv run pytest -q` / Ruff check | **2 failed, 1085 passed in 30.83s**; **2 lint findings**. API-key UI fixture used an invalid Codex source; duplicate weekly usage conflict needed planned recognized-identity `UNKNOWN`/`PARTIAL` behavior rather than `SCHEMA_ERROR`. Corrections landed; this is historical failure evidence, not the current gate |
+| Pre-cleanup `uv run pytest -q` | **1099 passed in 29.01s**; superseded by the post-cleanup result below, not evidence for later edits |
+| Pre-cleanup `uv run ruff check .` / `uv run ruff format --check .` | Passed / **44 files already formatted**; historical pre-cleanup result |
+| Final post-cleanup `uv run pytest -q` | **1098 passed in 28.59s**. One obsolete capability test was removed; the older 1099 count is not the final count |
+| Final post-cleanup `uv run ruff check .` | **All checks passed** |
+| Final post-cleanup `uv run ruff format --check .` | **44 files already formatted** |
+| Source LSP diagnostics | **All 17 source-file diagnostics clean**; earlier workers' unavailable-device reports do not negate this later orchestrator evidence. No separate references-query success claimed |
+| `uv run usage --help` | Passed installed CLI help |
+| `uv run python scripts/tui_smoke.py --scenario healthy` and `uv run python scripts/tui_smoke.py --scenario errors` | Supplied four installed-entry real-PTY healthy/errors runs passed, covering normal `x` -> `q` and Ctrl-C; rendered metrics and terminal restoration true |
+| `uv sync --locked --group dev` / standalone `uv run usage accounts list` | No separate exact-command outcome supplied here; the command specification alone is not execution evidence |
+
+#### Supplied actual offline component and terminal proof
+
+- Synthetic private auth-file selection through actual CredentialResolver ->
+  CodexProvider -> Transport smoke passed, using synthetic credentials/injected
+  transport only; no real login, upstream request, network or keyring access.
+- Actual Scheduler artifact `local://codex-scheduler-smoke.py` passed after its
+  optional 5h fixture gained the missing reset. The earlier partial-state assertion
+  was a fixture-only error, not an established product bug. Corrected proof covers
+  initial poll, manual refresh, two scheduled intervals, retry embargo/spacing,
+  last-good/stale state, replacement/removal and stop/no later publication.
+- Actual offline DemoSource proof passed: **4 healthy / 8 errors snapshots**, with
+  live dependencies forbidden. Synthetic/demo proof is not authenticated acceptance.
+- Installed CLI real-PTY artifact `local://codex-migration-smoke.py` passed with
+  synthetic mixed configs: decline/cancel/non-TTY unchanged, affirmative complete-set
+  migration, retained nonlegacy records/old backend entries, detached/disabled Codex
+  profiles, file-backed edit/reconnect and enable/disable toggle. Isolated no-credential
+  live-mode empty-state/account dialogs also passed; no real import/keyring claim.
+- All four installed-entry healthy/errors real-PTY runs passed, including Codex
+  weekly/optional-extra rendering, DEMO/provenance, detail/help, account-manager return,
+  refresh, resize, normal quit/Ctrl-C and restored terminal state.
+
+#### Landed unit reports and cleanup disposition
+
+S1 reports frozen identities, redacted Codex-only selected-account field and both
+narrow migration callables; old secrets remain untouched by CredentialStore and
+committed-write warnings remain truthful. S2 reports file-only resolver/defaults,
+absent-only selected-ID fallback and JWT expiry hints. W reports `CodexProvider`,
+explicit fixed transport/header branch and duration/reset/pool parser, with obsolete
+provider/module/export removed. T reports synthetic wire/security/capability/parser
+coverage. U reports file-only choices/guidance, migration before ordinary load or
+CredentialStore construction, whole-set TTY consent, committed-durability warnings
+and actionable TUI migration instruction. V reports weekly (7d)/5h labels,
+synthetic/non-live banner, seven-day/non-calendar-week help and distinct nonadditive
+optional pools/windows; production Scheduler unchanged. D reports four healthy/eight
+error fictional accounts, weekly plus optional 5h (healthy rows 10 -> 11), required-
+before-extra inventory and CODEX_HOME-isolated harness. R reports active README,
+SECURITY, CHANGELOG and repo-root AGENTS Lessons reconciliation. All eight bounded
+unit reports landed; the integrated evidence above, not those reports alone,
+establishes their checked implementation/verification status. Workers ran no checks.
+
+Provider-neutral diagnostic cleanup and obsolete capability-test removal landed;
+the final **1098-test / Ruff / 44-file format / 17-source diagnostics** evidence is
+post-cleanup and all green. No known component-proof failure remains open. Green
+draft, independent implementation reviews, any required separately verified review
+fixes, and closure remain pending. No draft/closure hash or implementation-review
+success is invented. Historical 851-test evidence remains pre-Codex only. No real
+Codex auth files, user secrets, network, keyring, authenticated metric comparison or
+other-provider live success was used or claimed.
 

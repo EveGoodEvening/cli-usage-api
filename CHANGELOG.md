@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Changed — Codex atomic cutover implemented and verified offline
+
+- User-corrected GPT scope is Codex quota, not ordinary ChatGPT chat-model usage.
+  The single cutover authorized by reviewed planning commit `e3190b9` is implemented.
+  Integrated offline checks and synthetic/terminal proofs passed; independent
+  implementation review, draft closure and authorized live comparison remain pending.
+- Replaced the old runtime provider/CLI identity with `codex_subscription` /
+  `codex-subscription`, file-only `codex_auth_file`, and the private version-sensitive
+  WHAM usage contract. Default login reference uses `$CODEX_HOME/auth.json` when
+  CODEX_HOME is nonempty, otherwise `~/.codex/auth.json`; no manual bearer, API-key
+  or Codex-keyring fallback.
+- Main weekly quota follows 604800-second duration, not primary/secondary position;
+  5h and other reported windows/pools are optional distinct extras. Use absolute
+  `reset_at` seconds, never a timestamp invented from relative reset or plan name.
+- Explicit TTY `usage accounts migrate-chatgpt-to-codex` requires whole-set consent,
+  disables and detaches legacy profiles, preserves other providers/local identities,
+  and retains old secrets detached/unmanaged without reading, reusing, transmitting
+  or deleting them.
+- Post-cleanup orchestrator gate: **1,098 tests passed in 28.59 seconds**, Ruff lint
+  passed, the **44-file** formatting check passed, and all **17 source files** had
+  clean language-server diagnostics. Installed `usage --help` passed.
+- Synthetic auth resolver → Codex provider → transport smoke passed. Actual
+  Scheduler proof passed initial/manual refresh, two scheduled intervals, retry,
+  stale state, replacement/removal and stop. Offline demo component smoke passed
+  **4 healthy / 8 errors snapshots**.
+- Actual installed-CLI real-PTY proof passed migration decline/cancel/non-TTY
+  unchanged paths, affirmative mixed-config migration, file-backed edit/reconnect,
+  enable/disable and isolated empty-live/account flows. Four installed-entry
+  healthy/errors PTY runs rendered and restored terminals on normal quit and Ctrl-C.
+- No real Codex auth files, user secrets, network or keyring were used. The private
+  source is not a supported public API; authenticated compatibility and same-account
+  weekly/reset comparison remain unknown, not established by synthetic proof.
+- README/security/CLI setup and repo-root Lessons reflect the implemented scope.
+  Entries below are **historical pre-Codex evidence** within their original scopes;
+  old ordinary-ChatGPT blockers are not current Codex blockers, and the historical
+  851-test/PTY results are not this cutover's gate.
+
 ### Fixed and verified offline — final split review correction `d653397`
 
 - Final split review completed four independent slices: three clean, one P2
@@ -26,10 +63,10 @@
 - An additional installed-CLI real-PTY check displayed the extra Grok product
   `Other10` with selectable provenance; refresh removed the extra while retaining
   required rows, and the application exited cleanly.
-- These checks do not exercise authenticated providers or real OS-keyring
-  persistence. Ordinary ChatGPT weekly retrieval remains upstream-contract-blocked.
-  All 13 blocked acceptance tasks and exact prerequisites remain unchanged; no
-  full original-goal completion is claimed.
+- These historical checks did not exercise authenticated providers or real
+  OS-keyring persistence. At that time ordinary ChatGPT remained contract-blocked
+  and 13 acceptance tasks were open. PLAN.md §11 now supersedes the GPT tasks with
+  Codex implementation/proof and separate authorized live acceptance.
 
 ### Verified — historical C14 offline acceptance (before `d653397`)
 
@@ -365,14 +402,14 @@ application includes the C12 CLI/dashboard composition.
   smoke, CLI/TUI integration, live request, or authenticated acceptance is claimed;
   exercised verification remains separately recorded in `PLAN.md`.
 
-### Not yet implemented / not verified
+### Current unverified boundary
 
-- Ordinary ChatGPT quota retrieval is not delivered: its required row remains
-  blocked on an upstream contract. The production CLI and offline demo do not
-  resolve that prerequisite.
-- No live metric, authenticated provider response, or secure OS-keyring acceptance is
-  established. Ordinary ChatGPT weekly usage has an unresolved upstream contract;
-  WHAM/Codex or API consumption is not a substitute.
+- Codex cutover integrated checks, actual installed-entry terminal proof and
+  implementation reviews remain pending in PLAN.md §11. Static source research
+  makes the code task actionable; it is not authenticated acceptance.
+- No live metric, authenticated provider response or real OS-keyring acceptance is
+  established. Other providers' live prerequisites remain unchanged. Historical
+  ordinary-ChatGPT blocker entries above are superseded, not erased or completed.
 - Writing tests and documenting setup does not establish successful verification.
   Exact exercised checks, smoke evidence, lock resolution, review, and chunk closure
   are recorded by the orchestrator in `PLAN.md`, not inferred from this entry.

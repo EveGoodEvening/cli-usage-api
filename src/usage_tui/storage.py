@@ -15,18 +15,23 @@ import sys
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import keyring
 from keyring.backends.SecretService import Keyring as SecretServiceKeyring
 
-from usage_tui.domain import Account, CredentialKind
+from usage_tui.domain import Account, CredentialKind, ProviderId
 
 MAX_FILE_BYTES = 1_048_576
 _SERVICE = "usage-tui"
 _SECURE_BACKEND_TYPES = (SecretServiceKeyring,)
-_FILE_KINDS = {CredentialKind.CLAUDE_CODE_FILE, CredentialKind.GROK_AUTH_FILE}
+_FILE_KINDS = {
+    CredentialKind.CLAUDE_CODE_FILE,
+    CredentialKind.GROK_AUTH_FILE,
+    CredentialKind.CODEX_AUTH_FILE,
+}
 
 
 class ConfigError(ValueError):
@@ -51,6 +56,14 @@ def _config_error() -> ConfigError:
     return ConfigError(
         "Cannot use account configuration. Check its schema and user-owned "
         "0700 directory / 0600 regular files; configuration was not repaired automatically."
+    )
+
+
+def _migration_error() -> ConfigError:
+    return ConfigError(
+        "Legacy ChatGPT profiles require explicit migration. Run "
+        "usage accounts migrate-chatgpt-to-codex, then configure a file-backed Codex login. "
+        "Migration disables profiles and detaches credentials; old keyring secrets are retained."
     )
 
 
@@ -181,13 +194,15 @@ class AccountStore:
         except OSError:
             raise _config_error() from None
 
-    def _read(self, directory: int) -> tuple[Account, ...]:
+    def _read_config(
+        self, directory: int
+    ) -> tuple[tuple[Account, ...], tuple[tuple[str, str], ...]]:
         try:
             fd = os.open(
                 self.path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
             )
         except FileNotFoundError:
-            return ()
+            return (), ()
         try:
             self._check_file(fd)
             with os.fdopen(fd, "rb", closefd=False) as source:
@@ -208,9 +223,73 @@ class AccountStore:
                 or type(data["accounts"]) is not list
             ):
                 raise _config_error()
-            return _accounts(tuple(Account.from_dict(item) for item in data["accounts"]))
+            accounts = []
+            legacy = []
+            for record in data["accounts"]:
+                if type(record) is dict and record.get("provider") == "chatgpt_subscription":
+                    # Validate the historical shape with ordinary domain/reference rules,
+                    # without exposing a legacy provider or allowing its secrets into Codex.
+                    if record.get("credential_kind") not in (
+                        None,
+                        CredentialKind.MANUAL_BEARER,
+                        CredentialKind.API_KEY,
+                    ):
+                        raise _config_error()
+                    old = Account.from_dict({**record, "provider": ProviderId.CLAUDE_SUBSCRIPTION})
+                    _accounts((old,))
+                    legacy.append((old.id, old.label))
+                    accounts.append(
+                        replace(
+                            old,
+                            provider=ProviderId.CODEX_SUBSCRIPTION,
+                            enabled=False,
+                            credential_kind=None,
+                            credential_ref=None,
+                            credential_selector=None,
+                            organization_id=None,
+                        )
+                    )
+                else:
+                    accounts.append(Account.from_dict(record))
+            return _accounts(tuple(accounts)), tuple(legacy)
         except (ValueError, TypeError, RecursionError, UnicodeError):
             raise _config_error() from None
+
+    def _read(self, directory: int) -> tuple[Account, ...]:
+        accounts, legacy = self._read_config(directory)
+        if legacy:
+            raise _migration_error()
+        return accounts
+
+    def legacy_chatgpt_profiles(self) -> tuple[tuple[str, str], ...]:
+        """List validated local migration targets without accessing credentials."""
+        with self._locked() as directory:
+            _, legacy = self._read_config(directory)
+            return legacy
+
+    def migrate_legacy_chatgpt_to_codex(
+        self, *, confirmed_account_ids: tuple[str, ...]
+    ) -> tuple[Account, ...]:
+        """Detach and disable the complete explicitly confirmed legacy profile set.
+
+        Old keyring entries remain retained and unmanaged. No credential backend or
+        imported file is accessed. ConfigCommittedError carries committed accounts
+        when replacement succeeded but directory durability could not be confirmed.
+        """
+        with self._locked() as directory:
+            accounts, legacy = self._read_config(directory)
+            if (
+                type(confirmed_account_ids) is not tuple
+                or not all(isinstance(item, str) for item in confirmed_account_ids)
+                or len(set(confirmed_account_ids)) != len(confirmed_account_ids)
+                or set(confirmed_account_ids) != {item[0] for item in legacy}
+            ):
+                raise ConfigError(
+                    "Legacy profile selection changed. List profiles and confirm again."
+                )
+            if legacy:
+                self._write(directory, accounts)
+            return accounts
 
     def _write(self, directory: int, accounts: tuple[Account, ...]) -> None:
         accounts = _accounts(accounts)

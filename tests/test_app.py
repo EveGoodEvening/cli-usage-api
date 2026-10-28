@@ -32,7 +32,8 @@ async def test_actual_demo_surface_and_keyboard(size, scenario, monkeypatch):
         await pilot.pause()
         assert "DEMO" in str(app.banner.content)
         assert app.listing.option_count == sum(
-            3 if a.provider != ProviderId.CHATGPT_SUBSCRIPTION else 1 for a in app.accounts
+            len(set(REQUIRED_METRIC_IDS[a.provider]) | {m.id for m in app.snapshots[a.id].metrics})
+            for a in app.accounts
         )
         assert app.listing.size.height > 0
         assert app.listing.virtual_size.height > app.listing.size.height
@@ -44,6 +45,9 @@ async def test_actual_demo_surface_and_keyboard(size, scenario, monkeypatch):
         await pilot.press("escape", "?")
         assert isinstance(app.screen, InformationScreen)
         assert "Ctrl-C" in app.screen.content
+        assert "Codex weekly (7d)" in app.screen.content
+        assert "Codex 5h" in app.screen.content
+        assert "契约仍阻塞" not in app.screen.content
         await pilot.press("escape", "a")
         assert isinstance(app.screen, AccountManagerScreen)
         assert app.screen.readonly
@@ -187,10 +191,14 @@ async def test_account_selection_filters_rows():
     app = UsageApp(mode="demo")
     async with app.run_test() as pilot:
         selector = app.query_one("#account-selector", Select)
-        account = next(a for a in app.accounts if a.provider == ProviderId.CHATGPT_SUBSCRIPTION)
+        account = next(a for a in app.accounts if a.provider == ProviderId.CODEX_SUBSCRIPTION)
         selector.value = account.id
         await pilot.pause()
-        assert app.query_one("#metrics", OptionList).option_count == 1
+        assert app.query_one("#metrics", OptionList).option_count == 2
+        assert [metric_id for _, metric_id in app.rows] == [
+            "codex.subscription.weekly",
+            "codex.subscription.five_hour",
+        ]
         assert all(a.id == account.id for a, _ in app.rows)
         await pilot.press("q")
 
@@ -205,8 +213,8 @@ async def test_real_grok_extra_product_mount_details_filter_and_refresh():
     )
     other_account = Account(
         id="22222222-2222-4222-8222-222222222222",
-        provider=ProviderId.CHATGPT_SUBSCRIPTION,
-        label="Pending ChatGPT",
+        provider=ProviderId.CODEX_SUBSCRIPTION,
+        label="Detached Codex",
     )
     credential = ResolvedCredential(
         grok.provider, CredentialKind.MANUAL_BEARER, "synthetic-secret", "generation-1"
@@ -293,8 +301,8 @@ async def test_real_grok_extra_product_mount_details_filter_and_refresh():
 def test_configured_live_requires_injection():
     account = Account(
         id="11111111-1111-4111-8111-111111111111",
-        provider=ProviderId.CHATGPT_SUBSCRIPTION,
-        label="Blocked",
+        provider=ProviderId.CODEX_SUBSCRIPTION,
+        label="Detached Codex",
     )
     with pytest.raises(ValueError, match="factory"):
         UsageApp(mode="live", accounts=(account,))

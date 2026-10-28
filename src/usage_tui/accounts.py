@@ -33,16 +33,21 @@ from usage_tui.domain import (
 from usage_tui.providers.console import OrganizationChoice
 from usage_tui.storage import AccountStore, ConfigCommittedError, ConfigError, CredentialStore
 
-FILE_KINDS = {CredentialKind.CLAUDE_CODE_FILE, CredentialKind.GROK_AUTH_FILE}
+FILE_KINDS = {
+    CredentialKind.CLAUDE_CODE_FILE,
+    CredentialKind.GROK_AUTH_FILE,
+    CredentialKind.CODEX_AUTH_FILE,
+}
 PROVIDERS = {
     ProviderId.CLAUDE_SUBSCRIPTION: "Claude subscription",
     ProviderId.CLAUDE_PLATFORM: "Claude Platform",
-    ProviderId.CHATGPT_SUBSCRIPTION: "ChatGPT subscription (weekly blocked)",
+    ProviderId.CODEX_SUBSCRIPTION: "Codex subscription",
     ProviderId.GROK_SUBSCRIPTION: "Grok subscription",
 }
 KINDS = {
     CredentialKind.CLAUDE_CODE_FILE: "External Claude Code file",
     CredentialKind.GROK_AUTH_FILE: "External Grok auth file",
+    CredentialKind.CODEX_AUTH_FILE: "External Codex auth file",
     CredentialKind.CONSOLE_SESSION: "Console session (not an API key)",
     CredentialKind.MANUAL_BEARER: "Manual bearer",
     CredentialKind.API_KEY: "API key — local storage only, no quota reads",
@@ -60,9 +65,10 @@ GUIDANCE = {
         "Sign in again with Grok, select the intended auth-file scope, then retry. "
         "API keys are local storage only."
     ),
-    ProviderId.CHATGPT_SUBSCRIPTION: (
-        "Ordinary ChatGPT weekly quota is blocked: upstream read-only contract missing. "
-        "Optional bearer/API-key storage does not enable retrieval. Do not supply cookies."
+    ProviderId.CODEX_SUBSCRIPTION: (
+        "Run codex login with file-backed credential storage, then select default or auth.json. "
+        "CODEX_HOME/auth.json (otherwise ~/.codex/auth.json) is read only; API keys, manual "
+        "bearers and keyring-only Codex login are unsupported. Reconnect after signing in again."
     ),
 }
 
@@ -270,11 +276,12 @@ class AccountForm(ModalScreen[bool]):
 
     @staticmethod
     def _kinds(provider: ProviderId) -> list[tuple[str, str]]:
-        allowed = set(READ_CREDENTIAL_KINDS[provider]) | {CredentialKind.API_KEY}
-        if provider == ProviderId.CHATGPT_SUBSCRIPTION:
-            allowed.add(CredentialKind.MANUAL_BEARER)
-        return [("No credential / local profile", "none")] + [
-            (label, kind) for kind, label in KINDS.items() if kind in allowed
+        allowed = set(READ_CREDENTIAL_KINDS[provider])
+        if provider != ProviderId.CODEX_SUBSCRIPTION:
+            allowed.add(CredentialKind.API_KEY)
+        return [
+            ("No credential / local profile", "none"),
+            *((label, kind) for kind, label in KINDS.items() if kind in allowed),
         ]
 
     def on_mount(self) -> None:
@@ -289,7 +296,9 @@ class AccountForm(ModalScreen[bool]):
         if self.original and provider == self.original.provider:
             return
         self.query_one("#kind", Select).set_options(self._kinds(provider))
-        self.query_one("#kind", Select).value = "none"
+        self.query_one("#kind", Select).value = (
+            CredentialKind.CODEX_AUTH_FILE if provider == ProviderId.CODEX_SUBSCRIPTION else "none"
+        )
         self.query_one("#guidance", Static).update(GUIDANCE[provider])
         self._invalidate_discovery()
 
@@ -586,7 +595,9 @@ class AccountManagerScreen(Screen[None]):
                 self.accounts = self.account_store.load()
             except ConfigError:
                 self.status(
-                    "Cannot load accounts. Fix private config permissions; no data was overwritten."
+                    "Cannot load accounts. Check private config permissions/schema. Legacy ChatGPT "
+                    "profiles require usage accounts migrate-chatgpt-to-codex in a terminal; "
+                    "migration disables and detaches them, retaining old secrets. No data was overwritten."
                 )
                 return
         listing = self.query_one("#accounts", OptionList)
@@ -695,8 +706,6 @@ class AccountManagerScreen(Screen[None]):
         if self.readonly or not (account := self.selected()):
             return
         self.status(GUIDANCE[account.provider])
-        if account.provider == ProviderId.CHATGPT_SUBSCRIPTION:
-            return
         try:
             self.resolver.resolve(account)
         except CredentialResolutionError:

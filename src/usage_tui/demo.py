@@ -212,8 +212,12 @@ class DemoSource:
                     detail=detail,
                 )
             )
-        if tuple(metric.id for metric in metrics) != REQUIRED_METRIC_IDS[account.provider]:
-            raise ValueError("Demo fixture must contain every required metric in order.")
+        required = REQUIRED_METRIC_IDS[account.provider]
+        metric_ids = tuple(metric.id for metric in metrics)
+        if metric_ids[: len(required)] != required or len(set(metric_ids)) != len(metric_ids):
+            raise ValueError(
+                "Demo fixture must contain required metrics first, then unique extras."
+            )
         grants = tuple(
             Grant(
                 category=GrantCategory(item["category"]),
