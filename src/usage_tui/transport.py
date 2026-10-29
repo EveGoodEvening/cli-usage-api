@@ -26,6 +26,8 @@ MAX_RESPONSE_BYTES = 1_048_576
 TOTAL_TIMEOUT_SECONDS = 10.0
 CONNECT_TIMEOUT_SECONDS = 5.0
 _ORGANIZATION_PATH = re.compile(r"/api/organizations/[A-Za-z0-9-]{1,64}/prepaid/credits")
+# Release-pinned from https://x.ai/cli/stable; never fetched at runtime.
+_GROK_CLIENT_VERSION = "1.0.70"
 _ORIGINS = {
     ProviderId.CLAUDE_SUBSCRIPTION: "https://api.anthropic.com",
     ProviderId.CLAUDE_PLATFORM: "https://platform.claude.com",
@@ -156,6 +158,7 @@ class Transport:
         elif provider == ProviderId.GROK_SUBSCRIPTION:
             headers["Authorization"] = f"Bearer {credential.secret}"
             headers["x-xai-token-auth"] = "xai-grok-cli"
+            headers["x-grok-client-version"] = _GROK_CLIENT_VERSION
             if credential.user_id is not None:
                 headers["x-userid"] = credential.user_id
 

@@ -111,8 +111,10 @@ class _AccountState:
 class Scheduler:
     """Two global fetches, one per account, and five-second provider start spacing.
 
-    refresh() is an explicit reconnect attempt for suspended accounts. Requests
-    during a fetch coalesce into one follow-up, still subject to retry embargoes.
+    refresh() is an explicit reconnect attempt for suspended accounts and may
+    bypass the normal polling interval, including Claude's five-minute floor.
+    Requests during a fetch coalesce into one follow-up, still subject to retry
+    embargoes and provider start spacing.
     update_accounts() invalidates every supplied generation, even when a secret
     was replaced behind an unchanged reference. Same-provider retry embargoes
     survive that operation. Removed/replaced generations can never publish.
@@ -353,9 +355,10 @@ class Scheduler:
             )
             state.failures = 0
             state.retry_deadline = 0.0
-            seconds = account.poll_interval_seconds
+            seconds = account.effective_poll_interval_seconds
             offset = self._rng.uniform(-seconds * 0.1, seconds * 0.1)
-            interval = max(30.0, seconds + offset)
+            floor = seconds if account.provider == ProviderId.CLAUDE_SUBSCRIPTION else 30
+            interval = max(float(floor), seconds + offset)
             state.due = current if state.pending else current + interval
         elif result.fetch_state == FetchState.UPSTREAM_CONTRACT_MISSING:
             state.capability_done = True
@@ -374,6 +377,10 @@ class Scheduler:
                 result = replace(result, retry_at=None)
             else:
                 base = min(60 * 2 ** min(state.failures, 4), 900)
+                if account.provider == ProviderId.CLAUDE_SUBSCRIPTION:
+                    if result.fetch_state == FetchState.RATE_LIMITED:
+                        base = min(300 * 2 ** min(state.failures, 2), 900)
+                    base = max(base, account.effective_poll_interval_seconds)
                 state.failures += 1
                 delay = base + self._rng.uniform(0.0, base * 0.1)
                 if result.retry_at is not None:

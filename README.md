@@ -44,9 +44,20 @@ Codex quota is **not ordinary ChatGPT chat usage**. Fable is a weekly subset, no
 extra capacity. Grok product shares are not independent allowances; remaining and
 reset require confirmed shared-pool semantics. Credit expiry is not a quota reset.
 
-Missing values stay unknown, never zero. Failed reads retain last-known values
-with freshness/error indicators; passing a reset does not invent new allowance.
-Polling defaults to 60 seconds and is configurable from 30–3600 seconds.
+Missing values stay unknown. Grok's private weekly schema has one bounded exception:
+with an explicit weekly period and valid reset, omitted percentage scalars mean
+zero; explicit null/invalid values and absent products remain unknown. Product
+shares need not sum to the aggregate. Codex hides `plan_type`, `allowed`, and
+`limit_reached`; quota percentages and reset times remain visible.
+
+Failed reads retain last-known values with freshness/error indicators; passing a
+reset does not invent new allowance. Claude subscription automatically polls no
+more often than every **5 minutes**, including existing 60-second configurations;
+longer configured intervals are honored. Other providers retain the 60-second
+default and configurable 30–3600-second interval. Claude 429 retries start at
+5 minutes, then 10 and 15 minutes (plus jitter); longer configured intervals or
+server `Retry-After` win. `r` requests an earlier observation, but never bypasses
+retry deadlines. Restart a running dashboard to use the new policy.
 
 ## Connect accounts
 
@@ -85,6 +96,8 @@ Use the ID from `accounts list`. Other provider choices are `claude-subscription
 `claude-platform`, and `grok-subscription`. Mutating commands require an interactive
 TTY; credentials are entered through masked prompts, never command arguments.
 Run `uv run usage --help` for command help.
+`accounts list` shows the effective polling interval; saved values below Claude's
+5-minute floor are preserved in configuration but do not shorten automatic polls.
 
 Legacy ChatGPT profiles require `uv run usage accounts migrate-chatgpt-to-codex`.
 After explicit confirmation, replacements are disabled and credentials detached;

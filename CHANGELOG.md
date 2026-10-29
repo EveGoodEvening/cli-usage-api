@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Fixed — provider display, conservative polling, and Grok compatibility
+
+- Removed Codex `plan_type`, `allowed`, and `limit_reached` from dashboard and
+  details without changing quota/reset semantics.
+- Claude subscription automatic polling now has a 300-second effective floor,
+  including previously saved 60-second accounts, without rewriting configuration.
+  Freshness uses the same effective cadence. Rate-limit cooldown starts at
+  300 seconds, grows to 600/900 seconds plus jitter, and preserves longer settings
+  and server embargoes. Explicit refresh still cannot bypass a retry deadline.
+- Compared Grok with BYOS: recognize omitted percentage defaults only in a valid
+  explicit weekly period, keep malformed/null values and missing products unknown,
+  and remove the unsupported product-sum equality requirement. Whole-array
+  validation, exact Decimal parsing, and positive unified-pool evidence remain.
+- Pin Grok's compatibility header to `1.0.70`, observed from the
+  [official stable feed](https://x.ai/cli/stable), while retaining the identifying
+  `usage-tui` User-Agent; no runtime version download or client impersonation.
+- Synthetic HTTP/provider/dashboard and scheduler smoke, plus four isolated
+  installed-entry PTY runs, passed. Exact checks are recorded in PLAN.md §12.
+  No real account response or credential was inspected: the user's specific Grok
+  failure and Claude upstream rate threshold remain unverified live.
+
 ### Changed — Codex atomic cutover complete and independently reviewed
 
 - User-corrected GPT scope is Codex quota, not ordinary ChatGPT chat-model usage.

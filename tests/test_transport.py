@@ -76,6 +76,7 @@ def credential(provider=ProviderId.CLAUDE_SUBSCRIPTION, *, kind=None, user_id=No
                 "authorization": "Bearer synthetic-secret",
                 "x-xai-token-auth": "xai-grok-cli",
                 "x-userid": "synthetic-user",
+                "x-grok-client-version": "1.0.70",
             },
         ),
     ],
@@ -97,6 +98,7 @@ async def test_exact_routes_and_auth_headers(provider, path, host, expected_head
             "anthropic-beta",
             "x-xai-token-auth",
             "x-userid",
+            "x-grok-client-version",
             "chatgpt-account-id",
         ):
             if name not in expected_headers:

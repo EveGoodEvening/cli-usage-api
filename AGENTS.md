@@ -161,11 +161,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   A consumed share belongs in product detail with `quota=None` when the generic
   quota value would auto-derive an independent remaining percentage; use the
   shared-pool reference rather than weakening that domain invariant.
-- Validate the entire same-payload Grok product array before exposing a breakdown:
-  reject duplicate/malformed shares, reconcile all products to the wire aggregate
-  within one percentage point, and preserve sanitized unknown-product IDs. Missing
-  Build/Chat is unknown even when other shares reconcile; only an explicit entry
-  proves zero. An invalid breakdown must not erase independent aggregate evidence.
+- Validate the entire same-payload Grok product array: reject duplicate/malformed
+  shares and preserve sanitized unknown-product IDs. BYOS's billing contract does
+  not require product shares to sum to the aggregate; the older one-point gate was
+  an unsupported assumption, superseded in PLAN.md §12. Omitted scalar percentages
+  are zero only with explicit weekly type and valid reset; null/malformed values
+  and absent Build/Chat entries remain unknown. Invalid breakdowns must not erase
+  independent aggregate evidence.
 - Provider-emitted extra metrics must remain visible through the consumer, not
   merely survive parsing and scheduling. Final split review found additional Grok
   products hidden by required-ID-only dashboard enumeration; supplied actual
@@ -177,11 +179,10 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   the prior green gate.
 - Exact arithmetic starts at the HTTP JSON boundary. Decode decimal numeric tokens
   directly as `Decimal`; stringifying a binary float cannot recover lost wire
-  precision. C06 review reproduced raw numeric `43.500000000000000000000000000001`
-  against aggregate `42.5` with Chat `0` incorrectly passing the one-point tolerance
-  after float rounding. Boundary regressions must send actual raw JSON numbers
-  through Transport and the provider, not only decimal strings or decoded objects.
-  Record reproduction separately from pending fix verification and rereview.
+  precision. C06's historical one-point reconciliation reproduction exposed that
+  loss; §12 removes the unsupported sum invariant, not exact decoding. Boundary
+  regressions must send raw JSON numbers through Transport and the provider and
+  verify retained precision, not only decimal strings or decoded objects.
 - Period fallback is an absence rule, not an error-recovery shortcut. A malformed
   `currentPeriod.end` must not be replaced by `billingPeriodEnd`; reversed bounds
   cannot establish reset. Preserve valid usage independently and derive period
@@ -261,3 +262,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 - `.venv/bin/pytest` can carry a stale shebang from a renamed checkout; reinstall
   the package (`uv sync --locked --reinstall-package pytest`) rather than
   rewriting gate commands.
+- Provider-specific polling floors must affect existing saved accounts and UI
+  freshness, not merely new-account defaults. Clamp negative jitter at the actual
+  floor and apply conservative no-header 429 cooldowns; longer configured/server
+  delays win. Explicit manual refresh remains separate from automatic cadence and
+  cannot bypass embargoes. A green synthetic scheduler run does not prove an
+  upstream account's rate threshold.
+- Source a Grok compatibility-version pin from the official stable feed and retain
+  the app's identifying User-Agent. A reference project's version-gate report or
+  schema fixture establishes a compatibility lead, not the user's exact live
+  failure. Preserve the distinction between sourced repair and authenticated proof.

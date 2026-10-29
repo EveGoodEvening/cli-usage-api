@@ -175,7 +175,7 @@ async def test_initial_poll_periodic_monotonic_and_stop():
     await settle()
     assert len(published) == len(resolver.calls) == 1
     clock.wall += timedelta(days=10)
-    await clock.advance(59)
+    await clock.advance(299)
     assert len(provider.calls) == 1
     await clock.advance(1)
     assert len(provider.calls) == 2
@@ -276,7 +276,9 @@ async def test_long_rate_limit_survives_manual_and_same_reference_replacement():
     ],
 )
 async def test_exponential_backoff_cap_and_success_reset(state):
-    scheduler, clock, provider, _, published = setup()
+    scheduler, clock, provider, _, published = setup(
+        (account(provider=ProviderId.GROK_SUBSCRIPTION),)
+    )
     provider.results = [TransportError(state, state.value) for _ in range(7)]
     await scheduler.start()
     await settle()
@@ -333,7 +335,7 @@ async def test_errors_preserve_last_good_but_partial_disappearance_does_not():
     provider.results = [
         lambda item, now: observation(item, now, optional=False, state=FetchState.PARTIAL)
     ]
-    await clock.advance(60)
+    await clock.advance(300)
     partial = published[-1]
     assert partial.fetch_state == FetchState.PARTIAL
     assert partial.metrics[-1].id == "test.optional"
@@ -477,7 +479,9 @@ async def test_codex_resolves_initial_manual_periodic_retry_and_last_known(tmp_p
 
 @pytest.mark.parametrize("fraction, deadline", ((0, 54), (0.5, 60), (1, 66)))
 async def test_periodic_poll_never_starts_before_exact_jitter_deadline(fraction, deadline):
-    scheduler, clock, provider, _, _ = setup(rng=FixedRng(fraction))
+    scheduler, clock, provider, _, _ = setup(
+        (account(provider=ProviderId.GROK_SUBSCRIPTION),), rng=FixedRng(fraction)
+    )
     await scheduler.start()
     try:
         await settle()
@@ -507,7 +511,7 @@ async def test_unexpected_provider_exception_is_not_rendered_and_polling_recover
         assert failed.fetch_state == FetchState.PROVIDER_ERROR
         assert failed.diagnostic == Diagnostic("provider_error")
         assert "SECRET" not in repr(failed)
-        await clock.advance(60)
+        await clock.advance(300)
         assert len(provider.calls) == 2
         assert published[-1].fetch_state == FetchState.OK
     finally:
@@ -524,7 +528,8 @@ async def test_interval_jitter_floor_and_bounds():
         (3600, 1, 3960),
     ):
         scheduler, clock, provider, _, _ = setup(
-            (account(poll_interval_seconds=interval),), FixedRng(fraction)
+            (account(provider=ProviderId.GROK_SUBSCRIPTION, poll_interval_seconds=interval),),
+            FixedRng(fraction),
         )
         await scheduler.start()
         await settle()
@@ -536,7 +541,9 @@ async def test_interval_jitter_floor_and_bounds():
 
 
 async def test_retry_jitter_is_positive_bounded_and_server_deadline_not_capped():
-    scheduler, clock, provider, _, published = setup(rng=FixedRng(1))
+    scheduler, clock, provider, _, published = setup(
+        (account(provider=ProviderId.GROK_SUBSCRIPTION),), rng=FixedRng(1)
+    )
     provider.results = [TransportError(FetchState.NETWORK_ERROR, "network_error")]
     await scheduler.start()
     await settle()
@@ -589,7 +596,7 @@ async def scheduler_smoke():
     assert published[-1].diagnostic.code == "provider_error"
     replacement = replace(account(), credential_ref="new-synthetic-reference")
     await scheduler.update_accounts((replacement,))
-    await clock.advance(60)
+    await clock.advance(300)
     assert provider.calls[-1][0] == replacement
     assert published[-1].fetch_state == FetchState.OK
     await scheduler.update_accounts(())
@@ -671,7 +678,10 @@ async def test_successful_missing_row_is_unknown_not_last_good():
 
 
 async def test_seven_short_interval_accounts_receive_oldest_deadline_service():
-    items = tuple(account(number, poll_interval_seconds=30) for number in range(1, 8))
+    items = tuple(
+        account(number, ProviderId.GROK_SUBSCRIPTION, poll_interval_seconds=30)
+        for number in range(1, 8)
+    )
     scheduler, clock, provider, _, published = setup(items)
     await scheduler.start()
     try:
@@ -777,5 +787,123 @@ async def test_maximum_retry_deadline_publishes_without_shortening_embargo(last_
         await clock.advance(10000)
         assert len(provider.calls) == count
         assert scheduler._states[account().id].retry_deadline == embargo
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.parametrize(
+    "interval,fraction,expected",
+    [
+        (30, 0, 300),
+        (60, 0, 300),
+        (60, 1, 330),
+        (300, 0, 300),
+        (600, 0, 600),
+        (600, 1, 660),
+        (3600, 0, 3600),
+    ],
+)
+async def test_claude_automatic_poll_floor_applies_after_jitter(interval, fraction, expected):
+    item = account(poll_interval_seconds=interval)
+    saved = item.to_dict()
+    scheduler, clock, provider, _, _ = setup((item,), FixedRng(fraction))
+    await scheduler.start()
+    try:
+        await settle()
+        await clock.advance(expected - 0.01)
+        assert [call[2] for call in provider.calls] == [0]
+        await clock.advance(0.01)
+        assert [call[2] for call in provider.calls] == [0, expected]
+        assert item.to_dict() == saved
+        assert Account.from_dict(saved).effective_poll_interval_seconds == max(300, interval)
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.parametrize("interval", [60, 1200])
+@pytest.mark.parametrize("fraction", [0, 1])
+async def test_claude_429_without_retry_after_cooldown_and_refresh_embargo(interval, fraction):
+    item = account(poll_interval_seconds=interval)
+    scheduler, clock, provider, _, published = setup((item,), FixedRng(fraction))
+    provider.results = [TransportError(FetchState.RATE_LIMITED, "rate_limited") for _ in range(4)]
+    await scheduler.start()
+    try:
+        await settle()
+        for base in (300, 600, 900, 900):
+            base = max(base, item.effective_poll_interval_seconds)
+            delay = base + fraction * base * 0.1
+            assert (published[-1].retry_at - clock.now()).total_seconds() == delay
+            count = len(provider.calls)
+            await scheduler.refresh(item.id)
+            await scheduler.update_accounts((item,))
+            await clock.advance(delay - 0.01)
+            assert len(provider.calls) == count
+            await clock.advance(0.01)
+            assert len(provider.calls) == count + 1
+        assert published[-1].fetch_state == FetchState.OK
+        provider.results = [TransportError(FetchState.RATE_LIMITED, "rate_limited")]
+        await scheduler.refresh(item.id)
+        await clock.advance(5)
+        base = item.effective_poll_interval_seconds
+        assert (published[-1].retry_at - clock.now()).total_seconds() == (
+            base + fraction * base * 0.1
+        )
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.parametrize(
+    "state", [FetchState.NETWORK_ERROR, FetchState.SCHEMA_ERROR, FetchState.PROVIDER_ERROR]
+)
+async def test_claude_automatic_error_retry_also_observes_poll_floor(state):
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [TransportError(state, state.value)]
+    await scheduler.start()
+    try:
+        await settle()
+        assert (published[-1].retry_at - clock.now()).total_seconds() == 300
+        await clock.advance(299)
+        assert len(provider.calls) == 1
+        await clock.advance(1)
+        assert len(provider.calls) == 2
+    finally:
+        await scheduler.stop()
+
+
+async def test_claude_explicit_refresh_bypasses_interval_then_resumes_conservative_polling():
+    scheduler, clock, provider, _, _ = setup()
+    await scheduler.start()
+    try:
+        await settle()
+        await scheduler.refresh()
+        await clock.advance(5)
+        assert [call[2] for call in provider.calls] == [0, 5]
+        await clock.advance(299)
+        assert len(provider.calls) == 2
+        await clock.advance(1)
+        assert [call[2] for call in provider.calls] == [0, 5, 305]
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.parametrize("server_delay,expected", [(30, 300), (600, 600)])
+async def test_claude_retry_after_cannot_shorten_local_cooldown(server_delay, expected):
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [
+        TransportError(
+            FetchState.RATE_LIMITED,
+            "rate_limited",
+            retry_at=clock.now() + timedelta(seconds=server_delay),
+        )
+    ]
+    await scheduler.start()
+    try:
+        await settle()
+        assert published[-1].retry_at == clock.now() + timedelta(seconds=expected)
+        await scheduler.refresh()
+        await clock.advance(expected - 1)
+        assert len(provider.calls) == 1
+        await clock.advance(1)
+        assert len(provider.calls) == 2
     finally:
         await scheduler.stop()

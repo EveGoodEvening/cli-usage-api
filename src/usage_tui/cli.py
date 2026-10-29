@@ -304,7 +304,7 @@ def _accounts(args) -> int:
             print(
                 f"{account.id}  {account.provider.value}  {sanitize_text(account.label, max_length=120)}"
                 f"  {'enabled' if account.enabled else 'disabled'}  source={kind}"
-                f"  poll={account.poll_interval_seconds}s"
+                f"  poll={account.effective_poll_interval_seconds}s"
             )
         return 0
     _tty()

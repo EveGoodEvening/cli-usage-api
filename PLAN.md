@@ -2,6 +2,8 @@
 
 ## 0. Status, purpose, and scheduling authority
 
+**Latest maintenance authority (2026-10-29): §12 covers the user's Codex display cleanup, Claude polling/rate-limit investigation, and Grok compatibility repair against BYOS. It supersedes the earlier polling, omitted-zero, and product-reconciliation rules only where stated. Historical gates/reviews below remain historical, not proof of these changes or authenticated compatibility.**
+
 Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex single atomic cutover under §11 is closed for implementation, verification, documentation and independent review at green draft `2d7ea6b`; final tracker-snapshot commit follows and its hash is not yet known. Authorized live acceptance remains unexercised.
 
 Original goal: **终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。**
@@ -185,15 +187,15 @@ Credits expire; they do not “reset weekly.” Show nearest expiry plus expanda
 
 ### 4.3 Grok shared pool, Build, and Chat
 
-Prefer a direct implementation of the **official CLI's existing read-only billing request**, not spawning a potentially updating/telemetry-enabled agent process. Fixed origin `https://cli-chat-proxy.grok.com`; exact path `/v1/billing?format=credits`; headers `Authorization: Bearer <key>`, `x-xai-token-auth: xai-grok-cli`, `Accept: application/json`. The official source also supplies `x-userid`, `x-grok-client-version`, and client-mode headers; include `x-userid` only from the same resolved credential. Do not invent a version or impersonate an unsupported client. Begin with the independently evidenced minimal bearer/token-auth request; a live rejection demanding additional headers is a compatibility blocker requiring sourced adjustment, not guessed spoofing.
+Prefer a direct implementation of the **official CLI's existing read-only billing request**, not spawning a potentially updating/telemetry-enabled agent process. Fixed origin `https://cli-chat-proxy.grok.com`; exact path `/v1/billing?format=credits`; headers `Authorization: Bearer <key>`, `x-xai-token-auth: xai-grok-cli`, `Accept: application/json`. Include `x-userid` only from the same resolved credential. Under §12, add release-pinned `x-grok-client-version: 1.0.70`, sourced from the official stable feed; retain identifying `User-Agent: usage-tui/<installed-version>`. No runtime download, guessed version, client-mode header, or upstream User-Agent impersonation. This sourced compatibility adjustment does not prove the user's billing failure was a version rejection.
 
 Connection: official `grok login` runs outside this app. Read `$GROK_HOME/auth.json` or `~/.grok/auth.json`; top-level keys identify scopes. Prefer the selected `https://auth.x.ai::<client-id>` entry, fallback to `https://accounts.x.ai/sign-in` only if no ambiguity. Entry contains `key`, `expires_at`, `user_id`, `team_id`, `auth_mode`, and optional `principal_type`. Expiry parser accepts timezone-aware RFC3339 and explicitly tested Unix seconds/milliseconds; unknown expiry is not asserted fresh. Multiple matching identities require user selection stored as a nonsecret scope selector; do not accidentally choose another account. Never copy `refresh_token` into app storage or refresh it. Manual bearer is supported with unknown identity until configured; API/management keys beginning `xai-` are rejected for subscription use. Team principal unsupported responses are actionable, not retried under an unrelated personal account.
 
-Parse root `config` object, optional `subscriptionTier`/`subscription_tier` metadata; `config.creditUsagePercent` finite nonnegative means shared included usage only when semantics establish unified billing. `config.isUnifiedBillingUser == true` positively establishes that relationship. `currentPeriod` contains optional `type`, RFC3339 `start`, `end`. Known type `USAGE_PERIOD_TYPE_WEEKLY` labels weekly; monthly labels monthly. Reset is `currentPeriod.end`, fallback to `billingPeriodEnd` only when current-period end is absent. Reject reversed bounds; unknown type remains “period.” Do not derive included quota from `onDemandUsed / onDemandCap`, because on-demand spend is not included subscription usage. Missing `creditUsagePercent` remains unknown even with a period or prepaid wallet. No implicit zero inference, legacy estimated cap, gRPC/browser fallback, or optional reset-coupon lookup in this scope.
+Parse root `config` object, optional `subscriptionTier`/`subscription_tier` metadata; `config.creditUsagePercent` finite nonnegative means shared included usage only when `config.isUnifiedBillingUser == true` positively establishes that relationship. `currentPeriod` contains optional `type`, RFC3339 `start`, `end`. Known weekly/monthly types determine labels. Reset is `currentPeriod.end`, fallback to `billingPeriodEnd` only when current-period end is absent; invalid or reversed bounds cannot supply reset. Under §12's BYOS-compatible omitted-default convention, an absent `creditUsagePercent` means zero only with explicit `USAGE_PERIOD_TYPE_WEEKLY` and a valid reset. Present null/malformed values remain invalid; absent scalar without that context remains unknown. No included-usage inference from on-demand spend/prepaid balance, legacy estimated cap, gRPC/browser fallback, or reset-coupon lookup.
 
-`config.productUsage` is an observed private array of `{product: "GrokBuild" | "GrokChat" | other_string, usagePercent: number}`. Preserve all products for reconciliation. Validate whole array (no duplicates, finite nonnegative values, no malformed entries); require a wire-provided aggregate from the **same** payload and shares summing to aggregate within 1 percentage point to show the breakdown. Unknown products appear under their sanitized ID, so other consumers do not disappear. Explicit Build/Chat zero entries display zero; an absent entry remains unknown. Missing/inconsistent breakdown does not discard a valid aggregate. Product shares are consumed percentages of the common pool, not separate remaining percentages. Approved C06 representation keeps product consumption in detail only, not `QuotaValue`, whose automatic `100 - used` remaining would invent an independent product allowance. Proven shared semantics use `shared_pool_id` and detail to refer to shared remaining/reset rather than copying independent product quota/reset fields. If unified semantics are unproven, show breakdown consumption as reported but product remaining/reset unavailable. No cross-account enrichment or blending values from different requests.
+`config.productUsage` is an observed private array of `{product: "GrokBuild" | "GrokChat" | other_string, usagePercent: number}`. Validate the whole array (unique product identities, finite nonnegative values, no malformed entries) and require a usable aggregate from the same response. §12 removes the unsupported sum-to-aggregate invariant: BYOS projects informational shares even when their sum differs. With explicit weekly type and valid reset, an existing entry's omitted `usagePercent` means zero; a missing product, present null, or invalid percentage never does. Preserve sanitized unknown-product IDs. An invalid breakdown must not discard valid aggregate evidence. Product consumption remains detail-only (`quota=None`), never independent `100 - share` remaining. Attach `shared_pool_id`/reset only with positive unified-pool evidence; otherwise remaining/reset stay unavailable. No cross-account enrichment or blending different requests.
 
-C06 review precision requirement: HTTP JSON decimal numeric tokens must decode directly to `Decimal`, before provider parsing or reconciliation; converting a binary float back to a string/Decimal cannot restore wire precision. Raw numeric aggregate `42.5`, Build `43.500000000000000000000000000001`, and Chat `0` are outside the one-point tolerance and must not expose a READY product breakdown. Boundary tests must cover actual raw JSON numbers through Transport and GrokProvider, not only string-valued percentages.
+HTTP JSON decimal numeric tokens must decode directly to `Decimal`; converting a binary float back to a string cannot recover wire precision. §12 removes C06's unsupported one-point reconciliation test, not exact arithmetic: raw numeric `43.500000000000000000000000000001` must retain that exact product value. Boundary regressions must exercise actual raw JSON numbers through Transport and GrokProvider, not only strings or decoded objects. C06's original finding/fix remains historical evidence of the float-decoding defect.
 
 Official ACP evidence for troubleshooting/future contract repair: `grok agent stdio` uses newline-delimited JSON-RPC 2.0; `initialize` params are `{"protocolVersion":"1","clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false}}`, then `_x.ai/billing` with no params. Current typed CLI responses can drop `productUsage`; therefore ACP is **not** silently substituted for the direct JSON path and does not satisfy Build/Chat acceptance. No subprocess adapter is required for this plan.
 
@@ -238,9 +240,9 @@ HTTP credentials are limited to their exact origins (§4). Disable redirects, ne
 
 ## 6. Polling, freshness, and terminal behavior
 
-Assumption/rationale: “near real time” means bounded periodic observation, **not** a promised provider push/SLA. Default interval 60 seconds with ±10% jitter; configurable local integer interval 30…3600 seconds, never below 30. One fetch per account at a time, max two accounts fetching concurrently, and an origin-level minimum request start spacing of five seconds. Console discovery happens only on connection/organization reselection, not every poll. No duplicate request per metric. HTTP connect timeout 5s, overall read/request deadline 10s, max JSON body 1 MiB streamed with bounds. Shutdown cancels work and closes clients.
+“Near real time” means bounded periodic observation, not a provider push/SLA. Saved intervals remain integer 30…3600 seconds with default 60. Under §12, Claude subscription's effective cadence is `max(300, saved_interval)`; automatic polling clamps jitter at that floor and can add up to 10%, including for existing saved 60-second accounts without rewriting config. Freshness uses that same effective cadence. Other providers retain ±10% jitter and the 30-second minimum. One fetch per account, max two concurrent accounts, and five-second same-origin request-start spacing remain. Console discovery is connection-only; no duplicate request per metric. HTTP connect timeout 5s, overall deadline 10s, streamed decoded JSON limit 1 MiB; shutdown cancels work and closes owned clients.
 
-Fetch immediately after connection/start; `r` coalesces refresh requests, respects in-flight work, origin spacing, and retry deadlines. Never launch overlapping requests because of a countdown tick or repeated keypress. A local one-second UI tick updates countdowns without network traffic. Authentication/permission failures suspend that account until credential/config replacement or explicit reconnect action; reconnect can retry once but does not bypass service rate-limit deadlines. Schema errors back off without inventing data. 429 honors valid `Retry-After` seconds or HTTP date (at least 60s); never cap a longer server deadline downwards. Without a valid header use exponential 60s, 120s, 240s … capped at 15 minutes plus bounded jitter. Network/5xx/schema errors use the same exponential schedule; a successful compatible fetch resets it. A malformed retry header is a safe default, not an exception.
+Fetch immediately after connection/start. Explicit `r` may bypass periodic cadence but coalesces refreshes and respects in-flight work, origin spacing, and retry embargoes. One-second presentation ticks do not fetch. Auth/permission failures suspend until explicit reconnect/config replacement. Other providers keep exponential error backoff 60, 120, 240…900 seconds plus bounded jitter. Claude 429 backoff starts 300, then 600, then 900 seconds plus bounded jitter, never earlier than its effective configured cadence; other Claude errors also respect that cadence. All valid longer server `Retry-After` deadlines win, never shortened by the local cap. Same-provider account replacement preserves embargoes. Compatible success resets failure backoff; missing/malformed retry headers use the local policy. This is a conservative local policy, not a discovered upstream rate threshold.
 
 Select eligible work by oldest due deadline so overdue accounts, including initial polls, cannot be perpetually overtaken by accounts already serviced. Measure the five-second origin gate after credential resolution, immediately before entering the provider request; queue-time reservations do not establish actual request-start spacing. Keep retry embargoes monotonic and preserve long server deadlines; if reconstructing a UTC presentation timestamp would overflow, saturate it at UTC `datetime.max` without shortening the embargo or dropping the failure snapshot. These C08 review corrections landed in separately verified fix `8929ac4`, with clean independent rereviews recorded in the ledger.
 
@@ -679,7 +681,7 @@ Primary-source contract anchors (static research, not authenticated observation)
 - Optional reported main windows: `MetricId.CODEX_FIVE_HOUR = "codex.subscription.five_hour"`, label **Codex 5h**, only when duration is `18000`; other positive integer durations use `codex.subscription.window.<seconds>` with a duration-bearing label. Do not create a mandatory 5h/30d row or infer entitlement from plan names. Null/missing main weekly remains UNKNOWN, not zero/not-applicable or a guessed secondary window.
 - Optional additional pools remain distinct: `codex.pool.<sha256(metered_feature UTF-8).hexdigest()>.window.<seconds>` for valid nonempty `metered_feature` and positive integer duration. This follows existing hashed extra-product identity practice, fits the 128-character metric-ID bound, and never hashes credentials. Preserve sanitized `limit_name`/feature display, not raw terminal markup. Do not sum pools or use them to satisfy the main weekly row. Same-identity duplicate windows must reconcile only if their valid values agree; conflicting usage/reset stays unknown/partial for that identity, never last-wins. Unclassifiable/malformed siblings produce safe partial detail without discarding valid windows or inventing a duration.
 - Use validated nonnegative `used_percent`, preserve >100, derive remaining `max(0,100-used)`, reject bool/nonfinite/negative values. Missing usage stays unknown independently of reset. Absolute **`reset_at` Unix seconds** is canonical: parse finite valid integer seconds to aware UTC with safe bounds; no milliseconds guessing and **no timestamp fabricated from `reset_after_seconds`**. Invalid/missing reset does not erase valid usage. Relative reset may be omitted; it must never be promoted to an absolute timestamp.
-- `allowed`, `limit_reached`, and `rate_limit_reached_type` are separate sanitized enforcement detail, not proof of 100% usage. `plan_type` is descriptive. Credits/unlimited-credit flags, spend control, code-review limits and reset credits are not main quota and do not mandate new metrics. No balance adapter or purchases. Source is `SourceRef(kind="private_http", contract="codex.wham.usage.v1", version_sensitive=True)`; DEMO uses `offline_demo` and never a live fallback.
+- `allowed`, `limit_reached`, and `plan_type` do not establish quota and, under the user's §12 display request, are not emitted in displayed detail. Sanitized `rate_limit_reached_type` may remain explanatory, never proof of 100% usage. Credits/unlimited-credit flags, spend control, code-review limits and reset credits are not main quota and do not mandate new metrics. No balance adapter or purchases. Source remains `SourceRef(kind="private_http", contract="codex.wham.usage.v1", version_sensitive=True)`; DEMO uses `offline_demo` and never a live fallback.
 
 ### 11.3 Frozen read/auth interface
 
@@ -896,3 +898,92 @@ Do not send tokens, auth files, account IDs, raw responses or other secrets thro
 chat. The 12 unchecked items require concrete local authorization, eligible
 account/plan/UI evidence or user backend/configuration, not an ordinary-ChatGPT
 upstream-contract repair. No authenticated or real-keyring success is claimed.
+
+## 12. User-requested provider maintenance — 2026-10-29
+
+### Scope and findings
+
+- **Codex:** remove `plan_type`, `allowed`, and `limit_reached` from dashboard
+  and detail output. Weekly/5h/extra-pool values, reset semantics and provenance
+  remain unchanged. No credential or transport change for Codex.
+- **Claude subscription:** code inspection found one usage GET per account fetch
+  covering all three windows, not a duplicate request per metric or internal
+  transport retry loop. Previous default/saved 60s accounts polled every 54–66s;
+  a no-header 429 started retrying after about 60s. Effective automatic cadence is
+  now at least 300s (300–330s at the floor), retaining longer saved preferences,
+  with aligned freshness. Claude 429 cooldown starts at 300s and grows to 600/900s
+  plus jitter; longer settings/server embargoes win. Manual refresh remains an
+  explicit earlier read, never an embargo bypass. Config files are not rewritten.
+  Multiple connections/processes or first-party clients may also contribute traffic;
+  no upstream threshold or exact live root cause was established.
+- **Grok:** the old parser rejected an omitted aggregate even with a valid weekly
+  period/reset and rejected product breakdowns that did not sum within one point
+  of aggregate. BYOS supplies concrete counterexamples. Recognize omitted scalar
+  zeros only in explicit valid weekly context; explicit null/invalid values, missing
+  products and arbitrary empty config remain unknown/errors. Validate the entire
+  product array and preserve exact decimals, but remove the unsupported sum gate.
+  Shared remaining/reset still requires `isUnifiedBillingUser == true`.
+  Add a sourced compatibility-version header without impersonating the official
+  User-Agent. No response capture from the user's account was inspected, so these
+  are sourced compatibility repairs, not proof of the exact reported live failure.
+
+### Research provenance
+
+- Local read-only reference: `../../Recursive-Self-Improving/byos` at revision
+  `7d94261238e7690d19e5384696a5369f20446e5f`.
+  `internal/usage/xai_billing.go:106–140` recognizes omitted aggregate zero with
+  weekly/reset context; `:148–193` handles omitted product percentages. Its
+  permissive null/skipping/first-duplicate behavior was deliberately not copied.
+  `internal/usage/weekly_products_test.go:20–31` uses aggregate 40 and products
+  12.5 + 0 + 3: source evidence against imposing sum equality.
+  `internal/xai/headers.go:31–39`, `internal/config/config.go:34–36`, and
+  `docs/providers.md:23–40` supply version-header precedent (BYOS pin 1.0.46).
+- The [official stable feed](https://x.ai/cli/stable), retrieved without auth,
+  returned **1.0.70**; this release pins that value, with no runtime feed request.
+  The [documented HTTP426 incident](https://github.com/router-for-me/CLIProxyAPI/issues/6249)
+  concerns an inference version floor, not proof this user's billing request was
+  version-rejected.
+- The [official Grok FAQ](https://docs.x.ai/grok/faq#usage--limits) confirms a shared
+  weekly pool and product breakdown. It does **not** explicitly promise non-additive
+  percentages; removing the sum check follows BYOS evidence and the absence of a
+  documented sum invariant, not a stronger claim about that FAQ.
+
+### Exercised evidence and boundaries
+
+- Actual CodexProvider → Transport → mounted UsageApp/Pilot with synthetic HTTP:
+  weekly 37.5%, 5h 12.5%, extra pool 105%; all three detail screens retain provenance
+  and omit the requested metadata. The first throwaway harness omitted mandatory
+  selected-account data and was corrected; no production credential contract changed.
+- Actual Scheduler → ClaudeProvider → Transport, virtual monotonic time, synthetic
+  HTTP: request starts `[0, 300, 600, 605, 905, 1505, 3305, 3605]`; three windows per
+  request, negative-jitter floor, 300/600s 429 cooldown, 1800s server embargo through
+  manual refresh/account replacement, last-known timestamps, freshness and recovery
+  all passed. The 605s read was the explicit manual refresh, not automatic polling.
+- Actual GrokProvider → Transport → mounted UsageApp/Pilot, seven synthetic reads:
+  omitted weekly zero with/without unified evidence, explicit-null/bad-reset rejection,
+  duplicate-array rejection without losing aggregate, exact raw numeric precision,
+  aggregate 40% versus Build 10% / Chat 5.5%, shared remaining 60% without invented
+  per-product remaining, and all three selectable detail/provenance screens passed.
+- `uv run --locked python scripts/tui_smoke.py`: all four installed-entry runs
+  (healthy/errors × normal quit/Ctrl-C) rendered metrics and restored terminals.
+  HOME/XDG were isolated; no authenticated request or real credential/keyring read.
+- Initial full gate: 8 failed / 1162 passed; five new freshness fixtures omitted the
+  required injected factory, and three generic jitter cases still used Claude's old
+  cadence. Corrected the fixtures to mounted UI checks and kept generic jitter
+  assertions on unchanged Grok cadence. A lint-only conditional and formatting were
+  also corrected. Targeted cadence/freshness rerun: **73 passed in 5.05s**.
+- Integrated `uv run --locked pytest -q`: **1170 passed in 53.25s** after those
+  fixture corrections. A final CLI-only presentation integration then changed
+  `accounts list` to show effective rather than saved cadence; its targeted suite
+  passed **57 tests in 0.31s**, followed by clean full Ruff lint/45-file format checks
+  and clean CLI LSP diagnostics. The installed CLI, using isolated HOME/XDG and
+  synthetic saved accounts, showed **300s / 900s / 60s** for default Claude, longer
+  Claude and unchanged Grok while reloading the original saved accounts unchanged.
+- Ruff lint passed; formatting check passed for **45 files**; Ruff LSP diagnostics
+  were clean for all **17 source files**. No new independent review or commit is
+  claimed. README/CHANGELOG/SECURITY and repo-root Lessons reflect the bounded change.
+
+The earlier §11 live acceptance items remain unfulfilled by these synthetic checks.
+The user's reported Claude/Grok failures are accepted observations, not rerun against
+their credentials. Restart the dashboard to load the repair; actual account success
+and its upstream limit still require an authorized same-account observation.

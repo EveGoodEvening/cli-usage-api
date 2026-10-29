@@ -7,11 +7,14 @@ from uuid import UUID
 
 import pytest
 
+from usage_tui.app import UsageApp
 from usage_tui.domain import (
+    Account,
     Diagnostic,
     FetchState,
     Metric,
     MetricState,
+    ProviderId,
     QuotaValue,
     Snapshot,
     SourceKind,
@@ -149,3 +152,40 @@ def test_maximum_retry_timestamp_does_not_change_observation_freshness(last_good
     assert result.age_seconds == (301 if last_good else None)
     assert result.attempted_age_seconds == 1
     assert value.to_dict() == original
+
+
+@pytest.mark.parametrize(
+    "provider,interval,threshold",
+    [
+        (ProviderId.CLAUDE_SUBSCRIPTION, 60, 600),
+        (ProviderId.CLAUDE_SUBSCRIPTION, 900, 1800),
+        (ProviderId.GROK_SUBSCRIPTION, 60, 120),
+        (ProviderId.CODEX_SUBSCRIPTION, 60, 120),
+        (ProviderId.CLAUDE_PLATFORM, 60, 120),
+    ],
+)
+async def test_dashboard_freshness_uses_effective_poll_interval(
+    monkeypatch, provider, interval, threshold
+):
+    item = Account(str(UUID(int=1)), provider, "Synthetic", poll_interval_seconds=interval)
+    app = UsageApp(
+        mode="live", accounts=(item,), scheduler_factory=lambda accounts, *, publish: None
+    )
+    value = snapshot()
+    async with app.run_test(size=(120, 40)) as pilot:
+        for age, stale in ((121, threshold < 121), (threshold, False), (threshold + 1, True)):
+            now = NOW + timedelta(seconds=age)
+            monkeypatch.setattr(app, "now", lambda now=now: now)
+            app.publish_snapshot(value)
+            await pilot.pause()
+            prompts = "\n".join(
+                str(app.listing.get_option_at_index(index).prompt)
+                for index in range(app.listing.option_count)
+            )
+            assert ("STALE" in prompts) is stale
+            app.listing.highlighted = app.option_index((item, "test.usage"))
+            await pilot.press("enter")
+            assert ("STALE" in app.screen.content) is stale
+            await pilot.press("escape")
+        assert app.snapshots[item.id] is value
+        assert item.poll_interval_seconds == interval

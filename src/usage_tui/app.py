@@ -444,7 +444,7 @@ class UsageApp(App[None]):
                 if account.id in self.snapshots
             ]
             stale = sum(
-                freshness(snapshot, self.now(), account.poll_interval_seconds).stale
+                freshness(snapshot, self.now(), account.effective_poll_interval_seconds).stale
                 for account, snapshot in observed
             )
             retries = [
@@ -548,7 +548,9 @@ class UsageApp(App[None]):
             return heading + "\n  — 已禁用 / disabled"
         if snapshot is None:
             return heading + "\n  — 暂无数据 / no data · 等待首次观察 / pending"
-        state = freshness(snapshot, self.now(), account.poll_interval_seconds, metric=metric)
+        state = freshness(
+            snapshot, self.now(), account.effective_poll_interval_seconds, metric=metric
+        )
         flags = (" LAST KNOWN 上次已知" if state.last_known else "") + (
             " STALE 过期" if state.stale else " fresh 新鲜"
         )
@@ -752,13 +754,15 @@ class UsageApp(App[None]):
             f"{icon} {STATE_LABELS[code]}" + (f" ({code})" if tier == "wide" else ""),
             style=f"bold {self._color(color)}",
         )
-        state = freshness(snapshot, now, account.poll_interval_seconds)
+        state = freshness(snapshot, now, account.effective_poll_interval_seconds)
         if state.last_known:
             chips.append(" · ")
             chips.append("LAST KNOWN 上次已知", style=f"bold {self._color('warning')}")
         stale = (
             sum(
-                freshness(snapshot, now, account.poll_interval_seconds, metric=metric).stale
+                freshness(
+                    snapshot, now, account.effective_poll_interval_seconds, metric=metric
+                ).stale
                 for metric in snapshot.metrics
             )
             if snapshot.metrics
@@ -793,7 +797,7 @@ class UsageApp(App[None]):
         snapshot = self.snapshots.get(account.id)
         metric = self._metric(account, metric_id)
         state = (
-            freshness(snapshot, now, account.poll_interval_seconds, metric=metric)
+            freshness(snapshot, now, account.effective_poll_interval_seconds, metric=metric)
             if snapshot is not None
             else None
         )

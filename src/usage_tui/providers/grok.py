@@ -1,7 +1,7 @@
 """Version-sensitive Grok billing read; product consumption is not a quota."""
 
 from datetime import datetime
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from hashlib import sha256
 
 from usage_tui.domain import (
@@ -57,7 +57,9 @@ def _period(config: dict) -> tuple[str, datetime | None, bool]:
     return label, reset, False
 
 
-def _products(config: dict, aggregate: Decimal | None) -> dict[str, Decimal] | None:
+def _products(
+    config: dict, aggregate: Decimal | None, *, omitted_zero: bool
+) -> dict[str, Decimal] | None:
     entries = config.get("productUsage")
     if not isinstance(entries, list) or aggregate is None:
         return None
@@ -69,21 +71,9 @@ def _products(config: dict, aggregate: Decimal | None) -> dict[str, Decimal] | N
         if not isinstance(name, str) or not name.strip() or name in products:
             return None
         try:
-            products[name] = _percent(entry.get("usagePercent"))
+            value = entry.get("usagePercent", 0) if omitted_zero else entry.get("usagePercent")
+            products[name] = _percent(value)
         except DomainError:
-            return None
-    values = [aggregate, *products.values()]
-    # Align bounded Decimal representations before adding; default context rounds
-    # long coefficients and can wrongly accept a share just outside the tolerance.
-    with localcontext() as context:
-        context.prec = max(
-            28,
-            max(value.adjusted() for value in values)
-            - min(value.as_tuple().exponent for value in values)
-            + len(str(len(values)))
-            + 3,
-        )
-        if abs(sum(products.values(), Decimal(0)) - aggregate) > 1:
             return None
     return products
 
@@ -136,13 +126,23 @@ class GrokProvider:
         if not isinstance(payload, dict) or not isinstance(payload.get("config"), dict):
             return self._failure(account, now, FetchState.SCHEMA_ERROR, "schema_error")
         config = payload["config"]
+        period, reset, bad_period = _period(config)
+        # BYOS's weekly billing parser and ProtoJSON omit default-valued
+        # scalars. Require explicit, valid weekly context; an arbitrary empty
+        # config, malformed present value, or missing product is not zero.
+        omitted_zero = period == "weekly" and not bad_period
         try:
-            aggregate = _percent(config.get("creditUsagePercent"))
+            value = (
+                config.get("creditUsagePercent", 0)
+                if omitted_zero
+                else config.get("creditUsagePercent")
+            )
+            aggregate = _percent(value)
         except DomainError:
             aggregate = None
         unified = config.get("isUnifiedBillingUser") is True
-        period, reset, bad_period = _period(config)
-        products = _products(config, aggregate)
+        # The informational breakdown has no documented sum-to-total invariant.
+        products = _products(config, aggregate, omitted_zero=omitted_zero)
         detail = [
             f"Reported aggregate consumption: {aggregate}%." if aggregate is not None else _MISSING
         ]

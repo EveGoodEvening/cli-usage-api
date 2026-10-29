@@ -52,7 +52,8 @@ def provider_for(payload, *, status=200, headers=None, credential=CREDENTIAL):
         assert request.headers["authorization"] == f"Bearer {credential.secret}"
         assert request.headers["x-xai-token-auth"] == "xai-grok-cli"
         assert request.headers["accept"] == "application/json"
-        assert "x-grok-client-version" not in request.headers
+        assert request.headers["x-grok-client-version"] == "1.0.70"
+        assert request.headers["user-agent"].startswith("usage-tui/")
         assert "cookie" not in request.headers
         if credential.user_id is None:
             assert "x-userid" not in request.headers
@@ -147,7 +148,7 @@ async def test_aggregate_exact_overage_and_explicit_product_zero(payload, value)
         "invalid",
     ],
 )
-async def test_invalid_or_missing_aggregate_no_products_or_inference(payload, value):
+async def test_invalid_present_aggregate_no_products_or_inference(payload, value):
     payload["config"]["creditUsagePercent"] = value
     payload["config"]["onDemandUsed"] = 10
     payload["config"]["onDemandCap"] = 100
@@ -207,7 +208,6 @@ async def test_absence_is_unknown_not_zero(payload):
         {},
         [None],
         [{}],
-        [{"product": "GrokBuild"}],
         [{"product": True, "usagePercent": 42.5}],
         [{"product": "", "usagePercent": 42.5}],
         [{"product": "GrokBuild", "usagePercent": 42.5}] * 2,
@@ -221,7 +221,7 @@ async def test_absence_is_unknown_not_zero(payload):
         ],
         [{"product": "GrokBuild", "usagePercent": True}],
         [{"product": "GrokBuild", "usagePercent": "1e1001"}],
-        [{"product": "GrokBuild", "usagePercent": 0}],
+        [{"product": "GrokBuild", "usagePercent": None}],
         [],
     ],
 )
@@ -236,47 +236,28 @@ async def test_entire_breakdown_rejected_preserving_aggregate(payload, entries):
 
 
 @pytest.mark.parametrize(
-    ("share", "valid"),
-    [
-        ("41.5", True),
-        ("43.5", True),
-        ("41.499999999999999999999999999999", False),
-        ("43.500000000000000000000000000001", False),
-    ],
+    "share",
+    ["0", "41.499999999999999999999999999999", "43.500000000000000000000000000001", "150"],
 )
-async def test_reconciliation_tolerance_exact_boundary(payload, share, valid):
+@pytest.mark.parametrize("raw_number", [False, True])
+async def test_informational_products_need_not_reconcile_with_total(payload, share, raw_number):
     payload["config"]["productUsage"] = [
-        {"product": "GrokBuild", "usagePercent": share},
+        {"product": "GrokBuild", "usagePercent": "WIRE_SHARE" if raw_number else share},
         {"product": "GrokChat", "usagePercent": 0},
     ]
-    provider, _ = provider_for(payload)
-    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
-    assert (snapshot.metrics[1].state == MetricState.READY) is valid
-    assert snapshot.metrics[0].state == MetricState.READY
-
-
-@pytest.mark.parametrize(
-    ("share", "valid"),
-    [
-        ("41.5", True),
-        ("43.5", True),
-        ("41.499999999999999999999999999999", False),
-        ("43.500000000000000000000000000001", False),
-    ],
-)
-async def test_raw_numeric_reconciliation_tolerance_exact_boundary(payload, share, valid):
-    payload["config"]["productUsage"] = [
-        {"product": "GrokBuild", "usagePercent": "WIRE_SHARE"},
-        {"product": "GrokChat", "usagePercent": 0},
-    ]
-    body = json.dumps(payload).encode().replace(b'"WIRE_SHARE"', share.encode())
+    body = (
+        json.dumps(payload).encode().replace(b'"WIRE_SHARE"', share.encode())
+        if raw_number
+        else payload
+    )
     provider, _ = provider_for(body)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
-    assert snapshot.fetch_state == (FetchState.OK if valid else FetchState.PARTIAL)
+    assert snapshot.fetch_state == FetchState.OK
     assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
-    assert snapshot.metrics[0].state == MetricState.READY
-    expected = MetricState.READY if valid else MetricState.UNKNOWN
-    assert all(row.state == expected for row in snapshot.metrics[1:])
+    assert all(row.state == MetricState.READY for row in snapshot.metrics)
+    assert f"{Decimal(share)}%" in snapshot.metrics[1].detail
+    assert snapshot.metrics[1].quota is None
+    assert snapshot.metrics[1].shared_pool_id == snapshot.metrics[0].id
 
 
 @pytest.mark.parametrize("share", ["1e1001", "1e-1001", "1." + "1" * 1024])
@@ -293,7 +274,7 @@ async def test_raw_numeric_product_percent_bounds_preserve_aggregate(payload, sh
     assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics[1:])
 
 
-async def test_unknown_products_retained_sanitized_and_reconciled(payload):
+async def test_unknown_products_retained_sanitized_and_informational(payload):
     config = payload["config"]
     config["creditUsagePercent"] = 50
     config["productUsage"].append({"product": "\u001b[31m[Other]\n", "usagePercent": 7.5})
@@ -396,7 +377,7 @@ async def test_no_cross_payload_or_account_enrichment(payload):
     first = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert first.metrics[1].state == MetricState.READY
     missing = copy.deepcopy(payload)
-    del missing["config"]["creditUsagePercent"]
+    missing["config"]["creditUsagePercent"] = None
     next_provider, _ = provider_for(missing)
     second = await next_provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert all(row.state == MetricState.UNKNOWN for row in second.metrics)
@@ -413,6 +394,7 @@ async def test_no_cross_payload_or_account_enrichment(payload):
         (401, FetchState.AUTH_REQUIRED),
         (403, FetchState.PERMISSION_DENIED),
         (429, FetchState.RATE_LIMITED),
+        (426, FetchState.PROVIDER_ERROR),
         (500, FetchState.PROVIDER_ERROR),
     ],
 )
@@ -477,15 +459,12 @@ async def test_plan_metadata_sanitized_not_assumed_quota(payload):
     assert snapshot.metrics[0].quota.limit_count is None
 
 
-@pytest.mark.parametrize("field", ["creditUsagePercent", "productUsage", "isUnifiedBillingUser"])
-async def test_omitted_fields_never_inferred(payload, field):
+@pytest.mark.parametrize("field", ["productUsage", "isUnifiedBillingUser"])
+async def test_omitted_non_scalar_usage_fields_never_inferred(payload, field):
     del payload["config"][field]
     provider, _ = provider_for(payload)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
-    if field == "creditUsagePercent":
-        assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
-        assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics)
-    elif field == "productUsage":
+    if field == "productUsage":
         assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
         assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics[1:])
     else:
@@ -552,3 +531,79 @@ async def test_malformed_json_response_is_safe():
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
     assert "synthetic-secret" not in repr(snapshot)
+
+
+async def test_raw_http_protojson_omitted_zero_with_weekly_context():
+    body = (Path(__file__).parent / "fixtures" / "grok_billing_omitted_zero.json").read_bytes()
+    provider, requests = provider_for(body)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert len(requests) == 1
+    assert snapshot.fetch_state == FetchState.OK
+    assert_rows(snapshot)
+    assert snapshot.metrics[0].quota.used_percent == Decimal(0)
+    assert snapshot.metrics[0].quota.remaining_percent == Decimal(100)
+    assert all(row.reset_at == RESET for row in snapshot.metrics)
+    assert all(row.state == MetricState.READY for row in snapshot.metrics)
+    assert all("0%" in row.detail for row in snapshot.metrics)
+    assert all(row.shared_pool_id == snapshot.metrics[0].id for row in snapshot.metrics[1:])
+
+
+@pytest.mark.parametrize(
+    "period",
+    [
+        None,
+        [],
+        {},
+        {"type": "USAGE_PERIOD_TYPE_MONTHLY"},
+        {"type": "FUTURE"},
+        {"type": "USAGE_PERIOD_TYPE_WEEKLY", "end": None},
+        {"type": "USAGE_PERIOD_TYPE_WEEKLY", "start": "2026-12-01T00:00:00Z"},
+    ],
+)
+async def test_missing_aggregate_without_valid_weekly_context_is_not_zero(payload, period):
+    config = payload["config"]
+    del config["creditUsagePercent"]
+    config["currentPeriod"] = period
+    config["billingPeriodEnd"] = "2026-11-02T00:00:00Z"
+    provider, _ = provider_for(payload)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
+    assert snapshot.fetched_at is None
+    assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics)
+
+
+async def test_no_period_or_reset_cannot_prove_omitted_aggregate_zero(payload):
+    config = payload["config"]
+    del config["creditUsagePercent"]
+    del config["currentPeriod"]
+    config["billingPeriodEnd"] = "2026-11-02T00:00:00Z"
+    provider, _ = provider_for(payload)
+    assert (await provider.fetch(ACCOUNT, CREDENTIAL, NOW)).fetch_state == FetchState.SCHEMA_ERROR
+    config["currentPeriod"] = {"type": "USAGE_PERIOD_TYPE_WEEKLY"}
+    del config["billingPeriodEnd"]
+    provider, _ = provider_for(payload)
+    assert (await provider.fetch(ACCOUNT, CREDENTIAL, NOW)).fetch_state == FetchState.SCHEMA_ERROR
+
+
+@pytest.mark.parametrize("weekly", [False, True])
+async def test_present_product_omitted_percent_requires_weekly_context(payload, weekly):
+    config = payload["config"]
+    if not weekly:
+        config["currentPeriod"]["type"] = "USAGE_PERIOD_TYPE_MONTHLY"
+    config["productUsage"] = [{"product": "GrokBuild"}]
+    provider, _ = provider_for(payload)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
+    assert snapshot.metrics[1].state == (MetricState.READY if weekly else MetricState.UNKNOWN)
+    if weekly:
+        assert "0%" in snapshot.metrics[1].detail
+    assert snapshot.metrics[2].state == MetricState.UNKNOWN
+    assert snapshot.metrics[2].shared_pool_id is None
+
+
+async def test_empty_config_cannot_be_defaulted_to_zero():
+    provider, _ = provider_for(b'{"config":{}}')
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
+    assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics)

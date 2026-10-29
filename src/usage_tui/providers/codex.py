@@ -68,10 +68,6 @@ def _window(value: dict, detail: str) -> _Window:
 
 def _enforcement(value: dict) -> str:
     parts = []
-    for field in ("allowed", "limit_reached"):
-        flag = value.get(field)
-        if type(flag) is bool:
-            parts.append(f"{field}={str(flag).lower()}")
     reached_type = value.get("rate_limit_reached_type")
     if isinstance(reached_type, dict):
         reached_type = reached_type.get("type")
@@ -176,11 +172,7 @@ class CodexProvider:
         grouped: dict[str, tuple[str, list[_Window]]] = {MetricId.CODEX_WEEKLY: (_WEEKLY_LABEL, [])}
         partial = False
         recognized = False
-        plan = payload.get("plan_type")
-        plan_detail = (
-            "plan_type=" + sanitize_text(plan, max_length=128) if isinstance(plan, str) else ""
-        )
-        plan_detail = "; ".join(part for part in (plan_detail, _enforcement(payload)) if part)
+        response_detail = _enforcement(payload)
 
         def collect(limit: object, feature: str | None = None, name: str = "") -> None:
             nonlocal partial, recognized
@@ -193,7 +185,9 @@ class CodexProvider:
                 else ""
             )
             detail = "; ".join(
-                part for part in (plan_detail, name, feature_detail, _enforcement(limit)) if part
+                part
+                for part in (response_detail, name, feature_detail, _enforcement(limit))
+                if part
             )
             for slot in ("primary_window", "secondary_window"):
                 value = limit.get(slot)
@@ -223,7 +217,7 @@ class CodexProvider:
             main = payload.get("rate_limit")
             detail = "; ".join(
                 part
-                for part in (plan_detail, _enforcement(main) if isinstance(main, dict) else "")
+                for part in (response_detail, _enforcement(main) if isinstance(main, dict) else "")
                 if part
             )
             grouped[MetricId.CODEX_WEEKLY][1].append(_Window(None, None, detail))

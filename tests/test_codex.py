@@ -383,11 +383,6 @@ async def test_enforcement_plan_credits_and_review_limits_do_not_fabricate_usage
     assert result[MetricId.CODEX_WEEKLY].state == MetricState.UNKNOWN
     assert result[MetricId.CODEX_WEEKLY].quota is None
     assert "\x1b" not in (result[MetricId.CODEX_WEEKLY].detail or "")
-    detail = result[MetricId.CODEX_WEEKLY].detail
-    assert "allowed=false" in detail
-    assert "limit_reached=true" in detail
-    assert "rate_limit_reached_type=" in detail
-    assert "plan_type=pro" in detail
 
 
 @pytest.mark.parametrize(

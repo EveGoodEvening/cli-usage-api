@@ -220,7 +220,8 @@ exposed, revoke or replace it through the relevant first-party service.
   Console sends only `Cookie: sessionKey=<value>` authentication, never that cookie
   to another Anthropic service. Grok sends Bearer plus
   `x-xai-token-auth: xai-grok-cli`; optional `x-userid` belongs to the same resolved
-  credential. No guessed upstream client-version headers are added.
+  credential. Grok's `x-grok-client-version: 1.0.70` is release-pinned from the
+  official stable feed; requests retain the identifying `usage-tui` User-Agent.
 - Codex has an explicit authentication branch: Bearer from `tokens.access_token`
   and `ChatGPT-Account-Id` from the same stable file read, never Grok headers,
   cookies or query parameters. Provider and transport independently enforce binding
@@ -320,8 +321,9 @@ exposed, revoke or replace it through the relevant first-party service.
 - This official-CLI proxy request and observed product fields are private and
   version-sensitive, not a public billing API guarantee. Bearer plus
   `x-xai-token-auth: xai-grok-cli` is used; optional `x-userid` comes from the same
-  resolved credential. No guessed client version or client-mode impersonation is
-  added when compatibility is unproven. Response fields cannot change destination,
+  resolved credential. The sourced compatibility-version header is pinned to
+  `1.0.70`, not downloaded at runtime; no upstream User-Agent or client-mode
+  impersonation is added. Response fields cannot change destination,
   authentication, identity selection, or account binding.
 - Users run `grok login` outside the app. The resolver reads a selected scope in
   `$GROK_HOME/auth.json`, `~/.grok/auth.json`, or an explicit private local file;
@@ -329,12 +331,14 @@ exposed, revoke or replace it through the relevant first-party service.
   chmod, refresh, or copy first-party login files or refresh tokens. Unknown expiry
   is not asserted fresh; unsupported team-principal responses must not cause a
   switch to another personal identity. No browser extraction or login subprocess.
-- All three required rows remain visible. Missing aggregate or product entries
-  are unknown, not zero; explicit validated zero remains zero. Product breakdown
-  requires a wholly valid unique-product array reconciling within one percentage
-  point to the same response's aggregate. Unknown products are preserved under
-  sanitized IDs; duplicate/malformed/inconsistent shares do not invalidate an
-  independently valid aggregate. No values are blended across accounts/requests.
+- All three required rows remain visible. An omitted percentage scalar is zero
+  only in an explicit weekly period with a validated reset (the private schema's
+  omitted-default convention). Explicit null/invalid scalars and missing products
+  remain unknown; empty/arbitrary configs do not establish zero. Product breakdown
+  requires a wholly valid unique-product array and usable same-response aggregate,
+  but no unsupported sum-to-total invariant. Unknown products retain sanitized IDs;
+  duplicate/malformed shares do not invalidate independent aggregate evidence.
+  No values are blended across accounts/requests; wire decimals stay exact.
 - Only `config.isUnifiedBillingUser == true` establishes the common included pool.
   Build/Chat percentages are consumed shares, never independent remaining quotas.
   Product remaining/reset refer to the shared pool only with positive evidence;
@@ -429,6 +433,12 @@ exposed, revoke or replace it through the relevant first-party service.
   not truncated by the local exponential-backoff cap, and same-provider account
   updates do not erase an embargo. Retries remain read-only provider fetches,
   never token refreshes, login subprocesses, purchases, or reset actions.
+- Claude subscription automatic polling and error retries honor a 300-second
+  effective minimum and longer configured intervals without rewriting saved
+  configuration. Its 429 backoff starts at 300 seconds, grows to 600/900 plus
+  jitter, and cannot shorten a server deadline. Freshness uses the same effective
+  cadence. Explicit manual refresh may bypass the periodic interval, never an
+  embargo. This is a conservative local policy, not a proven upstream rate limit.
 - Codex uses normal credentialed polling, manual refresh, stale-state, retry and
   cancellation semantics; no historical credential-free blocked exception remains.
 - Error snapshots retain last-good values with their old success time and new

@@ -1,0 +1,8 @@
+{
+  "config": {
+    "isUnifiedBillingUser": true,
+    "currentPeriod": {"type": "USAGE_PERIOD_TYPE_WEEKLY"},
+    "billingPeriodEnd": "2026-11-02T00:00:00Z",
+    "productUsage": [{"product": "GrokBuild"}, {"product": "GrokChat"}]
+  }
+}
