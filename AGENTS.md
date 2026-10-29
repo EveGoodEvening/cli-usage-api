@@ -318,3 +318,35 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   resolution. A throwaway PTY host should instantiate the production `UsageApp`
   directly with an injected clock, or define its subclass in a real temporary file;
   a host startup failure does not establish an application regression.
+- Railway volumes mount only at container start and hide anything the image wrote
+  to that path, so install CLIs outside the volume-backed `HOME` (npm global,
+  `/opt`), not with HOME-based installers. Grok's installer targets `$HOME/.grok`;
+  fetch its versioned artifact instead (xAI publishes no checksums). Railway Config
+  as Code (`railway.json`) is deprecated and new services cannot opt in; a root
+  `Dockerfile` is auto-detected. The container has no OS keyring: only file-backed
+  first-party logins work there, never Console sessions or persistent manual secrets.
+- First-party CLIs refresh only inside a ~5-minute pre-expiry window (Codex, Claude
+  Code, Grok at inspected revisions), so a keepalive must schedule from stored expiry,
+  not a fixed cron, and judge success by re-reading expiry rather than exit codes.
+  `codex login status` does not refresh; `codex doctor` and `grok sessions list` do.
+  Claude Code can exit before persisting a refresh (#105645): back up, restore only a
+  still-blank file, and alert instead of looping. Keepalive is a separate opt-in
+  process; the reader itself still never refreshes or reads refresh tokens.
+- An HTTP failed-auth limiter must verify a presented bearer first: a global failure
+  cap consulted before verification lets any client lock out valid token holders.
+  Cross-origin clients cannot read `Retry-After` unless it is listed in
+  `Access-Control-Expose-Headers`. uvicorn exits via `SystemExit` on lifespan
+  startup failure, so map it to the curated error inside `serve()`; and `localhost`
+  may resolve to an IPv6-only bind, so pin it to `127.0.0.1`.
+- A browser fetch timeout must cover the body read, not just headers; a stalled
+  body otherwise freezes polling. Grok product share rows show no reset in the web
+  UI either, matching the TUI.
+- A TUI session-only credential exists only in that process, so serve it by embedding
+  the API in the TUI's event loop (observer mirror of the TUI's snapshots/accounts),
+  never a second process. Embedded uvicorn: lifespan off, no signal handlers, silenced
+  loggers (root last-resort output corrupts the screen); bind and run every refusal
+  before `App.run`. Headless Textual `run_test` hides toasts unless
+  `notifications=True`.
+- Cancelling an `asyncio.to_thread` await does not stop its thread: a subprocess-running
+  worker needs a cooperative stop checked before each unit of work plus killing the
+  tracked child's process group, and locks it guards are released only after it exits.

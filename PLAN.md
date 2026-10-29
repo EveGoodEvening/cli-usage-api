@@ -1136,3 +1136,306 @@ Exercised evidence:
 - This is local replay/component-PTY evidence, not an installed-entry live request,
   billing-UI comparison, real-keyring check, full-suite rerun, or independent review.
 
+
+## 15. User-requested read-only API, web frontend and Railway deployment — 2026-10-29
+
+User request (translated): besides the TUI, provide a **read-only** HTTP API for
+viewing usage data only (no account management), started from a command-line
+option; a separated web frontend deployable to Railway / Vercel / Cloudflare with a
+"One True SaaS Layout" (left rail, sidebar list, tabs, main content with three
+cards and a callout, right summary bar, bottom status bar); mandatory
+authentication so nobody can view data without a credential; and a backend that
+runs locally and on Railway from a Dockerfile installing the environment plus
+Claude Code, Codex CLI and Grok Build CLI, idling on `sleep infinity` so the user
+can shell in, log in manually, configure accounts and start API mode by hand.
+
+### 15.1 Scope and units
+
+| Unit | Owned paths | Status |
+|---|---|---|
+| Backend API | `src/usage_tui/api.py`, CLI wiring in `cli.py`, `ApiTokenStore` in `storage.py`, `tests/`, `pyproject.toml`/`uv.lock` (Starlette + uvicorn) | Implementation landed in the working tree; gates/review pending verification |
+| Web frontend | `web/` (Vite + React 18 + TypeScript, deploy configs for Vercel, Cloudflare Pages/Workers, Railway) | Implementation landed in the working tree; build/lint/browser verification pending |
+| Deploy + docs | `Dockerfile`, `.dockerignore`, `railway.json`, `docker/entrypoint.sh`, `docs/deploy-railway.md`, README/SECURITY/CHANGELOG, this section | Landed; local image build and container smoke exercised (§15.4); Railway pending |
+
+Out of scope: any HTTP mutation of accounts, credentials, tokens or configuration;
+token refresh of first-party logins; live/authenticated provider acceptance.
+
+### 15.2 Frozen contract summary
+
+- CLI: `usage api serve [--host 127.0.0.1] [--port 8787] [--allow-origin ORIGIN ...]
+  [--demo [--scenario healthy|errors]] [--trust-proxy] [--debug-log PATH
+  [--debug-provider P ...]]` — headless; exact http(s) origins only (normalized, no
+  wildcard/path); invalid input is a curated exit-2 error. Live mode reuses
+  `LiveFactory` (store, resolver, transport, providers, scheduler) and keeps the
+  latest snapshot per account in memory; `--demo` branches before constructing any
+  live dependency and rejects `--debug-log`. Account config is read once at startup.
+  SIGINT/SIGTERM stop the scheduler and exit 0.
+- Tokens: `usage api token create [--label]` (TTY; `usk_` + `token_urlsafe(32)`,
+  printed once), `list` (no hashes), `revoke ID` (TTY confirm). `ApiTokenStore`
+  stores `{id, label, sha256, created_at}` in private, locked, atomic
+  `api_tokens.json` beside `accounts.json`; the server reloads on mtime change
+  (≤ 1 stat/s). Live serve refuses to start without tokens; loopback demo (`localhost`
+  binds `127.0.0.1`) may run
+  unauthenticated only while none exist.
+- HTTP: `GET`/`HEAD`/`OPTIONS` only (`405` otherwise); bearer header auth only,
+  `hmac.compare_digest` over all hashes, `401` + `WWW-Authenticate: Bearer`;
+  valid tokens bypass the limiter; failed-auth limits 10/60 s per client and 100/60 s
+  global → `429` + `Retry-After` (exposed cross-origin);
+  client key is the peer address, or the right-most `X-Forwarded-For` entry with
+  `--trust-proxy`; bounded tracking (10k). Exact-origin CORS, never `*` or
+  credentials; preflight `204`/`403 forbidden_origin`. Security headers on every
+  response (`no-store`, `nosniff`, `no-referrer`, `DENY`, `default-src 'none';
+  frame-ancestors 'none'`). Error bodies are fixed `{"error": code}`.
+- Endpoints: `/healthz` (public), `/api/v1/session`, `/api/v1/dashboard`,
+  `/api/v1/accounts/{id}`. AccountView omits credential references/selectors and
+  organization IDs; `snapshot` is `Snapshot.to_dict()` with `organization_id`
+  nulled; disabled accounts carry `snapshot: null`.
+- Frontend renders domain semantics faithfully: unknown is not zero, Grok
+  `share_percent` is consumption only, balance-mismatch diagnostics remain visible,
+  numbers are never truncated. Token in session/local storage per explicit choice,
+  never in URLs; any `401` returns to login.
+- Container: `python:3.12-slim-bookworm`, pinned uv 0.13.5, Node.js 22.23.4
+  (SHA-256 verified), Claude Code 2.1.308 and Codex 0.165.0 (npm), Grok Build
+  1.0.70 (versioned xAI artifact, first-download SHA-256), project via
+  `uv sync --locked --no-dev`; `HOME=/data/home` (`0700`, created by the entrypoint
+  under `tini`); `CMD ["sleep","infinity"]`. Only file-backed Claude Code, Codex and
+  Grok logins work (no OS keyring); Claude Platform is unsupported in the container.
+
+### 15.3 Research sources (2026-10-29)
+
+Recorded with URLs in `docs/deploy-railway.md`. Key findings: Grok's official
+installer is `curl -fsSL https://x.ai/cli/install.sh | bash [-s VERSION]`, installs
+to `$HOME/.grok/bin`, stable pointer `https://x.ai/cli/stable` read `1.0.70`;
+`grok login --device-auth` for headless hosts; `GROK_HOME` defaults to `~/.grok`;
+`GROK_DISABLE_AUTOUPDATER` suppresses updates. Claude Code's npm package installs
+the same native binary as the native installer; `DISABLE_AUTOUPDATER=1` stops
+background updates. Codex `codex login --device-auth`; `cli_auth_credentials_store
+= "file"` stores `auth.json` under `CODEX_HOME` (default `~/.codex`). Railway mounts
+volumes as root at runtime only (never at build), one volume per service; injects
+`PORT` and requires binding `0.0.0.0`; Config as Code (`railway.json`) is
+deprecated and new services cannot opt in (root `Dockerfile` is auto-detected);
+a forum moderator states the edge overwrites `X-Forwarded-For`/`X-Real-IP`
+(not formal documentation).
+
+### 15.4 Exercised deploy evidence (local Docker only)
+
+- `~/.claude/bin/heavy-gate -n 1 -l docker-build -- docker build -t
+  usage-api-railway:test .` succeeded (exit 0) on linux/amd64; rebuilt after adding
+  `umask 077` to `/etc/bash.bashrc`, also exit 0. Image size 2.08 GB on disk
+  (559 MB compressed content); largest layers: npm CLIs 741 MB (Codex 426 MB,
+  Claude Code 279 MB), Node.js 211 MB, Grok 196 MB.
+- `docker run --rm -e HOME=/data/home usage-api-railway:test sh -c 'usage --help &&
+  usage api --help; claude --version; codex --version; grok --version'` printed both
+  help texts (`{accounts,api}`, `{serve,token}`), `2.1.308 (Claude Code)`,
+  `codex-cli 0.165.0`, `grok 1.0.70 (f50904eaee6c)`; without a volume the
+  entrypoint printed its `/data is not a mounted volume` warning.
+- Detached container with a named volume at `/data`: PID 1 `tini --
+  usage-entrypoint sleep infinity`, child `sleep infinity`; `/data/home` mode `700`
+  owned by root, `HOME=/data/home`; Config `Cmd=["sleep","infinity"]`; no warning
+  logged; interactive bash `umask` `0077`; `docker stop` returned in 0.13 s.
+- In-container demo API on `127.0.0.1:8787`: `/healthz` → `{"status":"ok"}`;
+  `/api/v1/session` → `200` with `cache-control: no-store`; `/api/v1/dashboard`
+  returned demo accounts; `POST /api/v1/session` → `405`. Live `usage api serve
+  --host 0.0.0.0` without tokens refused with the curated message, exit 2.
+  Graceful SIGINT shutdown was not conclusively observed in this smoke.
+- Test containers and the volume were removed afterwards.
+
+### 15.5 Acceptance checklist
+
+- [ ] Backend: full `uv run pytest -q`, Ruff check/format and API tests green
+  after integration — pending orchestrator verification.
+- [ ] Backend: installed-entry `usage api serve` live and demo runs, token
+  create/list/revoke in a real PTY, revocation without restart, SIGINT/SIGTERM
+  exit 0 — pending.
+- [ ] Frontend: `npm ci`, typecheck/lint/build green; browser check against
+  `usage api serve --demo` (login, 401 return, polling, layout at 375/800/1200 px,
+  light/dark) — pending.
+- [x] Container image builds locally and contains working `usage`, `claude`,
+  `codex`, `grok` at the pinned versions; entrypoint creates `0700` HOME and idles
+  on `sleep infinity` (§15.4).
+- [ ] Frontend deployed to at least one of Vercel / Cloudflare / Railway with the
+  shipped headers — pending, requires the user's accounts.
+- [ ] Backend deployed on Railway with a `/data` volume, public domain, `PORT`
+  target, `railway ssh` logins and `serve --trust-proxy` — pending, requires the
+  user's Railway project and logins.
+- [ ] Railway `X-Forwarded-For` behavior verified for `--trust-proxy` — pending.
+- [ ] Authenticated live provider reads through the API — pending; unchanged live
+  prerequisites from §9/§11 apply.
+- [ ] Independent review of API, frontend and deploy units — pending.
+
+### 15.6 User-requested login keepalive (`usage-keepalive`)
+
+Request: idle Railway hosts let first-party access tokens lapse; design a renewal
+path, and (user choice) for Claude Code use `claude auth status` first, then a minimal
+Haiku request. The reader still never refreshes or reads refresh tokens (§4.3 is
+unchanged for the reader); this separate opt-in loop deliberately spawns the official
+CLIs so each CLI renews its own file. Implementation: `src/usage_tui/keepalive.py`,
+console script `usage-keepalive`, `tests/test_keepalive.py` (fake CLIs only).
+
+- Scheduling: all three CLIs refresh only within 300 s of access-token expiry at the
+  inspected revisions, so the loop reads token fields only for presence and expiry
+  hints (Claude `expiresAt` ms, Codex access-token JWT `exp` (unverified decode),
+  Grok per-scope `expires_at`) and acts within 290 s; token values are never logged
+  or printed. Unknown expiry: one run (`ran_unknown_expiry`), then a 24 h cadence.
+  Success is only "re-read file shows a later expiry and a nonempty token"; exit codes
+  are ignored. Output is discarded; logs carry provider, event and seconds-to-expiry.
+  `--interval` is capped at 240 s and the loop sleeps until the next window start or
+  backoff expiry (floor 1 s), so a window cannot be skipped and backoff is not rounded up.
+- Grok scopes: only reader-selectable keyed scopes (`https://auth.x.ai::<id>`, legacy
+  `https://accounts.x.ai/sign-in`) are observed, each separately. An attempt succeeds
+  when any scope's expiry advanced. Due scopes that did not advance after a completed
+  attempt are marked stale (logged once, by kind only) and excluded from scheduling,
+  except the scope the reader selects by default (the single modern scope, else
+  legacy) and protected scopes; a stale scope revives when its expiry changes. If only
+  stale scopes were due, the attempt is not counted as a failure. Protected scopes
+  (`keepalive.grok_protected_scopes`) are the explicit selectors of enabled saved Grok
+  `grok_auth_file` accounts whose reference is `default` or resolves to `grok_path()`;
+  a no-selector account adds nothing (its default is already the exempt preferred
+  scope), so an expired legacy scope next to one modern scope can go stale instead of
+  failing and alerting every token lifetime. Standalone `usage-keepalive` reads saved
+  accounts once at startup (never writes); any `ConfigError` logs `accounts
+  unavailable; no protected Grok scopes` and continues without protection.
+- Stop: `Keepalive.request_stop()` (thread-safe `threading.Event`) is checked before
+  each target and each command, and SIGKILLs the in-flight child's process group via
+  the tracked `Popen` (a child started as the stop arrives is killed at once). A
+  stopped attempt is neither success nor failure (no retry/alert/backoff change; the
+  restore rules still apply and the backup is kept). `run_async` honors it;
+  `wait_idle()` reports when no tick runs. Standalone Ctrl-C also kills the child.
+- Commands: Codex `codex doctor --json` (`doctor.rs` websocket check calls
+  `AuthManager::auth()`; `codex login status` does not refresh); Grok
+  `grok sessions list -n 1` (`sessions_cmd.rs` `try_ensure_fresh_auth`; refresh holds
+  `auth.json.lock`); Claude `claude auth status`, then `claude -p … --model haiku
+  --effort low --tools "" --max-turns 1` (flags confirmed accepted by the pinned
+  2.1.308 in an offline container; `--max-turns` is hidden from `--help`) only when
+  the expiry did not advance (`--claude-mode` selects
+  hybrid/status/model). Child env disables auto-update, telemetry and nonessential
+  traffic; 90 s timeout kills the process group.
+- Claude exit race (anthropics/claude-code#105645, 2.1.311/2.1.312 bundle: 2000 ms
+  exit wait): before each attempt the credentials file is copied to a same-directory
+  `0600` `.keepalive-backup` (unique `O_EXCL` temp + `os.replace`). It is restored
+  only when the file still exists, is still blank/unparseable, and its
+  `(st_ino, st_mtime_ns, st_size)` is unchanged since the command returned (a deleted
+  file is a logout and is never restored); deleted after success, retained after the
+  final alert, and deleted automatically when a manual re-login makes the file usable
+  again. A backup cannot revive a refresh token already consumed upstream. This copy
+  is a deliberate, documented exception to "never copy refresh tokens", outside app
+  storage. Concurrent interactive Claude sessions on the same HOME should be avoided.
+- Retries 30/60/120/300/600 s, then `ALERT manual login required` (", backup kept"
+  only for Claude) and no further attempts until the file's observed state changes to
+  a usable login (re-login). Backoff also resets when the login is renewed elsewhere
+  (usable and outside the window, or a later expiry). Per-target exceptions are logged
+  by type name only and do not stop the loop; nested-JSON `RecursionError` and
+  `TypeError` count as an unusable file. Single instance via
+  `~/.local/state/usage-keepalive/keepalive.lock`.
+- Sources: openai/codex@a29c7b97 (`login/src/auth/manager.rs`, `cli/src/login.rs`,
+  `cli/src/doctor.rs`), Codex CI/CD auth doc, code.claude.com CLI reference/env-vars,
+  claude-code issues #105645/#60503, agentcord PR #161, npm
+  `@anthropic-ai/claude-code-linux-x64@2.1.312` bundle strings, xai-org/grok-build@2bdd1d6
+  (`xai-grok-login` manager/refresh_chain/oidc, `xai-grok-pager/src/sessions_cmd.rs`).
+  Codex was cross-checked against tag `rust-v0.165.0` (the pinned 0.165.0).
+  Unknowns: real token lifetimes; whether a Claude remote flag suppresses the
+  `auth status` refresh; whether Grok 1.0.70 matches the inspected HEAD; the Claude
+  research came from 2.1.311/2.1.312 bundles but the image pins Claude Code 2.1.308
+  (`Dockerfile`), whose refresh window and exit race were not inspected.
+- [x] Unit tests with fake CLIs (24, after review fixes 13–21) — exercised locally.
+- [x] Review fixes (stop/protection): stop during the first hybrid Claude command never
+  runs the Haiku request; a stop kills a real long-running fake CLI and its grandchild
+  within seconds; no later target starts after a stop; protected-scope selection and
+  the legacy + one modern + no-selector scenario (legacy stale once, no ALERT over
+  several lifetimes); standalone main loads/fails soft — `tests/test_keepalive.py`.
+- [ ] Real-account renewal of each CLI inside the container — pending; requires the
+  user's logins.
+
+
+### 15.7 User-requested one-process dashboard + API (+ keepalive)
+
+Request (translated): Railway cannot show Claude Platform balances although the TUI
+offers session-only storage — run the TUI and the API in one process (`usage --api …`)
+sharing one scheduler and its snapshots, put `usage-keepalive` in the same process,
+and choose what starts with arguments. Rationale: with no keyring in the container a
+Console `sessionKey` can live only session-only in the TUI process; hosting the API
+there lets that one `CredentialStore`/resolver/scheduler feed the API. This
+supersedes §15.2's "Claude Platform is unsupported in the container" for one-process
+mode only; headless `serve` remains file-backed only.
+
+Contract:
+
+- CLI: `usage [--demo [--scenario S]] --api [--api-host H] [--api-port P]
+  [--allow-origin O ...] [--trust-proxy] [--keepalive [--keepalive-cli NAME ...]
+  [--keepalive-claude-mode hybrid|status|model]]`, and `usage api serve … --keepalive
+  [...]`. Validation, token policy, CORS normalization and bind error mapping are one
+  shared `cli.ApiPlan` used by both modes (curated exit 2; bind failures exit 3 naming
+  `--api-port`/`--port`). Live `--api` requires ≥ 1 token; loopback demo may be
+  anonymous only while no tokens exist. API options without `--api`, keepalive options
+  without `--keepalive`, `--keepalive` with `--demo`, and dashboard API/keepalive
+  options before a subcommand are refusals. Every refusal (including keepalive
+  `KeepaliveError`: no login files, lock held) happens before the TUI takes the
+  terminal; the socket is bound before `App.run`.
+- Embedding: `UsageApp.add_observer` (snapshot accepted / accounts changed) and
+  `add_service` (`start(app)` after the scheduler starts, `stop()` before the scheduler
+  and factory close, errors suppressed). `api.AppHub` mirrors the app's accounts and
+  accepted snapshots, drops all snapshots on any account change (as the TUI does) and
+  never starts/stops the scheduler. `api.EmbeddedServer` runs uvicorn in the app's
+  loop with `lifespan="off"`, no signal handlers, `log_config=None`, access log off and
+  uvicorn loggers given a `NullHandler` with propagation off; a server failure sets
+  the banner note to `API … 已停止` and raises an error notification. Banner notes:
+  `API host:port 令牌认证|无认证（本机演示）`, `keepalive <names>`.
+- Keepalive: `cli.KeepaliveService` wraps `keepalive.build`/`run_async` unchanged,
+  holds `keepalive.InstanceLock` for the process lifetime, logs via
+  `keepalive.file_logger()` (TUI: never the terminal; `serve`: also stdout), turns
+  `ALERT` lines into warning notifications via `call_soon_threadsafe`, and passes
+  `keepalive.grok_protected_scopes(accounts)` (§15.6). In the dashboard it is also a
+  `UsageApp` observer: `accounts_changed` swaps the Grok target's protected frozenset
+  atomically. Cancelling an `asyncio.to_thread` await does not stop its thread, so
+  `stop()` calls `request_stop()` (no new target/command; in-flight CLI process group
+  killed), then waits ≤ 10 s for the worker task; `keepalive stopped` is logged only
+  once the worker is idle. The lock context calls `join()` (unbounded wait for the
+  worker) before releasing `InstanceLock`, so a second keepalive can never refresh the
+  same token while this worker still runs.
+- Costs recorded in `docs/deploy-railway.md`: re-enter the session-only `sessionKey`
+  after every restart/redeploy/exit; a high-sensitivity session lives in a public
+  host's process memory; Console sessions expire and keepalive does not cover them.
+
+Acceptance (only what was run, 2026-10-29, this working tree):
+
+- [x] `tests/test_embedded.py` (33 tests after review fixes): demo API on a real 127.0.0.1 socket inside
+  `run_test` serves exactly `app.snapshots` (organization nulled) and stops/frees the
+  port on `q`; live API with a fake scheduler enforces bearer tokens and reflects
+  edit/remove/add/disable immediately, ignores late snapshots of removed accounts, and
+  stops before `scheduler.stop`/`factory.close`; a closed socket yields a toast and
+  `已停止` banner without crashing or terminal output; keepalive with a fake `codex`
+  on `PATH` and fake login files runs `doctor --json`, holds then releases the lock,
+  logs start/stop to a `0600` file; an unusable login file's `ALERT` becomes a toast
+  with nothing written to the terminal; `serve --keepalive` prints log lines and
+  stops; CLI refusals and bind conflict exit before the TUI. Review fixes: the lock
+  stays held while a worker ignoring the stop still runs and is released (with
+  `keepalive stopped` logged last) only after it returns; `stop()` kills a fake
+  `codex` running `sleep 60` in < 5 s; TUI account changes update protected Grok
+  scopes; `--keepalive-cli`/`--keepalive-claude-mode` before a subcommand are refused.
+- [x] Full gate after the stop/protection review fixes: `uv sync --locked --group dev`;
+  `uv run pytest -q` → 1409 passed (earlier: 1396);
+  `uv run ruff check .` → All checks passed; `uv run ruff format --check .` → 54 files
+  already formatted.
+- [x] Installed-entry PTY run (stdlib `pty`, `scripts/tui_smoke.py`'s `PtySession`,
+  isolated HOME/XDG, 120×40): `.venv/bin/usage --demo --api --api-port <free>`
+  rendered `DEMO` and `API 127.0.0.1:<port>`; while the TUI ran, curl `/healthz` → 200
+  `{"status":"ok"}`, `/api/v1/session` → 200 `auth: none`, `/api/v1/dashboard` → 200
+  demo with 4/4 accounts carrying snapshots; `q` → exit 0, screen/cursor/termios
+  restored, port freed. Repeated with Ctrl-C: same results.
+- [ ] Live `usage --api` with real accounts, a real session-only Console `sessionKey`
+  and real tokens — pending; requires the user's credentials.
+- [ ] Railway deployment of one-process mode in tmux, `--keepalive` renewing real
+  logins in the container — pending.
+- [ ] Independent review of this change — pending.
+- Final stop-fix verification (orchestrator): independent rereview reproduced that a
+  Grok scope marked stale stayed ignored after becoming protected (TUI account edit)
+  or becoming the reader's preferred scope; fixed by treating protected/preferred
+  scopes as live in `Target.live_scopes` (no cross-thread mutation of `stale`), with
+  two regression tests and the reviewer's repro scripts now scheduling correctly.
+  Actual installed-entry real-PTY smoke of live `usage --api --keepalive` with fake
+  Codex login/CLI and isolated HOME: 33/33 assertions passed (token auth 200/401,
+  fake `codex doctor` renewal observed, no token text in keepalive.log, `q` exit 0 in
+  0.60 s, port freed, terminal restored, lock released; quitting during a sleeping
+  fake CLI killed its process group and released the lock). Fake data only; no real
+  login renewal, Railway deployment or live provider read is claimed.
+

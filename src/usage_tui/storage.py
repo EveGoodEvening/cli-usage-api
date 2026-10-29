@@ -8,21 +8,33 @@ or memory. Python strings cannot provide memory-zeroization guarantees.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
+import re
+import secrets
 import stat
 import sys
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import keyring
 from keyring.backends.SecretService import Keyring as SecretServiceKeyring
 
-from usage_tui.domain import Account, CredentialKind, ProviderId
+from usage_tui.domain import (
+    Account,
+    CredentialKind,
+    DomainError,
+    ProviderId,
+    format_timestamp,
+    parse_timestamp,
+    sanitize_text,
+)
 
 MAX_FILE_BYTES = 1_048_576
 _SERVICE = "usage-tui"
@@ -475,3 +487,155 @@ class CredentialStore:
                     backend.delete_password(_SERVICE, ref)
             except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
                 raise _credential_error() from None
+
+
+API_TOKEN_PREFIX = "usk_"
+MAX_API_TOKENS = 100
+_TOKEN_ID = re.compile(r"[0-9a-f]{32}")
+_TOKEN_HASH = re.compile(r"[0-9a-f]{64}")
+
+
+class ApiTokenLimitError(ConfigError):
+    """The token file already holds MAX_API_TOKENS tokens; nothing was written."""
+
+
+def api_token_digest(token: str) -> str:
+    """SHA-256 hex digest of a presented bearer token; only digests are ever stored."""
+    return hashlib.sha256(token.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class ApiToken:
+    """Nonsecret API token metadata. The token itself is never stored or recoverable."""
+
+    id: str
+    label: str
+    sha256: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.id, str)
+            or not _TOKEN_ID.fullmatch(self.id)
+            or not isinstance(self.sha256, str)
+            or not _TOKEN_HASH.fullmatch(self.sha256)
+            or not isinstance(self.label, str)
+            or not 1 <= len(self.label) <= 80
+            or sanitize_text(self.label, max_length=80) != self.label
+        ):
+            raise _config_error()
+        try:
+            if format_timestamp(parse_timestamp(self.created_at)) != self.created_at:
+                raise _config_error()
+        except DomainError:
+            raise _config_error() from None
+
+
+class ApiTokenStore(_ConfigFile):
+    """Private read-only API bearer-token digests beside the account configuration.
+
+    The file holds only SHA-256 digests plus nonsecret metadata, using the shared
+    private, locked and atomically replaced file primitives. signature() is a cheap
+    no-follow stat so a running server can reload after creation or revocation.
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        super().__init__(path, "api_tokens.json")
+
+    def _read(self, directory: int) -> tuple[ApiToken, ...]:
+        content = self._read_content(directory)
+        if content is None:
+            return ()
+        try:
+            data = json.loads(
+                content, object_pairs_hook=_unique_object, parse_constant=_reject_constant
+            )
+            if (
+                type(data) is not dict
+                or set(data) != {"schema_version", "tokens"}
+                or type(data["schema_version"]) is not int
+                or data["schema_version"] != 1
+                or type(data["tokens"]) is not list
+                or len(data["tokens"]) > MAX_API_TOKENS
+            ):
+                raise _config_error()
+            tokens = []
+            for record in data["tokens"]:
+                if type(record) is not dict or set(record) != {
+                    "id",
+                    "label",
+                    "sha256",
+                    "created_at",
+                }:
+                    raise _config_error()
+                tokens.append(ApiToken(**record))
+        except (ValueError, TypeError, RecursionError, UnicodeError):
+            raise _config_error() from None
+        if len({item.id for item in tokens}) != len(tokens) or len(
+            {item.sha256 for item in tokens}
+        ) != len(tokens):
+            raise _config_error()
+        return tuple(tokens)
+
+    def _write(self, directory: int, tokens: tuple[ApiToken, ...]) -> None:
+        content = json.dumps(
+            {
+                "schema_version": 1,
+                "tokens": [
+                    {
+                        "id": item.id,
+                        "label": item.label,
+                        "sha256": item.sha256,
+                        "created_at": item.created_at,
+                    }
+                    for item in tokens
+                ],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self._replace(directory, content)
+        os.fsync(directory)
+
+    def load(self) -> tuple[ApiToken, ...]:
+        with self._locked() as directory:
+            return self._read(directory)
+
+    def signature(self) -> tuple[int, ...] | None:
+        """Identify the current file version without reading it; None when absent."""
+        try:
+            info = os.stat(self.path, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return (-1,)
+        return (info.st_ino, info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_mode)
+
+    def create(self, label: str | None = None) -> tuple[str, ApiToken]:
+        """Generate a token, persist only its digest and return the token once."""
+        label = sanitize_text(label or "", max_length=80) or "token"
+        token = API_TOKEN_PREFIX + secrets.token_urlsafe(32)
+        record = ApiToken(
+            id=uuid4().hex,
+            label=label,
+            sha256=api_token_digest(token),
+            created_at=format_timestamp(datetime.now(UTC).replace(microsecond=0)),
+        )
+        with self._locked() as directory:
+            tokens = self._read(directory)
+            if len(tokens) >= MAX_API_TOKENS:
+                raise ApiTokenLimitError(
+                    f"At most {MAX_API_TOKENS} API tokens are supported; revoke unused tokens."
+                )
+            self._write(directory, (*tokens, record))
+        return token, record
+
+    def revoke(self, token_id: str) -> bool:
+        """Remove one token by ID; False when no such token exists."""
+        with self._locked() as directory:
+            tokens = self._read(directory)
+            kept = tuple(item for item in tokens if item.id != token_id)
+            if len(kept) == len(tokens):
+                return False
+            self._write(directory, kept)
+            return True

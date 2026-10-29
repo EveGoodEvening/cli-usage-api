@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -325,6 +326,11 @@ class UsageApp(App[None]):
     ConsoleProvider.discover_organizations method), and async aclose(). The app
     owns the returned scheduler lifecycle and closes factory-owned clients after
     stopping it. A configured live dashboard requires this explicit factory.
+
+    Observers (``add_observer``) mirror accepted snapshots and account changes, e.g.
+    the embedded API hub; they never own or drive the scheduler. Services
+    (``add_service``: ``async start(app)``, ``async stop()``, optional ``note``)
+    start after the scheduler on mount and stop before it on unmount.
     """
 
     CSS_PATH = "app.tcss"
@@ -385,6 +391,9 @@ class UsageApp(App[None]):
         self._usage_closed = False
         self._refreshing = False
         self._notice = ""
+        self._observers: list = []
+        self.services: list = []
+        self._services_started: list = []
         self.scheduler = None
         if mode == "demo":
             self.scheduler = DemoSource(scenario=scenario, publish=self.publish_snapshot)
@@ -396,6 +405,21 @@ class UsageApp(App[None]):
         self.status_line = Static(id="dashboard-status", markup=False)
         self.listing = MetricList(id="metrics")
         self.hint = Static(id="resize-hint", markup=False)
+
+    def add_observer(self, observer) -> None:
+        """Register ``observer.publish(snapshot)`` / ``observer.accounts_changed(accounts)``."""
+        self._observers.append(observer)
+
+    def add_service(self, service) -> None:
+        if self.is_running:
+            raise RuntimeError("Add services before the app starts.")
+        self.services.append(service)
+
+    def _notify_observers(self, method: str, value) -> None:
+        for observer in self._observers:
+            # A mirror must never break the dashboard it observes.
+            with contextlib.suppress(Exception):
+                getattr(observer, method)(value)
 
     def _account_options(self):
         return [("全部账号", "all")] + [
@@ -416,6 +440,15 @@ class UsageApp(App[None]):
         self._rebuild()
         if self.scheduler is not None:
             await self.scheduler.start()
+        for service in self.services:
+            try:
+                await service.start(self)
+            except Exception:  # noqa: BLE001 - Curated notice; never echo exception text.
+                self.notify(
+                    "后台服务启动失败；仪表盘继续运行。", title="服务", severity="error", timeout=15
+                )
+            else:
+                self._services_started.append(service)
         self.set_interval(1, self._tick)
         self.listing.focus()
         self.watch(self, "theme", self._save_theme, init=False)
@@ -446,6 +479,7 @@ class UsageApp(App[None]):
         }:
             return
         self.snapshots[snapshot.account_id] = snapshot
+        self._notify_observers("publish", snapshot)
         if self.listing.is_mounted:
             self._render_rows()
 
@@ -470,11 +504,14 @@ class UsageApp(App[None]):
         compact = self.size.width < 80 or self.size.height < 24
         if self.screen_stack:
             self.screen_stack[0].set_class(compact, "compact")
-        self.banner.update(
+        banner = (
             "DEMO 离线合成演示 — 不代表真实账号或已验证的 Codex 实时额度"
             if demo
             else "LIVE 实时账号用量（有界轮询）"
         )
+        # Service notes (e.g. "API 127.0.0.1:8787") follow the mode banner.
+        notes = [note for service in self.services if (note := getattr(service, "note", None))]
+        self.banner.update(" · ".join([banner, *notes]))
         self.hint.update(
             "窗口较小：↑↓ 滚动，Enter 详情；建议放大终端"
             if self.size.width < 80 or self.size.height < 24
@@ -1149,6 +1186,7 @@ class UsageApp(App[None]):
         # A mutation may replace credentials under the same reference: discard UI
         # observations and let Scheduler invalidate all supplied generations.
         self.snapshots.clear()
+        self._notify_observers("accounts_changed", self.accounts)
         if self.selected_account not in {account.id for account in self.accounts}:
             self.selected_account = None
         self.selector.set_options(self._account_options())
@@ -1201,6 +1239,11 @@ class UsageApp(App[None]):
             return
         self._usage_closed = True
         try:
+            # Services (embedded API, keepalive) stop before the scheduler and factory.
+            while self._services_started:
+                service = self._services_started.pop()
+                with contextlib.suppress(Exception):
+                    await service.stop()
             if self.scheduler is not None:
                 await self.scheduler.stop()
         finally:

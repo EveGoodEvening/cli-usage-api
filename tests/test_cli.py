@@ -597,3 +597,376 @@ def test_codex_key_set_uses_file_only(monkeypatch, credentials, tmp_path, capsys
 def test_old_provider_spelling_is_rejected(capsys):
     assert cli.main(["accounts", "add", "--provider", "chatgpt-subscription"]) == 2
     assert "Invalid command" in capsys.readouterr().err
+
+
+# --- usage api ------------------------------------------------------------------
+
+
+class ServeCapture:
+    """Replace binding/serving so CLI composition is observable without a socket."""
+
+    def __init__(self, monkeypatch, *, bind_error=False):
+        from usage_tui import api as api_server
+
+        self.app = None
+        self.bound = None
+        self.closed_sockets = 0
+
+        def bind(host, port):
+            if bind_error:
+                raise api_server.BindError
+            self.bound = (host, port)
+            return SimpleNamespace(close=lambda: None)
+
+        def run(app, sock, services=()):
+            self.app = app
+            self.services = tuple(services)
+
+        monkeypatch.setattr(api_server, "bind_socket", bind)
+        monkeypatch.setattr(api_server, "run", run)
+
+
+def make_api_token():
+    from usage_tui.storage import ApiTokenStore
+
+    return ApiTokenStore().create("cli-test")[0]
+
+
+def forbid_live(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Demo API must not construct or read live services")
+
+    for name in (
+        "AccountStore",
+        "CredentialStore",
+        "CredentialResolver",
+        "Transport",
+        "LiveFactory",
+    ):
+        monkeypatch.setattr(cli, name, forbidden)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "*",
+        "https://*.example.com",
+        "https://app.example.com/",
+        "https://app.example.com/path",
+        "ftp://app.example.com",
+        "app.example.com",
+        "null",
+    ],
+)
+def test_api_serve_rejects_invalid_origins(monkeypatch, capsys, origin):
+    ServeCapture(monkeypatch)
+    make_api_token()
+    assert cli.main(["api", "serve", "--allow-origin", origin]) == 2
+    err = capsys.readouterr().err
+    assert "--allow-origin must be an exact" in err
+    # One fixed message regardless of input; the rejected value is not echoed back.
+    assert len(err.strip().splitlines()) == 1
+    assert "/path" not in err and "ftp" not in err
+
+
+@pytest.mark.parametrize("port", ["0", "65536", "-1", "abc", "80.5", "٣"])
+def test_api_serve_rejects_invalid_ports(monkeypatch, capsys, port):
+    ServeCapture(monkeypatch)
+    assert cli.main(["api", "serve", "--demo", "--port", port]) == 2
+    assert "--port must be an integer from 1 to 65535" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["api", "serve", "--scenario", "errors"], "--scenario requires --demo"),
+        (["api", "serve", "--demo", "--debug-log", "/tmp/x"], "cannot be combined with --demo"),
+        (["api", "serve", "--debug-provider", "grok-subscription"], "requires --debug-log"),
+        (["--demo", "api", "serve"], "--demo cannot be combined"),
+        (["--debug-log", "/tmp/x", "api", "serve"], "only to the live dashboard"),
+        (["api", "serve", "--host", "bad host"], "--host must be"),
+    ],
+)
+def test_api_serve_argument_combinations(monkeypatch, capsys, args, message):
+    ServeCapture(monkeypatch)
+    assert cli.main(args) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_api_serve_demo_loopback_without_tokens_is_unauthenticated(monkeypatch, capsys):
+    capture = ServeCapture(monkeypatch)
+    forbid_live(monkeypatch)
+    assert cli.main(["api", "serve", "--demo", "--scenario", "errors", "--port", "9999"]) == 0
+    assert capture.bound == ("127.0.0.1", 9999)
+    assert capture.app.auth_mode == "none"
+    assert capture.app.hub.mode == "demo"
+    out = capsys.readouterr().out
+    assert "without authentication" in out and "loopback" in out
+
+
+def test_api_serve_loopback_demo_requires_token_once_one_is_created(monkeypatch, capsys):
+    import time
+
+    import httpx
+
+    capture = ServeCapture(monkeypatch)
+    forbid_live(monkeypatch)
+    assert cli.main(["api", "serve", "--demo"]) == 0
+    app = capture.app
+    assert cli.main(["api", "token", "create", "--label", "later"]) == 0
+    token = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("usk_"))
+
+    async def probe():
+        transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 50000))
+        async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
+            # The running server rechecks the token file at most once per second.
+            deadline = time.monotonic() + 5
+            while True:
+                anonymous = await client.get("/api/v1/session")
+                if anonymous.status_code == 401 or time.monotonic() > deadline:
+                    break
+                await asyncio.sleep(0.1)
+            session = await client.get(
+                "/api/v1/session", headers={"Authorization": f"Bearer {token}"}
+            )
+            return anonymous, session
+
+    anonymous, session = asyncio.run(probe())
+    assert anonymous.status_code == 401
+    assert session.status_code == 200
+    assert session.json()["auth"] == "token"
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.2"])
+def test_api_serve_demo_non_loopback_requires_tokens(monkeypatch, capsys, host):
+    capture = ServeCapture(monkeypatch)
+    forbid_live(monkeypatch)
+    assert cli.main(["api", "serve", "--demo", "--host", host]) == 2
+    assert "No API tokens configured" in capsys.readouterr().err
+    assert capture.bound is None
+
+
+def test_api_serve_demo_with_tokens_requires_them(monkeypatch, capsys):
+    capture = ServeCapture(monkeypatch)
+    make_api_token()
+    forbid_live(monkeypatch)
+    assert cli.main(["api", "serve", "--demo", "--host", "0.0.0.0"]) == 0
+    assert capture.app.verifier is not None and capture.app.verifier.count == 1
+    out = capsys.readouterr().out
+    assert "browsers on other origins are blocked by CORS" in out
+
+
+def test_api_serve_live_requires_tokens_even_on_loopback(monkeypatch, capsys):
+    capture = ServeCapture(monkeypatch)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("No live services before the token check")
+
+    monkeypatch.setattr(cli, "LiveFactory", forbidden)
+    assert cli.main(["api", "serve"]) == 2
+    assert "No API tokens configured" in capsys.readouterr().err
+    assert capture.bound is None
+
+
+def test_api_serve_live_composes_factory_and_origins(monkeypatch, capsys):
+    capture = ServeCapture(monkeypatch)
+    make_api_token()
+    item = account(enabled=False)
+    seed(item)
+    built = []
+
+    class FakeFactory:
+        def __init__(self, credentials):
+            built.append(credentials)
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(cli, "LiveFactory", FakeFactory)
+    assert (
+        cli.main(
+            [
+                "api",
+                "serve",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8080",
+                "--trust-proxy",
+                "--allow-origin",
+                "HTTPS://Usage.Example.com:443",
+                "--allow-origin",
+                "https://usage.example.com",
+                "--allow-origin",
+                "http://localhost:5173",
+            ]
+        )
+        == 0
+    )
+    assert len(built) == 1
+    app = capture.app
+    assert app.hub.mode == "live"
+    assert app.hub.accounts == (item,)
+    assert app.trust_proxy is True
+    assert app.allowed_origins == {"https://usage.example.com", "http://localhost:5173"}
+    out = capsys.readouterr().out
+    assert "restart serve after changing accounts" in out
+
+
+def test_api_serve_bind_failure_is_curated(monkeypatch, capsys):
+    ServeCapture(monkeypatch, bind_error=True)
+    assert cli.main(["api", "serve", "--demo"]) == 3
+    assert "Cannot listen" in capsys.readouterr().err
+
+
+def test_api_serve_real_source_startup_failure_is_curated(monkeypatch, capsys):
+    """Real uvicorn on a real 127.0.0.1:0 socket; only the demo source is made to fail."""
+    from usage_tui import api as api_server
+
+    real_bind = api_server.bind_socket
+    bound = []
+
+    def bind_ephemeral(host, port):
+        sock = real_bind(host, 0)
+        bound.append(sock)
+        return sock
+
+    class FailingDemoSource(api_server.DemoSource):
+        async def start(self):
+            raise RuntimeError("synthetic secret startup detail")
+
+    monkeypatch.setattr(api_server, "bind_socket", bind_ephemeral)
+    monkeypatch.setattr(api_server, "DemoSource", FailingDemoSource)
+    assert cli.main(["api", "serve", "--demo"]) == 3
+    captured = capsys.readouterr()
+    assert "API server failed to start its usage source." in captured.err
+    assert "synthetic secret startup detail" not in captured.out + captured.err
+    assert "usage api stopped." not in captured.out
+    assert bound and bound[0].fileno() == -1
+
+
+def test_api_serve_real_socket_bind_conflict(monkeypatch, capsys):
+    import socket
+
+    from usage_tui import api as api_server
+
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    try:
+        port = holder.getsockname()[1]
+        with pytest.raises(api_server.AddressInUseError):
+            api_server.bind_socket("127.0.0.1", port)
+        sock = api_server.bind_socket("127.0.0.1", 0)
+        sock.close()
+        # The CLI reports EADDRINUSE distinctly from other bind failures.
+        assert cli.main(["api", "serve", "--demo", "--port", str(port)]) == 3
+        err = capsys.readouterr().err
+        assert "already in use" in err and "--port" in err
+    finally:
+        holder.close()
+
+
+def test_api_bind_localhost_is_reachable_over_ipv4():
+    import socket
+
+    from usage_tui import api as api_server
+
+    sock = api_server.bind_socket("localhost", 0)
+    try:
+        assert sock.family == socket.AF_INET
+        host, port = sock.getsockname()
+        assert host == "127.0.0.1"
+        sock.setblocking(True)
+        with socket.create_connection(("127.0.0.1", port), timeout=5):
+            peer, _ = sock.accept()
+            peer.close()
+    finally:
+        sock.close()
+
+
+def test_api_serve_non_local_host_bind_failure_message(monkeypatch, capsys):
+    make_api_token()
+    # TEST-NET-3 is never assigned to this host, so bind fails with EADDRNOTAVAIL.
+    assert cli.main(["api", "serve", "--demo", "--host", "203.0.113.1", "--port", "8787"]) == 3
+    err = capsys.readouterr().err
+    assert "Cannot listen" in err and "local address" in err and "already in use" not in err
+
+
+def test_api_token_create_refuses_without_tty(monkeypatch, capsys, terminal_boundary):
+    from usage_tui.storage import ApiTokenStore
+
+    monkeypatch.setattr(cli, "_tty", terminal_boundary)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
+    assert cli.main(["api", "token", "create"]) == 2
+    assert "requires a TTY" in capsys.readouterr().err
+    assert ApiTokenStore().load() == ()
+
+
+def test_api_token_lifecycle(monkeypatch, capsys):
+    from usage_tui.storage import ApiTokenStore, api_token_digest
+
+    assert cli.main(["api", "token", "list"]) == 0
+    assert "No API tokens" in capsys.readouterr().out
+    assert cli.main(["api", "token", "create", "--label", "laptop"]) == 0
+    out = capsys.readouterr().out
+    token = next(line for line in out.splitlines() if line.startswith("usk_"))
+    assert out.count(token) == 1
+    assert "shown only once" in out
+    (record,) = ApiTokenStore().load()
+    assert record.label == "laptop"
+    assert record.sha256 == api_token_digest(token)
+    assert token not in ApiTokenStore().path.read_text()
+    assert cli.main(["api", "token", "list"]) == 0
+    listing = capsys.readouterr().out
+    assert record.id in listing and "laptop" in listing
+    assert record.sha256 not in listing and token not in listing
+    assert cli.main(["api", "token", "revoke", "f" * 32]) == 2
+    assert "API token not found" in capsys.readouterr().err
+    answers(monkeypatch, "n")
+    assert cli.main(["api", "token", "revoke", record.id]) == 0
+    assert len(ApiTokenStore().load()) == 1
+    answers(monkeypatch, "yes")
+    assert cli.main(["api", "token", "revoke", record.id]) == 0
+    assert ApiTokenStore().load() == ()
+    assert "revoked" in capsys.readouterr().out
+
+
+def test_api_token_limit_has_curated_message(monkeypatch, capsys):
+    from usage_tui.storage import MAX_API_TOKENS, ApiTokenStore
+
+    store = ApiTokenStore()
+    for index in range(MAX_API_TOKENS):
+        store.create(f"t{index}")
+    assert cli.main(["api", "token", "create", "--label", "one-too-many"]) == 2
+    captured = capsys.readouterr()
+    assert "revoke unused tokens" in captured.err.casefold()
+    assert "usage api token revoke" in captured.err
+    assert "Cannot read/write config" not in captured.err
+    assert "usk_" not in captured.out + captured.err
+    assert len(ApiTokenStore().load()) == MAX_API_TOKENS
+
+
+def test_api_token_revoke_requires_tty(monkeypatch, capsys, terminal_boundary):
+    from usage_tui.storage import ApiTokenStore
+
+    make_api_token()
+    monkeypatch.setattr(cli, "_tty", terminal_boundary)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
+    (record,) = ApiTokenStore().load()
+    assert cli.main(["api", "token", "revoke", record.id]) == 2
+    assert len(ApiTokenStore().load()) == 1
+
+
+def test_api_token_list_does_not_require_tty(monkeypatch, capsys, terminal_boundary):
+    make_api_token()
+    monkeypatch.setattr(cli, "_tty", terminal_boundary)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
+    assert cli.main(["api", "token", "list"]) == 0
+    assert "cli-test" in capsys.readouterr().out
+
+
+def test_api_unknown_arguments_are_not_echoed(capsys):
+    assert cli.main(["api", "serve", "--token", "usk_pasted_secret_value"]) == 2
+    captured = capsys.readouterr()
+    assert "usk_pasted_secret_value" not in captured.out + captured.err

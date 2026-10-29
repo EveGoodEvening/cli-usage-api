@@ -1,0 +1,1098 @@
+{
+ "healthy": {
+  "mode": "demo",
+  "server_time": "2026-10-28T12:00:00Z",
+  "accounts": [
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000001",
+     "provider": "claude_subscription",
+     "label": "FICTIONAL DEMO · Claude",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 180
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000001",
+     "metrics": [
+      {
+       "id": "claude.subscription.five_hour",
+       "label": "Claude 5h · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "37.5",
+        "remaining_percent": "62.5",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-28T14:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.weekly",
+       "label": "Claude weekly · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "62.25",
+        "remaining_percent": "37.75",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-31T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.fable_weekly",
+       "label": "Fable weekly · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "110.25",
+        "remaining_percent": "0",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-31T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "ok",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": null,
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000002",
+     "provider": "claude_platform",
+     "label": "FICTIONAL DEMO · Console",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000002",
+     "metrics": [
+      {
+       "id": "claude.platform.purchased_balance",
+       "label": "Purchased · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": {
+        "minor": 4250,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.platform.promotional_balance",
+       "label": "Promotional · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": {
+        "minor": 1250,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.platform.total_balance",
+       "label": "Total · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": {
+        "minor": 5500,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      }
+     ],
+     "grants": [
+      {
+       "category": "purchased",
+       "granted": {
+        "minor": 5000,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "remaining": {
+        "minor": 4250,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "id": null,
+       "program_id": null,
+       "name": "Fictional purchased grant",
+       "expires_at": null
+      },
+      {
+       "category": "promotional",
+       "granted": {
+        "minor": 2000,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "remaining": {
+        "minor": 1250,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "id": null,
+       "program_id": null,
+       "name": "Fictional promotional grant",
+       "expires_at": "2026-11-04T12:00:00Z"
+      }
+     ],
+     "fetch_state": "ok",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": null,
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000003",
+     "provider": "codex_subscription",
+     "label": "FICTIONAL DEMO · Codex",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000003",
+     "metrics": [
+      {
+       "id": "codex.subscription.weekly",
+       "label": "Codex weekly (7d) · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "24",
+        "remaining_percent": "76",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-11-01T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "codex.subscription.five_hour",
+       "label": "Codex 5h · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "12.5",
+        "remaining_percent": "87.5",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-28T15:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "ok",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": null,
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000004",
+     "provider": "grok_subscription",
+     "label": "FICTIONAL DEMO · Grok",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000004",
+     "metrics": [
+      {
+       "id": "grok.subscription.shared_pool",
+       "label": "Grok shared pool · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "45",
+        "remaining_percent": "55",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-29T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "grok.product.build",
+       "label": "GrokBuild · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": "30"
+      },
+      {
+       "id": "grok.product.chat",
+       "label": "GrokChat · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": "15"
+      }
+     ],
+     "grants": [],
+     "fetch_state": "ok",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": null,
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   }
+  ]
+ },
+ "errors": {
+  "mode": "demo",
+  "server_time": "2026-10-28T12:00:00Z",
+  "accounts": [
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000011",
+     "provider": "claude_subscription",
+     "label": "FICTIONAL DEMO · auth required",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 180
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000011",
+     "metrics": [
+      {
+       "id": "claude.subscription.five_hour",
+       "label": "Claude 5h · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.weekly",
+       "label": "Claude weekly · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.fable_weekly",
+       "label": "Fable weekly · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "auth_required",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": null,
+     "retry_at": null,
+     "diagnostic": {
+      "code": "auth_required",
+      "message": "Reconnect this account using a supported credential."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": null,
+     "attempted_age_seconds": 0.0,
+     "stale": true,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000012",
+     "provider": "claude_platform",
+     "label": "FICTIONAL DEMO · permission denied",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000012",
+     "metrics": [
+      {
+       "id": "claude.platform.purchased_balance",
+       "label": "Purchased · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.platform.promotional_balance",
+       "label": "Promotional · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.platform.total_balance",
+       "label": "Total · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "permission_denied",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": null,
+     "retry_at": null,
+     "diagnostic": {
+      "code": "permission_denied",
+      "message": "Check the selected organization and account permissions."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": null,
+     "attempted_age_seconds": 0.0,
+     "stale": true,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000013",
+     "provider": "grok_subscription",
+     "label": "FICTIONAL DEMO · rate limited, last known",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000013",
+     "metrics": [
+      {
+       "id": "grok.subscription.shared_pool",
+       "label": "Grok shared pool · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "45",
+        "remaining_percent": "55",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-29T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "grok.product.build",
+       "label": "GrokBuild · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
+       "share_percent": "30"
+      },
+      {
+       "id": "grok.product.chat",
+       "label": "GrokChat · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
+       "share_percent": "15"
+      }
+     ],
+     "grants": [],
+     "fetch_state": "rate_limited",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T11:50:00Z",
+     "retry_at": "2026-10-28T12:01:30Z",
+     "diagnostic": {
+      "code": "rate_limited",
+      "message": "Wait until the retry deadline before refreshing."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 600.0,
+     "attempted_age_seconds": 0.0,
+     "stale": true,
+     "reset_passed": false,
+     "last_known": true
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000014",
+     "provider": "claude_subscription",
+     "label": "FICTIONAL DEMO · network failure, stale last known",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 180
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000014",
+     "metrics": [
+      {
+       "id": "claude.subscription.five_hour",
+       "label": "Claude 5h · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "37.5",
+        "remaining_percent": "62.5",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-28T14:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.weekly",
+       "label": "Claude weekly · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "62.25",
+        "remaining_percent": "37.75",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-31T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.fable_weekly",
+       "label": "Fable weekly · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "110.25",
+        "remaining_percent": "0",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-31T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "network_error",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T11:45:00Z",
+     "retry_at": "2026-10-28T12:01:00Z",
+     "diagnostic": {
+      "code": "network_error",
+      "message": "Check network connectivity and retry later."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 900.0,
+     "attempted_age_seconds": 0.0,
+     "stale": true,
+     "reset_passed": false,
+     "last_known": true
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000015",
+     "provider": "claude_platform",
+     "label": "FICTIONAL DEMO · malformed response",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000015",
+     "metrics": [
+      {
+       "id": "claude.platform.purchased_balance",
+       "label": "Purchased · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.platform.promotional_balance",
+       "label": "Promotional · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.platform.total_balance",
+       "label": "Total · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "schema_error",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": null,
+     "retry_at": "2026-10-28T12:01:00Z",
+     "diagnostic": {
+      "code": "schema_error",
+      "message": "The provider response does not match the supported contract."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": null,
+     "attempted_age_seconds": 0.0,
+     "stale": true,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000016",
+     "provider": "claude_subscription",
+     "label": "FICTIONAL DEMO · unknown Fable",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 180
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000016",
+     "metrics": [
+      {
+       "id": "claude.subscription.five_hour",
+       "label": "Claude 5h · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "37.5",
+        "remaining_percent": "62.5",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-28T14:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.weekly",
+       "label": "Claude weekly · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "62.25",
+        "remaining_percent": "37.75",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-31T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "claude.subscription.fable_weekly",
+       "label": "Fable weekly · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "partial",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": {
+      "code": "partial_data",
+      "message": "Some values are unavailable; inspect the individual metric details."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000017",
+     "provider": "grok_subscription",
+     "label": "FICTIONAL DEMO · missing products",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000017",
+     "metrics": [
+      {
+       "id": "grok.subscription.shared_pool",
+       "label": "Grok shared pool · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "45",
+        "remaining_percent": "55",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-29T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "grok.product.build",
+       "label": "GrokBuild · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      },
+      {
+       "id": "grok.product.chat",
+       "label": "GrokChat · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": "fictional-grok-pool",
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "partial",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": {
+      "code": "partial_data",
+      "message": "Some values are unavailable; inspect the individual metric details."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000018",
+     "provider": "codex_subscription",
+     "label": "FICTIONAL DEMO · Codex",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 60
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000018",
+     "metrics": [
+      {
+       "id": "codex.subscription.weekly",
+       "label": "Codex weekly (7d) · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "24",
+        "remaining_percent": "76",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-11-01T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      },
+      {
+       "id": "codex.subscription.five_hour",
+       "label": "Codex 5h · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "12.5",
+        "remaining_percent": "87.5",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-28T15:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "ok",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": null,
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   }
+  ]
+ }
+}

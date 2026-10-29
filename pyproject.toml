@@ -7,10 +7,11 @@ name = "usage-tui"
 version = "0.1.0"
 description = "Immutable usage snapshots for a read-only terminal account dashboard"
 requires-python = ">=3.11"
-dependencies = ["textual", "httpx", "keyring"]
+dependencies = ["textual", "httpx", "keyring", "starlette>=1.10.0", "uvicorn>=0.54.0"]
 
 [project.scripts]
 usage = "usage_tui.cli:main"
+usage-keepalive = "usage_tui.keepalive:main"
 
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio", "respx", "ruff"]

@@ -1,0 +1,5 @@
+# Cloudflare Pages: the app is a single page with no client-side routes.
+# Pages already serves /index.html for unknown paths when no 404.html exists,
+# and Workers static assets use not_found_handling in wrangler.toml, so no
+# rewrite rule is needed here (a "/* /index.html 200" rule would be reported
+# as an infinite loop). Add explicit redirects below if you ever need them.

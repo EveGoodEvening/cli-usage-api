@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+### Added — one-process dashboard + API (+ keepalive)
+
+- `usage --api [--api-host H] [--api-port P] [--allow-origin O ...] [--trust-proxy]`
+  serves the read-only API from inside the dashboard process (also with `--demo`).
+  It mirrors the TUI's own snapshots and account list (one scheduler), so accounts
+  changed in the TUI and session-only credentials entered there (including a Claude
+  Platform `sessionKey` on a keyring-less host) reach the API. Same validation,
+  token, CORS and limiter code as `usage api serve`; the socket is bound before the
+  TUI starts; no uvicorn signal handlers or terminal logging; the banner shows the
+  API address and a server failure is a notification.
+- `--keepalive [--keepalive-cli NAME ...] [--keepalive-claude-mode MODE]` on the live
+  dashboard and on `usage api serve` runs `usage-keepalive` in the same event loop
+  under its instance lock; TUI `ALERT` lines become warnings, `serve` also prints log
+  lines. Explicit selectors of enabled saved Grok accounts reading the default login
+  file are protected from stale marking (no-selector accounts add nothing; TUI account
+  changes update the set; standalone `usage-keepalive` reads saved accounts once).
+  Stopping kills the official CLI command in flight, starts no further command, and
+  releases the instance lock only after the worker thread returns.
+- Railway guide now recommends one tmux window running
+  `usage --api --api-host 0.0.0.0 --api-port "$PORT" … --trust-proxy --keepalive`,
+  with the session-only Console costs spelled out (PLAN.md §15.7).
+
+### Added — opt-in `usage-keepalive` for first-party logins
+
+- Separate loop that invokes `codex doctor --json`, `grok sessions list -n 1` and
+  `claude auth status` (falling back to a minimal Haiku request) shortly before each
+  stored access token expires, so each official CLI renews its own file. Reads
+  token fields only for presence and expiry hints (never logs them), discards CLI
+  output, verifies renewal by re-reading expiry (per scope for Grok, ignoring scopes
+  the CLI no longer refreshes), backs up Claude credentials against a known exit race
+  and restores only an unchanged, still-unusable file, retries with backoff and then
+  alerts. Fake-CLI unit tests only; no real-account renewal verified (PLAN.md §15.6).
+
+### Added — Railway container image and deployment guide
+
+- Root `Dockerfile` (`python:3.12-slim-bookworm`) with this project installed via
+  `uv sync --locked --no-dev`, checksum-verified Node.js 22.23.4, Claude Code
+  2.1.308 and Codex CLI 0.165.0 from npm, and Grok Build CLI 1.0.70 from xAI's
+  versioned release artifact (SHA-256 computed on first download; xAI publishes
+  none). CLIs install outside `HOME`, so the runtime volume cannot hide them.
+- `docker/entrypoint.sh` creates `HOME=/data/home` with `0700` under `tini`, warns
+  when `/data` is not a mounted volume, then runs `sleep infinity`. Interactive
+  shells use `umask 077`. Self-updaters are disabled via non-secret flags.
+- `.dockerignore` limits the build context to `pyproject.toml`, `uv.lock`, `src/`
+  and the entrypoint. `railway.json` declares the Dockerfile builder; Railway has
+  deprecated Config as Code for new services, which use root-Dockerfile detection.
+- `docs/deploy-railway.md` (Chinese): volume, port/domain, `railway ssh`, device
+  logins, file-backed accounts, token creation and `serve` startup, with sources.
+  Only file-backed Claude Code / Codex / Grok logins work in the container;
+  Claude Platform is unsupported there. README and SECURITY.md describe the API,
+  frontend and threat model. Local image build and container smoke only; no
+  Railway deployment, in-container login or live read verified (PLAN.md §15).
+
 ### Fixed — distinct Claude Platform balance mismatch warning
 
 - Complete balance reads no longer become `partial_data` solely because category

@@ -24,6 +24,95 @@ reports should describe the affected component and reproduction with synthetic d
 remove authentication and identity information before sharing. If a credential is
 exposed, revoke or replace it through the relevant first-party service.
 
+## Read-only HTTP API, web frontend and container deployment (PLAN.md §15)
+
+Scope and threat model for `usage api serve`, the embedded `usage --api` mode,
+`web/` and the root `Dockerfile`.
+Implementation follows the PLAN.md §15 frozen contract; verification status is
+recorded there, and no Railway deployment or authenticated live read is claimed.
+
+**Assets.** Usage/balance snapshots and account labels (personal data), API bearer
+tokens, and, on a container host, the first-party CLI login files on the volume.
+
+**Boundaries and controls.**
+
+- Read-only surface: only `GET`/`HEAD`/`OPTIONS`; no account, credential, token or
+  configuration mutation over HTTP. Request bodies are not read. Unknown methods
+  return `405`; unauthenticated unknown `/api/` paths return `401`, not `404`, so
+  paths cannot be enumerated. `/healthz` is the only public path.
+- Authentication: `Authorization: Bearer` only, never query strings or cookies.
+  Tokens are `usk_` + 32 random bytes (URL-safe), shown once at creation in a TTY,
+  and stored only as SHA-256 hashes in a private (`0700` directory / `0600` file),
+  locked, atomically replaced `api_tokens.json`. Comparison uses
+  `hmac.compare_digest` over every stored hash. The token file is re-read when its
+  mtime changes (checked at most once per second), so revocation needs no restart.
+  Live mode refuses to start without tokens; only loopback-bound demo may run
+  unauthenticated, and only while the token file is readable and empty (rechecked
+  per reload); creating a token enables auth without a restart. `--host localhost`
+  binds `127.0.0.1`.
+- Brute force: failed authentication is limited per client (10 per 60 s) and
+  globally (100 per 60 s) with `429` and `Retry-After`; tracked clients are capped.
+  A valid token is verified first and never consults or consumes the limiter, so a
+  failed-auth flood cannot lock out legitimate token holders (256-bit tokens make
+  the limiter a noise control, not the guessing defense). Cross-origin responses
+  expose `Retry-After` and `WWW-Authenticate` to allowed origins.
+  The client key is the socket peer, or with `--trust-proxy` the right-most
+  `X-Forwarded-For` entry. Enable `--trust-proxy` only behind a proxy that sets that
+  header; otherwise clients can choose their own limiter key. Railway's edge is
+  reported (forum moderator answer, not formal documentation) to overwrite
+  forwarding headers; this is unverified for this deployment.
+- Browser access: CORS is granted only to exactly configured origins, never `*`
+  and never with credentials. Every response carries `Cache-Control: no-store`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `X-Frame-Options: DENY` and a `default-src 'none'; frame-ancestors 'none'` CSP.
+  CORS is not authentication: a non-browser client with a valid token can read data.
+- Data minimization: responses omit credential references/selectors and
+  organization IDs (snapshot `organization_id` is nulled). Errors are fixed codes
+  such as `{"error":"unauthorized"}` and never echo input. The server does not log
+  `Authorization` headers.
+- Transport security: the server speaks plain HTTP. Bind to loopback locally; on a
+  network host terminate TLS in front of it (Railway's public domain does this).
+  A token sent over plain HTTP on an untrusted network can be captured.
+- Frontend: tokens live in `sessionStorage` by default, or `localStorage` only when
+  "remember" is chosen; any script running on the frontend origin could read them,
+  so the static app avoids `dangerouslySetInnerHTML` and ships a strict CSP. Logout
+  clears both stores but does not revoke the token server-side; use
+  `usage api token revoke`.
+- Container host: the image contains no credentials. Login files, account
+  configuration and token hashes live under `HOME=/data/home` (`0700`) on the
+  volume; interactive bash shells use `umask 077`. There is no OS keyring, so
+  manual/Console secrets cannot persist; Claude Platform works there only as a
+  session-only credential in one-process mode (below).
+  Anyone with `railway ssh` or volume access can read the first-party CLI logins,
+  which are password-equivalent. The CLI versions are pinned; Grok's artifact
+  checksums were computed on first download because xAI publishes none, so they
+  detect later changes but do not establish the original artifact's authenticity.
+  Claude Code and Grok self-updaters are disabled by non-secret environment flags.
+- One-process mode (`usage --api`, PLAN.md §15.7): the API runs as a task in the
+  dashboard's event loop and serves an observer mirror (`AppHub`) of the snapshots
+  and account list the TUI shows; it never starts, stops or reconfigures the
+  scheduler. The token, CORS, header and limiter controls above are the same code;
+  live mode still requires a token. Consequence: a **session-only** credential
+  entered in that TUI, including a Claude Platform Console `sessionKey`, now feeds a
+  network-reachable API. The API returns only the same minimized views (no session,
+  reference or organization ID), but the high-sensitivity account session sits in the
+  memory of a process on a public host; anyone with shell or process-memory access
+  there (for example `railway ssh`) may obtain it. It is lost on restart, redeploy or
+  exit, expires upstream on its own schedule, is not renewed by keepalive, and local
+  removal does not revoke it. On account changes the mirror drops all held snapshots
+  (as the TUI does), so removed accounts' observations are not retained or served.
+  uvicorn installs no signal handlers and its loggers are silenced (no handlers reach
+  the terminal); the socket is bound before the TUI starts. The process still serves
+  plain HTTP: terminate TLS in front of it.
+- `--keepalive` (dashboard or `api serve`, live only) runs the opt-in
+  `usage-keepalive` loop in the same process under its single-instance lock. It
+  spawns the official CLIs (no TTY, output discarded) so they renew their own login
+  files; logs (no token values) go to the private keepalive log only, plus stdout in
+  headless `serve`; in the TUI, `ALERT` lines become notifications. Saved Grok
+  accounts' selected scopes (or the legacy scope when none is selected) are protected
+  from being marked stale.
+- Local removal of a token or account never revokes provider sessions.
+
 ## Implemented C12 entry and CLI secret boundary
 
 - `usage` and `python -m usage_tui` compose the live dashboard with one shared

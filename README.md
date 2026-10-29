@@ -1,7 +1,8 @@
 # Usage TUI
 
 A local, read-only terminal dashboard for subscription usage and Claude Platform
-credit balances. No web server or statusline.
+credit balances, with an optional token-protected read-only HTTP API and a separate
+web frontend. No statusline.
 
 **Status:** Offline demo and local account workflows are verified. Authenticated
 provider reads and real OS-keyring persistence remain unverified. Provider
@@ -85,7 +86,10 @@ dashboard:
 
 For file sources, use `default` or an absolute path to a private, user-owned `0600`
 file. The app never modifies or deletes first-party login files, runs login, or
-refreshes tokens. Renew expired credentials through the first-party tool.
+refreshes tokens. Renew expired credentials through the first-party tool; on an
+unattended host, the separate opt-in `usage-keepalive` loop invokes each official CLI
+shortly before its stored expiry so that CLI renews its own file (see
+[docs/deploy-railway.md](docs/deploy-railway.md)).
 API keys do not enable subscription metrics or Console balances.
 
 ### CLI account management
@@ -150,6 +154,91 @@ files are refused.
 Account metadata lives at `$XDG_CONFIG_HOME/usage-tui/accounts.json`, falling back
 to `~/.config/usage-tui/accounts.json`; credential values are stored separately.
 See [SECURITY.md](SECURITY.md) for boundaries and limitations.
+
+## Read-only HTTP API
+
+`usage api serve` runs headless (no TUI) and serves the same usage data as JSON. It
+only reads: there are no endpoints for adding, editing or removing accounts.
+
+```sh
+uv run usage api token create --label web    # TTY only; the token is printed once
+uv run usage api serve                       # live mode, default 127.0.0.1:8787
+uv run usage api serve --demo                # fictional data, no live files/network
+```
+
+- Every endpoint except `GET /healthz` requires `Authorization: Bearer <token>`.
+  Live mode refuses to start without a configured token. Demo bound to a loopback
+  host may run without tokens; once any token exists, demo requires it too.
+- Only the SHA-256 hash of each token is stored, in `api_tokens.json` beside
+  `accounts.json`. `usage api token list` shows IDs/labels/creation times;
+  `usage api token revoke ID` takes effect in a running server within about a second.
+- Endpoints: `/healthz`, `/api/v1/session`, `/api/v1/dashboard`,
+  `/api/v1/accounts/{id}`. Only `GET`/`HEAD`/`OPTIONS` are accepted.
+- Browsers on another origin need `--allow-origin https://frontend.example`
+  (exact origin, repeatable; no wildcard). `--trust-proxy` makes failed-auth limiting
+  use the right-most `X-Forwarded-For` entry; use it only behind a trusted reverse
+  proxy such as Railway.
+- Account configuration is read once at startup: restart `serve` after changing
+  accounts. Credential sources are resolved per poll, as in the dashboard.
+- Headless `serve` cannot use TUI session-only secrets. Without an OS keyring
+  (for example in a container) it reads only file-backed Claude Code / Codex / Grok
+  logins; use one-process mode below for Claude Platform there.
+- `usage api serve --keepalive [--keepalive-cli NAME ...] [--keepalive-claude-mode
+  hybrid|status|model]` (live only) also runs `usage-keepalive` in the server process
+  and prints its log lines.
+
+### One-process mode: dashboard + API (+ keepalive)
+
+```sh
+uv run usage --api                                   # TUI and API, 127.0.0.1:8787
+uv run usage --api --api-host 0.0.0.0 --api-port 9000 \
+  --allow-origin https://frontend.example --trust-proxy --keepalive
+uv run usage --demo --api                            # fictional data; loopback, no token
+```
+
+`usage --api` runs the read-only API inside the dashboard process: one scheduler, and
+the API serves exactly the snapshots the TUI shows. Accounts added, edited, removed,
+enabled or disabled in the TUI's account manager appear in `/api/v1/dashboard`
+immediately, and a **session-only** credential entered in that TUI (for example a
+Claude Platform Console `sessionKey` on a host without a keyring) feeds the API too.
+It lasts only as long as the process: re-enter it after every restart. The token,
+CORS and `--trust-proxy` rules are the same as `usage api serve`; live mode needs at
+least one token. The socket is bound before the TUI starts, so a busy port fails with
+a normal error. The banner shows `API host:port`; an API failure is a notification,
+not a crash, and uvicorn never writes to the terminal.
+`--keepalive` (live only, also on `usage api serve`) runs `usage-keepalive` in the same
+process, holding its single-instance lock; it logs only to
+`~/.local/state/usage-keepalive/keepalive.log`, and `ALERT` lines appear as TUI
+warnings. Quitting the TUI stops the API, keepalive and scheduler together: keepalive
+starts no further command, kills the official CLI command in flight (its whole process
+group; that attempt counts as neither success nor failure, so a Claude `auth status`
+interrupted by quitting never escalates to the Haiku request), and the lock is
+released only after its worker thread has returned. Grok scopes an enabled saved
+account selects explicitly in the default login file are never marked stale; the TUI
+updates that set when accounts change. A no-selector account adds nothing, because the
+reader's default scope is already never marked stale.
+
+## Web frontend
+
+[`web/`](web/) is a separate static Vite/React app that signs in with the API base
+URL and a token and polls `/api/v1/dashboard`. It deploys to Vercel, Cloudflare or
+Railway; see [web/README.md](web/README.md). For local development, run
+`uv run usage api serve --demo --allow-origin http://localhost:5173` and
+`npm run dev` in `web/`.
+
+## Railway deployment (backend)
+
+The root [`Dockerfile`](Dockerfile) builds an image with Python 3.12, this project,
+Node.js 22 and pinned Claude Code, Codex and Grok Build CLIs, then runs
+`sleep infinity`. Attach a volume at `/data` (`HOME=/data/home`), then
+`railway ssh` in to log in to each CLI, add accounts, create a token, and start
+`usage --api --api-host 0.0.0.0 --api-port "$PORT" --allow-origin https://<frontend> --trust-proxy --keepalive`
+in tmux (one process; a session-only Claude Platform `sessionKey` entered in that TUI
+feeds the API until the process exits). Headless `usage api serve` plus a separate
+`usage-keepalive` remain available for file-backed logins only.
+Step-by-step instructions (Chinese) and sources are in
+[docs/deploy-railway.md](docs/deploy-railway.md). The image has been built and
+smoke-tested locally only; no Railway deployment or in-container login is verified.
 
 ## Development
 

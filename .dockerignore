@@ -1,0 +1,9 @@
+# Build context is only what the Dockerfile copies: pyproject.toml, uv.lock,
+# src/ and docker/. Exclude everything else, including local state and secrets.
+**
+!pyproject.toml
+!uv.lock
+!src/
+!docker/entrypoint.sh
+**/__pycache__
+**/*.py[cod]
