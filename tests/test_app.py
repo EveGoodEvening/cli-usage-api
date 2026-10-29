@@ -31,10 +31,11 @@ async def test_actual_demo_surface_and_keyboard(size, scenario, monkeypatch):
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         assert "DEMO" in str(app.banner.content)
-        assert app.listing.option_count == sum(
+        assert app.metric_option_count() == sum(
             len(set(REQUIRED_METRIC_IDS[a.provider]) | {m.id for m in app.snapshots[a.id].metrics})
             for a in app.accounts
         )
+        assert app.listing.option_count == app.metric_option_count() + len(app.accounts)
         assert app.listing.size.height > 0
         assert app.listing.virtual_size.height > app.listing.size.height
         if size == (40, 12):
@@ -194,7 +195,8 @@ async def test_account_selection_filters_rows():
         account = next(a for a in app.accounts if a.provider == ProviderId.CODEX_SUBSCRIPTION)
         selector.value = account.id
         await pilot.pause()
-        assert app.query_one("#metrics", OptionList).option_count == 2
+        assert app.query_one("#metrics", OptionList).option_count == 3
+        assert app.metric_option_count() == 2
         assert [metric_id for _, metric_id in app.rows] == [
             "codex.subscription.weekly",
             "codex.subscription.five_hour",
@@ -262,12 +264,12 @@ async def test_real_grok_extra_product_mount_details_filter_and_refresh():
         extra = app.snapshots[grok.id].metrics[-1]
         assert extra.label == "Other" and extra.id.startswith("grok.product.other.")
         assert app.rows[3] == (grok, extra.id)
-        assert app.listing.option_count == 5
-        prompt = str(app.listing.get_option_at_index(3).prompt)
+        assert app.metric_option_count() == 5
+        prompt = str(app.listing.get_option_at_index(app.option_index(app.rows[3])).prompt)
         assert "Other" in prompt and "consumption share: 10%" in prompt
         assert "非独立额度" in prompt and "剩余 90%" not in prompt
         assert extra.quota is None
-        app.listing.highlighted = 3
+        app.listing.highlighted = app.option_index(app.rows[3])
         await pilot.press("enter")
         assert isinstance(app.screen, InformationScreen)
         assert "Other" in app.screen.content and "10%" in app.screen.content
@@ -285,15 +287,15 @@ async def test_real_grok_extra_product_mount_details_filter_and_refresh():
         selector.value = "all"
         await pilot.pause()
         # Removing a row before the selected account must preserve its identity.
-        app.listing.highlighted = 4
+        app.listing.highlighted = app.option_index(app.rows[4])
         app.listing.focus()
         await pilot.press("r")
         await pilot.pause()
         assert len(requests) == 2 and not bodies
         assert [metric_id for _, metric_id in app.rows[:3]] == required
-        assert app.listing.option_count == 4
+        assert app.metric_option_count() == 4
         assert extra.id not in [metric_id for _, metric_id in app.rows]
-        assert app.rows[app.listing.highlighted][0] == other_account
+        assert app.highlighted_row()[0] == other_account
         await pilot.press("q")
     assert factory.closed and factory.scheduler.stopped
 

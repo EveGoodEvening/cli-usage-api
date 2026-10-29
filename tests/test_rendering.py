@@ -27,6 +27,13 @@ from usage_tui.providers.codex import CodexProvider
 from usage_tui.transport import Transport
 
 
+def shown(app, row=None) -> str:
+    """Text the dashboard actually displays: one metric prompt, or every option."""
+    if row is not None:
+        return str(app.listing.get_option_at_index(app.option_index(row)).prompt)
+    return "\n".join(str(option.prompt) for option in app.listing._options)
+
+
 async def test_all_required_provider_rows_values_and_details():
     app = UsageApp(mode="demo")
     async with app.run_test(size=(80, 24)) as pilot:
@@ -145,6 +152,10 @@ async def test_live_codex_duration_rows_provenance_and_missing_weekly():
             five_hour = app._row_text(account, "codex.subscription.five_hour")
             assert "Codex weekly (7d)" in weekly and "35%" in weekly
             assert "Codex 5h" in five_hour and "20%" in five_hour
+            visible_weekly = shown(app, (account, "codex.subscription.weekly"))
+            assert "Codex weekly (7d)" in visible_weekly and "已用 35%" in visible_weekly
+            assert "剩余 65%" in visible_weekly
+            assert "已用 20%" in shown(app, (account, "codex.subscription.five_hour"))
             details = app.details(account, "codex.subscription.weekly")
             assert "private_http" in details and "codex.wham.usage.v1" in details
             app.publish_snapshot(await provider.fetch(account, credential, DEMO_NOW))
@@ -156,6 +167,10 @@ async def test_live_codex_duration_rows_provenance_and_missing_weekly():
             assert "未知 / no data" in weekly and "已用 0" not in weekly
             assert "300" in app._row_text(account, "codex.subscription.window.300")
             assert "8%" in app._row_text(account, "codex.subscription.window.300")
+            visible_weekly = shown(app, (account, "codex.subscription.weekly"))
+            assert "未知 / no data" in visible_weekly and "已用" not in visible_weekly
+            window = shown(app, (account, "codex.subscription.window.300"))
+            assert "300" in window and "已用 8%" in window
             await pilot.press("q")
     finally:
         await http_transport.aclose()
@@ -176,6 +191,9 @@ async def test_untrusted_labels_remain_plain_and_no_credential_reference_rendere
         text = "\n".join(app._row_text(*row) for row in app.rows)
         assert "\x1b" not in text and "\x07" not in text and "[red]" not in text
         assert "NEVER_SHOW_THIS" not in text
+        dashboard = shown(app) + str(app.status_line.content)
+        assert "Unsafe" in dashboard and "NEVER_SHOW_THIS" not in dashboard
+        assert "\x1b" not in dashboard and "\x07" not in dashboard and "[red]" not in dashboard
         await pilot.press("q")
 
 
@@ -193,6 +211,8 @@ async def test_fresh_success_missing_metric_does_not_preserve_current_value():
         )
         assert "未知 / no data" in app._row_text(account, metric_id)
         assert "已用" not in app._row_text(account, metric_id)
+        assert "未知 / no data" in shown(app, (account, metric_id))
+        assert "已用" not in shown(app, (account, metric_id))
         await pilot.press("q")
 
 
@@ -241,8 +261,10 @@ async def test_saturated_retry_response_renders_without_local_overflow(saturated
         row = app._row_text(account, snapshot.metrics[0].id)
         assert "rate_limited" in row and "重试 / retry" in row
         assert local_time(snapshot.retry_at) in row
+        header = str(app.listing.get_option_at_index(0).prompt)
+        assert "限流" in header and "重试 / retry 9999-12-31" in header and "2912141天" in header
         assert snapshot.retry_at.isoformat() in app.details(account, snapshot.metrics[0].id)
-        assert app.listing.option_count == 3
+        assert app.metric_option_count() == 3
         await pilot.press("q")
 
 
@@ -273,7 +295,7 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
         ids = [metric_id for row_account, metric_id in app.rows if row_account == account]
         assert ids == [*required, first.id, unknown.id]
         assert len(ids) == len(set(ids))
-        index = app.rows.index((account, first.id))
+        index = app.option_index((account, first.id))
         app.listing.highlighted = index
         assert "10%" in str(app.listing.get_option_at_index(index).prompt)
         details = app.details(account, first.id)
@@ -287,7 +309,7 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
         app.publish_snapshot(
             replace(snapshot, metrics=(*snapshot.metrics, earlier, first, unknown))
         )
-        assert app.rows[app.listing.highlighted] == (account, first.id)
+        assert app.highlighted_row() == (account, first.id)
         assert [metric_id for a, metric_id in app.rows if a == account] == [
             *required,
             earlier.id,

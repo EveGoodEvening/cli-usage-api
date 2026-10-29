@@ -50,3 +50,15 @@ Screen.compact #banner, Screen.compact #dashboard-status, Screen.compact #resize
 Screen.compact Footer {
     display: none;
 }
+#metrics {
+    scrollbar-gutter: stable;
+    scrollbar-size-vertical: 1;
+}
+#metrics > .option-list--option-disabled {
+    color: $text;
+    text-style: bold;
+    background: $boost;
+}
+#metrics > .option-list--option {
+    padding: 0 1;
+}

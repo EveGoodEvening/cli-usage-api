@@ -244,3 +244,20 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   Display the Console `sessionKey` high-sensitivity account-session warning before
   its secret input, including value-only guidance excluding passwords, full Cookie
   headers, and HAR files; cover visibility for the specific provider/kind.
+- Dashboard option lists mix disabled account headers with metric rows: map rows by
+  option id (`option_index`/`highlighted_row`), never by option index, and never
+  assign a header index to `highlighted` (Textual accepts it). App `on_resize` runs
+  before the list's own layout, so width tiers re-flow on the list's Resize. Numbers,
+  money and Grok product shares are never ellipsized; only labels/reset text adapt.
+- Disabled header options also break Textual page movement: PageUp can land on a
+  first-row header and clear `highlighted`; fall back to the nearest metric. Pack
+  header segments by their widest clock-driven form (age, retry countdown) so 1 s
+  ticks never change row heights, and keep a visible selection visible when a
+  semantic change (reset passed) grows a row. Explanatory notes, diagnostics and
+  grant-count uncertainty wrap whole in every tier; an incomplete Console fetch
+  shows `—`/`≥N` grants, never 0. A READY quota without reset reads `重置 — 未知`.
+  Narrow rows place the bare balance amount, not its wide padded cell. Test the
+  displayed OptionList prompts, not only `_row_text` (now details-only).
+- `.venv/bin/pytest` can carry a stale shebang from a renamed checkout; reinstall
+  the package (`uv sync --locked --reinstall-package pytest`) rather than
+  rewriting gate commands.

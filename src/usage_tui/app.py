@@ -6,11 +6,16 @@ import inspect
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from rich.cells import cell_len
+from rich.errors import StyleSyntaxError
+from rich.style import Style
 from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
+from textual.geometry import Region
+from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Footer, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
@@ -109,6 +114,175 @@ def metric_value(metric: Metric) -> str:
     return "共享池消耗明细（非独立额度）" if metric.shared_pool_id else "— 未知 / no data"
 
 
+WEEKDAYS = "一二三四五六日"
+# Widest ordinary clock-driven strings ("23小时59分前", "等待刷新 / awaiting refresh").
+AGE_RESERVE = cell_len("23小时59分前")
+RETRY_RESERVE = cell_len("等待刷新 / awaiting refresh")
+FALLBACK_COLORS = {
+    "success": "green",
+    "warning": "yellow",
+    "error": "red",
+    "secondary": "magenta",
+    "accent": "cyan",
+}
+STATE_CHIPS = {"ok": ("●", "success"), "partial": ("◑", "warning")} | {
+    state: ("▲", "warning") for state in ("rate_limited", "network_error")
+}
+
+
+def _span(seconds: int, *, precise: bool = False, coarse: bool = False) -> str:
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    if days:
+        return f"{days}天{hours}小时" if hours and not coarse else f"{days}天"
+    if hours:
+        return f"{hours}小时{minutes}分" if minutes and not coarse else f"{hours}小时"
+    if minutes:
+        return f"{minutes}分{seconds:02}秒" if precise and seconds else f"{minutes}分钟"
+    return f"{seconds}秒"
+
+
+def relative_reset(
+    value: datetime, now: datetime, *, precise: bool = False, coarse: bool = False
+) -> str:
+    """Relative countdown on the app clock; zero waits for refresh, never resets."""
+    seconds = max(0, int((value - now).total_seconds()))
+    if not seconds:
+        return "等待刷新 / awaiting refresh"
+    return _span(seconds, precise=precise, coarse=coarse) + "后"
+
+
+def age(value: datetime, now: datetime) -> str:
+    seconds = max(0, int((now - value).total_seconds()))
+    return "刚刚" if seconds < 60 else _span(seconds) + "前"
+
+
+def short_local_time(value: datetime, now: datetime, fmt: str = "%H:%M") -> str:
+    try:
+        local, current = value.astimezone(), now.astimezone()
+    except OverflowError:
+        # Saturated deadlines keep their UTC value; nothing is clamped.
+        return value.astimezone(UTC).strftime("%Y-%m-%d " + fmt) + " UTC"
+    days = (local.date() - current.date()).days
+    clock = local.strftime(fmt)
+    if days in (-1, 0, 1):
+        return ("昨天 ", "今天 ", "明天 ")[days + 1] + clock
+    if 1 < days < 7:
+        return f"周{WEEKDAYS[local.weekday()]} {clock}"
+    return local.strftime("%m-%d " if local.year == current.year else "%Y-%m-%d ") + clock
+
+
+def severity(used: Decimal) -> str:
+    if used > 100:
+        return "error"
+    return "error" if used >= 90 else "warning" if used >= 70 else "success"
+
+
+def overage(used: Decimal) -> str:
+    return f"超额 +{used - Decimal(100)}%"
+
+
+def bar(used: Decimal, width: int, *, style: str, dim: bool = False) -> Text:
+    """Drawing alone is clamped at 100%; the numeric value is shown separately."""
+    filled = int(min(used, Decimal(100)) * width / 100)
+    text = Text("█" * filled, style=f"dim {style}" if dim else style)
+    text.append("░" * (width - filled), style="dim")
+    if used > 100:
+        text.append("▶", style=f"bold {style}")
+    return text
+
+
+def middle(value: str, width: int) -> str:
+    """Ellipsize inside a label so distinguishing tails ("购买余额") stay visible."""
+    if cell_len(value) <= width:
+        return value
+    tail = ""
+    for char in reversed(value):
+        if cell_len(char + tail) > max(1, (width - 1) // 2):
+            break
+        tail = char + tail
+    word = tail.rsplit(" ", 1)[-1]
+    tail = word if cell_len(word) >= 4 else tail
+    head = ""
+    for char in value:
+        if cell_len(head + char) > width - 1 - cell_len(tail):
+            break
+        head += char
+    return head.rstrip() + "…" + tail.lstrip()
+
+
+def cell(value: Text | str, width: int, *, justify: str = "left", truncate: bool = True) -> Text:
+    """Pad by terminal cells; values that must stay whole are never ellipsized."""
+    text = Text(value) if isinstance(value, str) else value.copy()
+    text.no_wrap = True
+    if truncate and text.cell_len > width:
+        text.truncate(width, overflow="ellipsis")
+    gap = max(0, width - text.cell_len)
+    if justify == "right":
+        text.pad_left(gap)
+    else:
+        text.pad_right(gap)
+    return text
+
+
+class MetricList(OptionList):
+    """Option list whose scroll keeps an account header above its first metric."""
+
+    class Resized(Message):
+        pass
+
+    def on_resize(self) -> None:
+        self.post_message(self.Resized())
+
+    def _move_page(self, direction) -> None:
+        # A page can land on a disabled header with no metric beyond it; keep a
+        # metric selected (the nearest one at that end) rather than clearing it.
+        super()._move_page(direction)
+        if self.highlighted is None and self.option_count:
+            (self.action_first if direction < 0 else self.action_last)()
+
+    def keep_highlight_in_view(self, before: tuple[int, int] | None) -> None:
+        """After prompts change height, keep a previously visible selection visible."""
+        span = self.highlight_span()
+        if before is not None and span is not None and span != before:
+            top = self.scroll_offset.y
+            if not (top <= span[0] and span[1] <= top + self.scrollable_content_region.height):
+                self.scroll_to_highlight()
+
+    def highlight_span(self) -> tuple[int, int] | None:
+        highlighted = self.highlighted
+        if highlighted is None or not self.is_mounted:
+            return None
+        self._update_lines()
+        try:
+            start = self._index_to_line[highlighted]
+            return start, start + self._heights[highlighted]
+        except KeyError:
+            return None
+
+    def scroll_to_highlight(self, top: bool = False) -> None:
+        highlighted = self.highlighted
+        if highlighted and self.is_mounted and self.get_option_at_index(highlighted - 1).disabled:
+            self._update_lines()
+            try:
+                start = self._index_to_line[highlighted - 1]
+                end = self._index_to_line[highlighted] + self._heights[highlighted]
+            except KeyError:
+                pass
+            else:
+                if end - start <= self.scrollable_content_region.height:
+                    self.scroll_to_region(
+                        Region(0, start, self.scrollable_content_region.width, end - start),
+                        force=True,
+                        animate=False,
+                        top=top,
+                        immediate=True,
+                    )
+                    return
+        super().scroll_to_highlight(top)
+
+
 class InformationScreen(Screen[None]):
     BINDINGS = (("escape", "back", "返回"), ("?", "back", "返回"))
 
@@ -172,6 +346,7 @@ class UsageApp(App[None]):
         self.snapshots: dict[str, Snapshot] = {}
         self.selected_account: str | None = None
         self.rows: list[tuple[Account, str]] = []
+        self._row_option: list[int] = []
         self._usage_closed = False
         self._refreshing = False
         self._notice = ""
@@ -184,7 +359,7 @@ class UsageApp(App[None]):
             self._account_options(), value="all", allow_blank=False, id="account-selector"
         )
         self.status_line = Static(id="dashboard-status", markup=False)
-        self.listing = OptionList(id="metrics")
+        self.listing = MetricList(id="metrics")
         self.hint = Static(id="resize-hint", markup=False)
 
     def _account_options(self):
@@ -232,7 +407,12 @@ class UsageApp(App[None]):
 
     def on_resize(self) -> None:
         if self.listing.is_mounted:
-            self._render_header()
+            self._render_rows()
+
+    @on(MetricList.Resized)
+    def _reflow(self) -> None:
+        # The list's own size settles after the screen resize: re-flow tiers then.
+        self._render_rows()
 
     def _render_header(self) -> None:
         demo = self.mode == "demo"
@@ -275,6 +455,19 @@ class UsageApp(App[None]):
             message = f"fresh {len(observed) - stale} · STALE {stale} · pending {len(visible) - len(observed)}"
             if retries:
                 message += f" · retry {countdown(min(retries), self.now())}"
+            upcoming = [
+                (metric.reset_at, account, metric)
+                for account, snapshot in observed
+                for metric in snapshot.metrics
+                if metric.state == MetricState.READY
+                and metric.reset_at is not None
+                and metric.reset_at > self.now()
+            ]
+            if upcoming and not compact:
+                reset_at, account, metric = min(upcoming, key=lambda item: item[0])
+                soonest = f" · 最近重置 {self._label(account, metric.id)} {relative_reset(reset_at, self.now())}"
+                if cell_len(message + soonest) <= self.size.width - 2:
+                    message += soonest
         self.status_line.update(message + ("\n" + self._notice if self._notice else ""))
 
     def _visible_rows(self) -> list[tuple[Account, str]]:
@@ -292,23 +485,50 @@ class UsageApp(App[None]):
                         seen.add(metric.id)
         return rows
 
+    def option_index(self, row: tuple[Account, str]) -> int:
+        return self._row_option[self.rows.index(row)]
+
+    def metric_option_count(self) -> int:
+        return len(self.rows)
+
+    def _row_index(self, option_index: int | None) -> int | None:
+        if option_index is None or not 0 <= option_index < self.listing.option_count:
+            return None
+        option_id = self.listing.get_option_at_index(option_index).id or ""
+        return int(option_id[1:]) if option_id.startswith("m") else None
+
+    def highlighted_row(self) -> tuple[Account, str] | None:
+        index = self._row_index(self.listing.highlighted)
+        return None if index is None or index >= len(self.rows) else self.rows[index]
+
+    def _groups(self) -> list[tuple[Account, list[int]]]:
+        groups: list[tuple[Account, list[int]]] = []
+        for index, (account, _) in enumerate(self.rows):
+            if not groups or groups[-1][0] != account:
+                groups.append((account, []))
+            groups[-1][1].append(index)
+        return groups
+
     def _rebuild(self, rows: list[tuple[Account, str]] | None = None) -> None:
-        highlighted = self.listing.highlighted
-        selected = (
-            self.rows[highlighted]
-            if highlighted is not None and highlighted < len(self.rows)
-            else None
-        )
+        selected = self.highlighted_row()
+        previous = self._row_index(self.listing.highlighted)
         self.rows = self._visible_rows() if rows is None else rows
+        self._row_option = []
         self.listing.clear_options()
-        for index, (account, metric_id) in enumerate(self.rows):
-            self.listing.add_option(Option(Text(self._row_text(account, metric_id)), id=str(index)))
+        options = []
+        for number, (account, indexes) in enumerate(self._groups()):
+            options.append(Option(self._account_header(account), id=f"h{number}", disabled=True))
+            for index in indexes:
+                self._row_option.append(len(options))
+                options.append(Option(self._metric_prompt(*self.rows[index]), id=f"m{index}"))
+        self.listing.add_options(options)
         if self.rows:
-            self.listing.highlighted = (
+            # Only metric options are ever highlighted, never a disabled header.
+            self.listing.highlighted = self._row_option[
                 self.rows.index(selected)
                 if selected in self.rows
-                else min(highlighted or 0, len(self.rows) - 1)
-            )
+                else min(previous or 0, len(self.rows) - 1)
+            ]
         self._render_header()
 
     def _metric(self, account: Account, metric_id: str) -> Metric | None:
@@ -362,9 +582,450 @@ class UsageApp(App[None]):
         if rows != self.rows:
             self._rebuild(rows)
             return
-        for index, (account, metric_id) in enumerate(self.rows):
-            self.listing.replace_option_prompt(str(index), Text(self._row_text(account, metric_id)))
+        before = self.listing.highlight_span()
+        for number, (account, indexes) in enumerate(self._groups()):
+            self.listing.replace_option_prompt(f"h{number}", self._account_header(account))
+            for index in indexes:
+                self.listing.replace_option_prompt(
+                    f"m{index}", self._metric_prompt(*self.rows[index])
+                )
+        self.listing.keep_highlight_in_view(before)
         self._render_header()
+
+    def _layout(self) -> tuple[str, int, bool]:
+        compact = self.size.width < 80 or self.size.height < 24
+        mounted = self.listing.is_mounted and self.listing.size.width > 0
+        outer = self.listing.size.width - 2 if mounted else self.size.width - 4
+        region = self.listing.scrollable_content_region.width if mounted else 0
+        width = region - 2 if region > 2 else outer - 3
+        tier = "wide" if outer >= 100 else "medium" if outer >= 72 else "narrow"
+        return tier, max(20, width), compact
+
+    def _color(self, name: str) -> str:
+        if getattr(self, "_palette", (None,))[0] != self.theme:
+            variables = self.get_css_variables()
+            palette = {}
+            for key, fallback in FALLBACK_COLORS.items():
+                try:
+                    palette[key] = str(Style.parse(variables.get(key, fallback)).color.name)
+                except (StyleSyntaxError, AttributeError):
+                    palette[key] = fallback
+            self._palette = (self.theme, palette)
+        return self._palette[1][name]
+
+    def _label(self, account: Account, metric_id: str) -> str:
+        metric = self._metric(account, metric_id)
+        return METRIC_LABELS.get(metric_id) or sanitize_text(
+            metric.label if metric else metric_id, max_length=120
+        )
+
+    def _wrapped(self, text: str, width: int, indent: str, style: str) -> Text:
+        result = Text()
+        for line in Text(text).wrap(self.console, max(10, width - cell_len(indent))):
+            result.append("\n" + indent, style="dim")
+            result.append(line.plain, style=style)
+        return result
+
+    def _account_header(self, account: Account) -> Text:
+        tier, width, compact = self._layout()
+        chips_first = compact or tier == "narrow"
+        label = sanitize_text(account.label, max_length=80)
+        snapshot = self.snapshots.get(account.id)
+        now = self.now()
+        chips = self._chips(account, tier, now)
+        times, later = Text(), Text()
+        reserves = [0, 0]
+        lines: list[Text] = []
+        hoisted: str | None = None
+        if account.enabled and snapshot is not None:
+            code = str(snapshot.fetch_state)
+
+            def clock(value: datetime) -> str:
+                return short_local_time(value, now).removeprefix("今天 ")
+
+            times.style = "dim"
+            elapsed = "" if snapshot.fetched_at is None else age(snapshot.fetched_at, now)
+            times.append(
+                "成功 "
+                + (
+                    "—"
+                    if snapshot.fetched_at is None
+                    else f"{clock(snapshot.fetched_at)} ({elapsed})"
+                )
+            )
+            times.append(f" · 尝试 {clock(snapshot.attempted_at)}")
+            reserves[0] = times.cell_len + max(0, AGE_RESERVE - cell_len(elapsed))
+            if snapshot.retry_at:
+                remaining = relative_reset(snapshot.retry_at, now, precise=True)
+                later.append(
+                    f"重试 / retry {short_local_time(snapshot.retry_at, now, '%H:%M:%S').removeprefix('今天 ')} · "
+                    + remaining,
+                    style=self._color("warning"),
+                )
+                reserves[1] = later.cell_len + max(0, RETRY_RESERVE - cell_len(remaining))
+            if snapshot.diagnostic:
+                lines.append(
+                    Text(
+                        "⚠ " + sanitize_text(snapshot.diagnostic.message, max_length=256),
+                        style=self._color("error" if code not in STATE_CHIPS else "warning"),
+                    )
+                )
+            if snapshot.organization_id or snapshot.grants:
+                organization = sanitize_text(snapshot.organization_id or "—", max_length=64)
+                # An incomplete fetch (any category unknown) cannot prove a grant
+                # count: empty is unknown, never zero, and a non-empty list is a floor.
+                complete = code == "ok" and all(
+                    metric.state == MetricState.READY and metric.balance is not None
+                    for metric in snapshot.metrics
+                )
+                count = len(snapshot.grants)
+                grants = (
+                    f"{count} 项"
+                    if complete
+                    else f"≥{count} 项（部分未知）"
+                    if count
+                    else "— 项（未知）"
+                )
+                lines.append(
+                    Text(
+                        f"组织 {organization} · 赠款 {grants}"
+                        + (
+                            "（到期≠周期重置，Enter 详情）"
+                            if tier == "wide"
+                            else "（到期≠周期重置）"
+                        ),
+                        style="dim",
+                    )
+                )
+            if self._hoisted(account):
+                hoisted = sanitize_text(snapshot.metrics[0].detail, max_length=1024)
+        name = Text(label, style="bold")
+        # One chip column across accounts: pad to the longest visible label,
+        # capped so every account's chips still fit beside the padded label.
+        pad = max(30, min(self._longest_label(), width - 4 - self._widest_chips(tier, now)))
+        if not chips_first and 1 + pad + 3 + chips.cell_len <= width:
+            name = cell(name, max(pad, name.cell_len))
+        segments = [chips, name] if chips_first else [name, chips]
+        packed: list[Text] = []
+        footprint = 0
+        for segment, reserve in [
+            *((s, 0) for s in segments),
+            (times, reserves[0]),
+            (later, reserves[1]),
+        ]:
+            if not segment.plain:
+                continue
+            # Clock-driven text packs at its widest form so ticks never reflow lines.
+            size = max(segment.cell_len, reserve)
+            if not packed:
+                packed.append(Text("▌", style="bold").append_text(segment))
+                footprint = 1 + size
+            elif footprint + 3 + size <= width:
+                packed[-1].append("   ").append_text(segment)
+                footprint += 3 + size
+            else:
+                packed.append(Text("  ").append_text(segment))
+                footprint = 2 + size
+        result = Text(no_wrap=True, overflow="ellipsis")
+        for index, line in enumerate(packed):
+            result.append("\n" if index else "")
+            result.append_text(cell(line, width))
+        # Diagnostics and unknown-value notes wrap whole in every tier.
+        for line in lines:
+            result.append_text(self._wrapped(line.plain, width, "  ", str(line.style)))
+        if hoisted:
+            result.append_text(self._wrapped("ⓘ " + hoisted, width, "  ", "dim"))
+        return result
+
+    def _chips(self, account: Account, tier: str, now: datetime) -> Text:
+        chips = Text()
+        snapshot = self.snapshots.get(account.id)
+        if not account.enabled:
+            chips.append("⏸ 已禁用 / disabled — 不轮询（a 账号管理）", style="dim")
+            return chips
+        if snapshot is None:
+            chips.append("… 等待首次观察 / pending", style="dim italic")
+            return chips
+        code = str(snapshot.fetch_state)
+        icon, color = STATE_CHIPS.get(code, ("✖", "error"))
+        chips.append(
+            f"{icon} {STATE_LABELS[code]}" + (f" ({code})" if tier == "wide" else ""),
+            style=f"bold {self._color(color)}",
+        )
+        state = freshness(snapshot, now, account.poll_interval_seconds)
+        if state.last_known:
+            chips.append(" · ")
+            chips.append("LAST KNOWN 上次已知", style=f"bold {self._color('warning')}")
+        stale = (
+            sum(
+                freshness(snapshot, now, account.poll_interval_seconds, metric=metric).stale
+                for metric in snapshot.metrics
+            )
+            if snapshot.metrics
+            else int(state.stale)
+        )
+        chips.append(" · ")
+        if stale:
+            count = f" {stale}/{len(snapshot.metrics)}" if snapshot.metrics else ""
+            chips.append(f"STALE 过期{count}", style=f"bold {self._color('warning')}")
+        else:
+            chips.append("fresh 新鲜", style=self._color("success"))
+        return chips
+
+    def _widest_chips(self, tier: str, now: datetime) -> int:
+        return max(
+            (self._chips(account, tier, now).cell_len for account, _ in self._groups()),
+            default=0,
+        )
+
+    def _longest_label(self) -> int:
+        return max(
+            (
+                cell_len(sanitize_text(account.label, max_length=80))
+                for account, _ in self._groups()
+            ),
+            default=0,
+        )
+
+    def _metric_prompt(self, account: Account, metric_id: str) -> Text:
+        tier, width, _ = self._layout()
+        now = self.now()
+        snapshot = self.snapshots.get(account.id)
+        metric = self._metric(account, metric_id)
+        state = (
+            freshness(snapshot, now, account.poll_interval_seconds, metric=metric)
+            if snapshot is not None
+            else None
+        )
+        dim = bool(state and state.last_known)
+        nest, last = self._nesting(account).get(metric_id, ("", False))
+        prefix = "  " + (nest + " " if nest else "")
+        name = self._label(account, metric_id) + (" ⟲" if dim else "")
+        used_w, rest_w = 12, 11
+        values_w = 1 + used_w + 1 + rest_w + 1
+        # Labels shrink only when the row (minimal bar plus a short reset) cannot fit.
+        label_w = min(26, max(20, width - 1 - (6 + 1) - values_w - 10))
+        spare = width - label_w - 2 - values_w
+        # Spare width grows the bar while the absolute reset time still fits.
+        bar_w = (
+            24
+            if tier == "wide"
+            else 8
+            if tier == "narrow"
+            else max(6, min(24, max(spare - 22, min(8, spare - 10))))
+        )
+        span_w = bar_w + 1 + 1 + used_w + 1 + rest_w
+        extra: list[str] = []
+        reset = Text()
+        amount: Text | None = None
+        heads = [Text()]
+        cells: list[Text] = []
+        if not account.enabled or snapshot is None:
+            cells = [
+                Text(
+                    "— 已禁用 / disabled" if not account.enabled else "— 暂无数据 / no data",
+                    style="dim",
+                )
+            ]
+        elif (
+            metric is None
+            or metric.state != MetricState.READY
+            or (metric.quota is None and metric.balance is None and not metric.shared_pool_id)
+            or (
+                metric.quota is not None
+                and all(
+                    value is None
+                    for value in (
+                        metric.quota.used_percent,
+                        metric.quota.remaining_percent,
+                        metric.quota.used_count,
+                        metric.quota.limit_count,
+                        metric.quota.remaining_count,
+                    )
+                )
+            )
+        ):
+            kind = MetricState.UNKNOWN if metric is None else metric.state
+            if kind == MetricState.BLOCKED:
+                placeholder = Text("✖ 阻塞 / blocked", style=f"bold {self._color('secondary')}")
+            elif kind == MetricState.NOT_APPLICABLE:
+                placeholder = Text("不适用 / not applicable", style="dim italic")
+            else:
+                text = " 未知 / no data "
+                fill = max(2, (bar_w + 1 - cell_len(text)) // 2)
+                placeholder = Text("┄" * fill + text + "┄" * fill, style="dim")
+            if cell_len(placeholder.plain) <= bar_w + 1:
+                cells = [cell(placeholder, bar_w + 1), cell(Text("—", style="dim"), used_w)]
+            else:
+                cells = [cell(placeholder, bar_w + 1 + 1 + used_w, truncate=False)]
+            cells.append(cell(Text("—", style="dim"), rest_w))
+            reset = Text("—", style="dim")
+        elif metric.balance is not None:
+            amount = Text(
+                metric.balance.format(),
+                style=f"bold {self._color('accent')}"
+                if metric_id == "claude.platform.total_balance"
+                else "bold",
+            )
+            cells = [
+                cell(Text("余额", style="dim"), bar_w + 1),
+                cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
+            ]
+            reset = Text("无周期重置", style="dim")
+        elif metric.quota is None:
+            cells = [cell(Text("共享池消耗 · 非独立额度", style="dim"), span_w)]
+            reset = Text("同共享池 ↑", style="dim")
+        else:
+            quota = metric.quota
+            parts = [quota.used_count, quota.limit_count, quota.remaining_count]
+            parts = ["—" if value is None else str(value) for value in parts]
+            if quota.used_percent is not None or quota.remaining_percent is not None:
+                used = quota.used_percent
+                color = self._color(severity(used)) if used is not None else "default"
+                style = f"{'dim ' if dim else ''}bold {color}"
+                cells = [
+                    cell(bar(used, bar_w, style=color, dim=dim), bar_w + 1)
+                    if used is not None
+                    else cell(Text("—", style="dim"), bar_w + 1),
+                    cell(
+                        Text(f"已用 {'—' if used is None else str(used) + '%'}", style=style),
+                        used_w,
+                        truncate=False,
+                    ),
+                    cell(
+                        Text(
+                            f"剩余 {'—' if quota.remaining_percent is None else str(quota.remaining_percent) + '%'}",
+                            style=("dim bold" if dim else "bold"),
+                        ),
+                        rest_w,
+                        truncate=False,
+                    ),
+                ]
+                if used is not None and used > 100:
+                    heads = [
+                        Text(f"{overage(used)} · ", style=f"bold {self._color('error')}"),
+                        Text("超额 ", style=f"bold {self._color('error')}"),
+                    ]
+                    reset = heads[0][:-3]
+                if any(
+                    value is not None
+                    for value in (quota.used_count, quota.limit_count, quota.remaining_count)
+                ):
+                    extra.append(f"次数 已用 {parts[0]} / 上限 {parts[1]} / 剩余 {parts[2]}")
+            else:
+                cells = [
+                    cell(
+                        Text(f"{parts[0]} / {parts[1]} 次", style="bold"), bar_w + 1, truncate=False
+                    ),
+                    cell(Text(f"已用 {parts[0]}", style="bold"), used_w, truncate=False),
+                    cell(Text(f"剩余 {parts[2]}", style="bold"), rest_w, truncate=False),
+                ]
+        resets = [reset]
+        if (
+            metric is not None
+            and account.enabled
+            and snapshot is not None
+            and cells
+            and reset.plain != "—"
+            and metric.state == MetricState.READY
+        ):
+            if metric.reset_at is None and metric.quota is not None and metric.expires_at is None:
+                # A missing or invalid reset is unknown, never blank.
+                unknown = Text("重置 — 未知", style="dim")
+                resets = [head + unknown for head in heads] + [Text("重置 —", style="dim")]
+            elif metric.reset_at is not None and metric.quota is not None:
+                if state is not None and state.reset_passed:
+                    passed = ("⟳ 等待刷新 / awaiting refresh · STALE", "⟳ awaiting refresh · STALE")
+                    bodies = [Text(text, style=self._color("warning")) for text in passed]
+                else:
+                    style = "dim" if dim else ""
+                    full = Text(relative_reset(metric.reset_at, now), style=style)
+                    coarse = Text(relative_reset(metric.reset_at, now, coarse=True), style=style)
+                    bodies = [full, coarse]
+                    if metric.reset_at > now:
+                        absolute = " · " + short_local_time(metric.reset_at, now)
+                        bodies.insert(0, full + Text(absolute, style="dim"))
+                resets = [head + body for head in heads for body in bodies]
+            if metric.expires_at is not None:
+                expiry = f"到期 {short_local_time(metric.expires_at, now)}（非周期重置）"
+                resets = [Text(expiry, style=f"italic {self._color('secondary')}")]
+        detail = (
+            sanitize_text(metric.detail, max_length=1024)
+            if metric is not None and metric.detail and not self._hoisted(account)
+            else None
+        )
+        indent = "  " + ("│   " if nest and not last else "    ")
+        prompt = Text()
+        if tier == "narrow":
+            body = list(cells)
+            value = None
+            if amount is not None:
+                # The bare amount (not its wide padded cell) sits on the label line.
+                body.pop(1)
+                value = amount
+            elif len(body) > 1 and body[1].plain.startswith(("已用", "—")):
+                value = body.pop(1)
+            value_w = max(used_w, value.cell_len) if value is not None else 0
+            room = width - (value_w + 1) if value is not None else width
+            prompt.append_text(cell(prefix + middle(name, room - cell_len(prefix)), room))
+            if value is not None:
+                prompt.append(" ").append_text(
+                    cell(value, value_w, justify="right", truncate=False)
+                )
+            line = Text("  ")
+            line.append(("│ " if not last else "  ") if nest else "", style="dim")
+            for part in body:
+                line.append_text(part).append(" ")
+            prompt.append("\n").append_text(line)
+            self._append_reset(prompt, resets, width, indent)
+        else:
+            prompt.append_text(cell(prefix + middle(name, label_w - cell_len(prefix)), label_w))
+            prompt.append(" ")
+            for part in cells:
+                prompt.append_text(part).append(" ")
+            self._append_reset(prompt, resets, width, indent)
+        for line in extra:
+            prompt.append("\n" + indent, style="dim").append(line, style="dim")
+        if detail:
+            prompt.append_text(self._wrapped(detail, width, indent, "dim"))
+        return prompt
+
+    @staticmethod
+    def _append_reset(prompt: Text, resets: list[Text], width: int, indent: str) -> None:
+        """Prefer a variant that fits; otherwise continue whole on the next line."""
+        if not resets[0].plain:
+            return
+        line = prompt.plain.rsplit("\n", 1)[-1]
+        room = width - cell_len(line)
+        choice = next((text for text in resets if text.cell_len <= room), None)
+        if choice is not None:
+            prompt.append_text(choice)
+        else:
+            prompt.rstrip()
+            prompt.append("\n" + indent).append_text(resets[0])
+
+    def _hoisted(self, account: Account) -> bool:
+        snapshot = self.snapshots.get(account.id)
+        if snapshot is None or not snapshot.metrics:
+            return False
+        details = {metric.detail for metric in snapshot.metrics}
+        return len(details) == 1 and bool(details.pop())
+
+    def _nesting(self, account: Account) -> dict[str, tuple[str, bool]]:
+        pools: set[str] = set()
+        nested: list[str] = []
+        for row_account, metric_id in self.rows:
+            metric = self._metric(account, metric_id) if row_account == account else None
+            if metric is None or not metric.shared_pool_id:
+                continue
+            if metric.quota is not None:
+                pools.add(metric.shared_pool_id)
+            elif metric.shared_pool_id in pools:
+                nested.append(metric_id)
+        return {
+            metric_id: ("└" if index == len(nested) - 1 else "├", index == len(nested) - 1)
+            for index, metric_id in enumerate(nested)
+        }
 
     @on(Select.Changed, "#account-selector")
     def select_account(self, event: Select.Changed) -> None:
@@ -373,8 +1034,9 @@ class UsageApp(App[None]):
 
     @on(OptionList.OptionSelected, "#metrics")
     def show_details(self, event: OptionList.OptionSelected) -> None:
-        if event.option_index < len(self.rows):
-            account, metric_id = self.rows[event.option_index]
+        option_id = event.option.id or ""
+        if option_id.startswith("m") and int(option_id[1:]) < len(self.rows):
+            account, metric_id = self.rows[int(option_id[1:])]
             self.push_screen(
                 InformationScreen("用量详情 / Details", self.details(account, metric_id))
             )
