@@ -121,13 +121,76 @@ async def test_overage_unknown_and_product_prompts():
         unknown = prompt(app, row(app, "claude.subscription.five_hour", "auth required"))
         assert "未知 / no data" in unknown and "已用" not in unknown
         assert not any(glyph in unknown for glyph in BARS)
-        for metric_id in ("grok.product.build", "grok.product.chat"):
+        pool = prompt(app, row(app, "grok.subscription.shared_pool", "rate limited"))
+        assert "已用 45%" in pool and "剩余 55%" in pool
+        for metric_id, share in (("grok.product.build", "30"), ("grok.product.chat", "15")):
             product = prompt(app, row(app, metric_id, "rate limited"))
-            assert "非独立额度" in product and "同共享池" in product
-            assert "剩余" not in product.split("\n")[0]
-            assert not any(glyph in product for glyph in BARS)
+            # One line: bar plus used share; never a derived remaining or a lecture.
+            assert "\n" not in product.rstrip()
+            assert f"已用 {share}%" in product and any(glyph in product for glyph in BARS)
+            assert "剩余" not in product and "非独立额度" not in product
+            assert "同共享池" not in product and "Synthetic" not in product
         missing = prompt(app, row(app, "grok.product.build", "missing products"))
         assert "未知 / no data" in missing and "剩余" not in missing.split("\n")[0]
+        assert "never zero" in missing  # failure details remain visible
+        await pilot.press("q")
+
+
+@pytest.mark.parametrize("width", [120, 80, 60])
+async def test_grok_rows_match_quota_style_in_every_tier(width):
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=(width, 60)) as pilot:
+        await pilot.pause()
+        pool = prompt(app, row(app, "grok.subscription.shared_pool"))
+        assert pool.startswith("  Grok 共享池 ") and "已用 45%" in pool and "剩余 55%" in pool
+        assert "Synthetic" not in pool
+        expected = (
+            ("grok.product.build", "├ GrokBuild", "30"),
+            ("grok.product.chat", "└ GrokChat", "15"),
+        )
+        for metric_id, label, share in expected:
+            text = prompt(app, row(app, metric_id))
+            first = text.split("\n")[0]
+            # Narrow puts the value on the label line, like every other row.
+            assert label in first and f"已用 {share}%" in first
+            assert any(glyph in text for glyph in BARS)
+            assert "剩余" not in text and "后" not in text
+            assert "Synthetic" not in text and "共享池" not in text
+            assert len(text.rstrip().split("\n")) == (2 if width == 60 else 1)
+        await pilot.press("q")
+
+
+async def test_grok_demo_card_hoists_synthetic_notice_like_other_cards():
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=(120, 60)) as pilot:
+        await pilot.pause()
+        grok = row(app, "grok.subscription.shared_pool")[0]
+        claude = row(app, "claude.subscription.five_hour")[0]
+        notice = "ⓘ Fictional synthetic demonstration; not live account data."
+        assert notice in header(app, grok) and notice in header(app, claude)
+        await pilot.press("q")
+
+
+async def test_unlinked_product_share_keeps_pool_relationship_caveat():
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=(120, 60)) as pilot:
+        await pilot.pause()
+        build = row(app, "grok.product.build")
+        snapshot = app.snapshots[build[0].id]
+        caveat = "Pool relationship unknown; remaining/reset unavailable."
+        metrics = tuple(
+            replace(metric, shared_pool_id=None, detail=caveat)
+            if metric.id == "grok.product.build"
+            else metric
+            for metric in snapshot.metrics
+        )
+        app.publish_snapshot(replace(snapshot, metrics=metrics))
+        text = prompt(app, build)
+        assert "已用 30%" in text and "剩余" not in text
+        # Without proven pool linkage the share is not presented as a bare meter.
+        assert "Pool relationship unknown" in text
+        linked = prompt(app, row(app, "grok.product.chat"))
+        assert "已用 15%" in linked and "Fictional" not in linked
         await pilot.press("q")
 
 

@@ -28,9 +28,9 @@
     },
     "grok_subscription": {
       "metrics": [
-        {"id": "grok.subscription.shared_pool", "label": "Grok shared pool · SYNTHETIC", "used_percent": "45", "reset_offset": 86400, "shared_pool_id": "fictional-grok-pool", "detail": "Synthetic shared allowance; Build and Chat draw from this same pool."},
-        {"id": "grok.product.build", "label": "GrokBuild · SYNTHETIC", "shared_pool_id": "fictional-grok-pool", "detail": "Synthetic product consumption: 30% of shared pool; not an independent remaining allowance. See shared pool for remaining and reset."},
-        {"id": "grok.product.chat", "label": "GrokChat · SYNTHETIC", "shared_pool_id": "fictional-grok-pool", "detail": "Synthetic product consumption: 15% of shared pool; not an independent remaining allowance. See shared pool for remaining and reset."}
+        {"id": "grok.subscription.shared_pool", "label": "Grok shared pool · SYNTHETIC", "used_percent": "45", "reset_offset": 86400, "shared_pool_id": "fictional-grok-pool"},
+        {"id": "grok.product.build", "label": "GrokBuild · SYNTHETIC", "share_percent": "30", "shared_pool_id": "fictional-grok-pool"},
+        {"id": "grok.product.chat", "label": "GrokChat · SYNTHETIC", "share_percent": "15", "shared_pool_id": "fictional-grok-pool"}
       ]
     }
   },

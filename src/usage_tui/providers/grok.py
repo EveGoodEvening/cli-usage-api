@@ -195,8 +195,9 @@ class GrokProvider:
                     sanitize_text(name, max_length=120) or metric_id,
                     MetricState.READY if used is not None else MetricState.UNKNOWN,
                     _SOURCE,
-                    # QuotaValue derives 100-used: product consumption must stay
-                    # detail-only rather than falsely exposing independent remaining.
+                    # QuotaValue derives 100-used: product consumption is a share,
+                    # never a quota exposing an independent remaining allowance.
+                    share_percent=used,
                     shared_pool_id=self.metric_ids[0] if linked else None,
                     reset_at=reset if linked else None,
                     detail=product_detail,

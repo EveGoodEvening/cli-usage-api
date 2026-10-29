@@ -283,3 +283,10 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   these UI preferences without constructing live dependencies. Verify selection
   through the actual command palette and a fresh process; an in-memory theme value
   alone does not establish restart persistence.
+- A Grok product's consumption is a structured `Metric.share_percent` (bounded via
+  `percent()`, exclusive with quota/balance), rendered as bar + `已用` only: never a
+  derived remaining or reset. Numeric Grok dashboard rows carry no per-row
+  explanation; the user knows it is a shared pool. Keep details in Enter details
+  and on unknown rows. Nest products under a pool named by metric id or pool id.
+  Exception: an unlinked share (no `shared_pool_id`) keeps its pool-unknown caveat.
+  Demo Grok rows use the uniform synthetic detail so it hoists like other cards.

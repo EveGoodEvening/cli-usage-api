@@ -477,6 +477,21 @@ def test_grant_units_and_metric_value_types_are_checked():
         replace(snapshot(), organization_id="../other")
 
 
+def test_product_share_is_exact_bounded_and_never_a_quota():
+    product = Metric(
+        MetricId.GROK_BUILD, "GrokBuild", MetricState.READY, SOURCE, share_percent="150.25"
+    )
+    assert product.share_percent == Decimal("150.25") and product.quota is None
+    assert Metric(MetricId.GROK_CHAT, "c", MetricState.READY, SOURCE).share_percent is None
+    for bad in (-1, "nan", "1e1001", "1." + "1" * 1024, 1.5, True):
+        with pytest.raises(DomainError):
+            replace(product, share_percent=bad)
+    with pytest.raises(DomainError):
+        replace(product, quota=QuotaValue(used_percent=10))
+    with pytest.raises(DomainError):
+        replace(product, balance=Money(1, "USD", 2))
+
+
 def test_display_text_is_sanitized_and_bounded():
     raw = "\x1b[31m[bold]hello[/bold]\n\x00\x1b]8;;https://invalid\x07world"
     assert sanitize_text(raw) == "boldhello/boldworld"

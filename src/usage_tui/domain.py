@@ -455,6 +455,9 @@ class Metric:
     expires_at: datetime | None = None
     shared_pool_id: str | None = None
     detail: str | None = None
+    # A product's reported consumption share of a pool; never an allowance and
+    # never a source for a derived remaining percentage.
+    share_percent: Decimal | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.id)
@@ -468,6 +471,10 @@ class Metric:
             _fail()
         if self.balance is not None and self.quota is not None:
             _fail()
+        if self.share_percent is not None:
+            if self.quota is not None or self.balance is not None:
+                _fail()
+            object.__setattr__(self, "share_percent", percent(self.share_percent))
         object.__setattr__(self, "reset_at", _optional_time(self.reset_at))
         object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
         if self.shared_pool_id is not None:

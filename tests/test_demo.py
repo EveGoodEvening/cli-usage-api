@@ -152,11 +152,20 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
             assert row.source.kind == SourceKind.OFFLINE_DEMO
             assert row.detail == "Fictional synthetic demonstration; not live account data."
         pool = rows[MetricId.GROK_SHARED_POOL]
+        assert rows[MetricId.GROK_BUILD].share_percent == Decimal(30)
+        assert rows[MetricId.GROK_CHAT].share_percent == Decimal(15)
+        assert pool.share_percent is None
+        for metric_id in (MetricId.GROK_SHARED_POOL, MetricId.GROK_BUILD, MetricId.GROK_CHAT):
+            # Uniform synthetic provenance, hoisted to the header like other cards.
+            assert rows[metric_id].detail == (
+                "Fictional synthetic demonstration; not live account data."
+            )
         for product in (MetricId.GROK_BUILD, MetricId.GROK_CHAT):
             assert rows[product].quota is None
             assert rows[product].reset_at is None
             assert rows[product].shared_pool_id == pool.shared_pool_id
-            assert "not an independent remaining allowance" in rows[product].detail
+            # A share is never a quota, so no independent remaining is derivable.
+            assert rows[product].share_percent is not None
     finally:
         await source.stop()
 

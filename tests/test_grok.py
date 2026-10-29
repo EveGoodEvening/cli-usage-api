@@ -94,6 +94,8 @@ async def test_fixture_exact_single_read(payload):
     assert "Synthetic plan" in pool.detail
     assert all(row.reset_at == RESET for row in snapshot.metrics)
     assert "32.5%" in build.detail and "10%" in chat.detail
+    assert build.share_percent == Decimal("32.5") and chat.share_percent == Decimal(10)
+    assert pool.share_percent is None
     for row in (build, chat):
         assert row.shared_pool_id == pool.id
         assert "剩余/重置：共享池" in row.detail
@@ -256,6 +258,9 @@ async def test_informational_products_need_not_reconcile_with_total(payload, sha
     assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
     assert all(row.state == MetricState.READY for row in snapshot.metrics)
     assert f"{Decimal(share)}%" in snapshot.metrics[1].detail
+    # Raw wire numbers stay exact Decimals in the structured share.
+    assert type(snapshot.metrics[1].share_percent) is Decimal
+    assert str(snapshot.metrics[1].share_percent) == str(Decimal(share))
     assert snapshot.metrics[1].quota is None
     assert snapshot.metrics[1].shared_pool_id == snapshot.metrics[0].id
 
@@ -272,6 +277,7 @@ async def test_raw_numeric_product_percent_bounds_preserve_aggregate(payload, sh
     assert snapshot.fetch_state == FetchState.PARTIAL
     assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
     assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics[1:])
+    assert all(row.share_percent is None for row in snapshot.metrics[1:])
 
 
 async def test_unknown_products_retained_sanitized_and_informational(payload):

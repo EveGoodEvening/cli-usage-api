@@ -345,6 +345,42 @@ async def test_errors_preserve_last_good_but_partial_disappearance_does_not():
     await scheduler.stop()
 
 
+def shared_observation(item, now, *, optional=True, state=FetchState.OK):
+    snapshot = observation(item, now, optional=False, state=state)
+    if not optional:
+        return snapshot
+    share = Metric(
+        "test.optional",
+        "Product share",
+        MetricState.READY,
+        SourceRef(SourceKind.OFFLINE_DEMO, "scheduler.test"),
+        share_percent=Decimal(30),
+        shared_pool_id="test.usage",
+    )
+    return replace(snapshot, metrics=(*snapshot.metrics, share))
+
+
+async def test_unknown_rows_clear_prior_product_share():
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [
+        shared_observation,
+        lambda item, now: shared_observation(item, now, optional=False, state=FetchState.PARTIAL),
+        shared_observation,
+    ]
+    await scheduler.start()
+    await settle()
+    assert published[-1].metrics[-1].share_percent == Decimal(30)
+    await scheduler.refresh()
+    await clock.advance(5)
+    missing = published[-1].metrics[-1]
+    assert missing.state == MetricState.UNKNOWN
+    assert missing.share_percent is None
+    assert missing.shared_pool_id is None
+    await clock.advance(300)
+    assert published[-1].metrics[-1].share_percent == Decimal(30)
+    await scheduler.stop()
+
+
 async def test_replacement_cancels_old_generation_and_removal_stops_publication():
     scheduler, clock, provider, _, published = setup()
     provider.gate = asyncio.Event()

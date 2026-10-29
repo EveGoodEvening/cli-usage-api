@@ -266,16 +266,19 @@ async def test_real_grok_extra_product_mount_details_filter_and_refresh():
         assert app.rows[3] == (grok, extra.id)
         assert app.metric_option_count() == 5
         prompt = str(app.listing.get_option_at_index(app.option_index(app.rows[3])).prompt)
-        assert "Other" in prompt and "consumption share: 10%" in prompt
-        assert "非独立额度" in prompt and "剩余 90%" not in prompt
-        assert extra.quota is None
+        # Extra products render like known products: tree, bar and used share only.
+        assert "└ Other" in prompt and "已用 10%" in prompt and "█" in prompt
+        assert "剩余" not in prompt and "consumption share" not in prompt
+        assert extra.quota is None and extra.share_percent == 10
         app.listing.highlighted = app.option_index(app.rows[3])
         await pilot.press("enter")
         assert isinstance(app.screen, InformationScreen)
         assert "Other" in app.screen.content and "10%" in app.screen.content
         assert "private_http" in app.screen.content
         assert "grok.cli.billing.credits" in app.screen.content
-        assert "不推算产品剩余" in app.screen.content
+        assert "consumption share: 10%" in app.screen.content
+        assert "剩余 90%" not in app.screen.content
+        assert f"属于共享池 {app.snapshots[grok.id].metrics[0].id}" in app.screen.content
         await pilot.press("escape")
         selector = app.query_one("#account-selector", Select)
         selector.value = other_account.id

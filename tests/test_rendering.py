@@ -56,7 +56,11 @@ async def test_all_required_provider_rows_values_and_details():
         details = "\n".join(app.details(*row) for row in app.rows)
         assert "offline_demo" in details and "synthetic-demo-v1" in details
         assert "grant" in details and "UTC" in details
-        assert "不是可相加的独立额度" in details
+        assert "属于共享池 fictional-grok-pool" in details
+        products = [r for r in app.rows if r[1].startswith("grok.product.")]
+        for product in products:
+            # The structured share reads as used only: no derived remaining.
+            assert "已用" in app._row_text(*product) and "剩余" not in app._row_text(*product)
         assert "不代表真实账号" in str(app.banner.content)
         await pilot.press("q")
 
@@ -280,6 +284,7 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
             label="First other product",
             detail="Reported consumption share: 10%. Not an independent quota.",
             quota=None,
+            share_percent=Decimal(10),
         )
         unknown = replace(
             first,
@@ -289,6 +294,7 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
             detail="Usage is unavailable; missing does not mean zero.",
             shared_pool_id=None,
             reset_at=None,
+            share_percent=None,
         )
         app.publish_snapshot(replace(snapshot, metrics=(first, *snapshot.metrics, unknown)))
         required = [metric.id for metric in snapshot.metrics]
@@ -297,9 +303,10 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
         assert len(ids) == len(set(ids))
         index = app.option_index((account, first.id))
         app.listing.highlighted = index
-        assert "10%" in str(app.listing.get_option_at_index(index).prompt)
+        shown_first = str(app.listing.get_option_at_index(index).prompt)
+        assert "已用 10%" in shown_first and "剩余" not in shown_first
         details = app.details(account, first.id)
-        assert "provenance" in details and "不推算产品剩余" in details
+        assert "provenance" in details and "consumption share: 10%" in details
         assert "剩余 90%" not in details
         unknown_text = app._row_text(account, unknown.id)
         assert "未知 / no data" in unknown_text and "missing does not mean zero" in unknown_text

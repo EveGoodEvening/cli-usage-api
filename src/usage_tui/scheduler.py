@@ -290,6 +290,7 @@ class Scheduler:
                 expires_at=None,
                 shared_pool_id=None,
                 detail=None,
+                share_percent=None,
             )
             if key in previous
             else Metric(key, key, MetricState.UNKNOWN, source)

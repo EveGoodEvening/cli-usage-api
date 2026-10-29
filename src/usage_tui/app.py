@@ -27,6 +27,7 @@ from usage_tui.domain import (
     Account,
     Metric,
     MetricState,
+    ProviderId,
     Snapshot,
     sanitize_text,
 )
@@ -42,9 +43,9 @@ METRIC_LABELS = {
     "claude.platform.total_balance": "Claude Platform 总余额",
     "codex.subscription.weekly": "Codex weekly (7d)",
     "codex.subscription.five_hour": "Codex 5h",
-    "grok.subscription.shared_pool": "Grok 共享池用量",
-    "grok.product.build": "GrokBuild 共享池消耗",
-    "grok.product.chat": "GrokChat 共享池消耗",
+    "grok.subscription.shared_pool": "Grok 共享池",
+    "grok.product.build": "GrokBuild",
+    "grok.product.chat": "GrokChat",
 }
 STATE_LABELS = {
     "ok": "正常",
@@ -93,6 +94,10 @@ def metric_value(metric: Metric) -> str:
         }[metric.state]
     if metric.balance is not None:
         return metric.balance.format()
+    if metric.share_percent is not None:
+        # A pool share has no remaining of its own.
+        filled = int(min(Decimal(100), metric.share_percent) / 10)
+        return f"已用 {metric.share_percent}% [" + "#" * filled + "-" * (10 - filled) + "]"
     if metric.quota is not None:
         quota = metric.quota
         parts = []
@@ -111,8 +116,7 @@ def metric_value(metric: Metric) -> str:
                 f"已用 {quota.used_count if quota.used_count is not None else '—'} / 上限 {quota.limit_count if quota.limit_count is not None else '—'} / 剩余 {quota.remaining_count if quota.remaining_count is not None else '—'}"
             )
         return " ".join(parts) or "— 未知 / no data"
-    # Product percentages are detail-only: they are not independent allowances.
-    return "共享池消耗明细（非独立额度）" if metric.shared_pool_id else "— 未知 / no data"
+    return "— 未知 / no data"
 
 
 WEEKDAYS = "一二三四五六日"
@@ -852,7 +856,6 @@ class UsageApp(App[None]):
             if tier == "narrow"
             else max(6, min(24, max(spare - 22, min(8, spare - 10))))
         )
-        span_w = bar_w + 1 + 1 + used_w + 1 + rest_w
         extra: list[str] = []
         reset = Text()
         amount: Text | None = None
@@ -868,7 +871,7 @@ class UsageApp(App[None]):
         elif (
             metric is None
             or metric.state != MetricState.READY
-            or (metric.quota is None and metric.balance is None and not metric.shared_pool_id)
+            or (metric.quota is None and metric.balance is None and metric.share_percent is None)
             or (
                 metric.quota is not None
                 and all(
@@ -910,9 +913,19 @@ class UsageApp(App[None]):
                 cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
             ]
             reset = Text("无周期重置", style="dim")
-        elif metric.quota is None:
-            cells = [cell(Text("共享池消耗 · 非独立额度", style="dim"), span_w)]
-            reset = Text("同共享池 ↑", style="dim")
+        elif metric.share_percent is not None:
+            # A pool share draws bar + used only: no derived remaining, no reset.
+            share = metric.share_percent
+            color = self._color(severity(share))
+            cells = [
+                cell(bar(share, bar_w, style=color, dim=dim), bar_w + 1),
+                cell(
+                    Text(f"已用 {share}%", style=f"{'dim ' if dim else ''}bold {color}"),
+                    used_w,
+                    truncate=False,
+                ),
+                cell("", rest_w),
+            ]
         else:
             quota = metric.quota
             parts = [quota.used_count, quota.limit_count, quota.remaining_count]
@@ -987,9 +1000,25 @@ class UsageApp(App[None]):
             if metric.expires_at is not None:
                 expiry = f"到期 {short_local_time(metric.expires_at, now)}（非周期重置）"
                 resets = [Text(expiry, style=f"italic {self._color('secondary')}")]
+        # Numeric Grok rows speak for themselves; failure details stay visible.
+        numeric = (
+            account.enabled
+            and snapshot is not None
+            and metric is not None
+            and metric.state == MetricState.READY
+            and reset.plain != "—"
+        )
         detail = (
             sanitize_text(metric.detail, max_length=1024)
-            if metric is not None and metric.detail and not self._hoisted(account)
+            if metric is not None
+            and metric.detail
+            and not self._hoisted(account)
+            and not (
+                numeric
+                and account.provider == ProviderId.GROK_SUBSCRIPTION
+                # An unlinked product share keeps its pool-relationship caveat.
+                and (metric.share_percent is None or metric.shared_pool_id is not None)
+            )
             else None
         )
         indent = "  " + ("│   " if nest and not last else "    ")
@@ -1054,11 +1083,12 @@ class UsageApp(App[None]):
         nested: list[str] = []
         for row_account, metric_id in self.rows:
             metric = self._metric(account, metric_id) if row_account == account else None
-            if metric is None or not metric.shared_pool_id:
+            if metric is None:
                 continue
             if metric.quota is not None:
-                pools.add(metric.shared_pool_id)
-            elif metric.shared_pool_id in pools:
+                # A product may name its pool by metric id or by a shared pool id.
+                pools.update(filter(None, (metric.id, metric.shared_pool_id)))
+            elif metric.shared_pool_id and metric.shared_pool_id in pools:
                 nested.append(metric_id)
         return {
             metric_id: ("└" if index == len(nested) - 1 else "├", index == len(nested) - 1)
@@ -1094,9 +1124,7 @@ class UsageApp(App[None]):
                 ]
             )
             if metric.shared_pool_id:
-                lines.append(
-                    f"共享池 {metric.shared_pool_id}：产品消耗占同一个池，不是可相加的独立额度；不推算产品剩余。"
-                )
+                lines.append(f"属于共享池 {metric.shared_pool_id}")
         if snapshot:
             lines.extend(
                 [

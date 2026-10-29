@@ -209,6 +209,9 @@ class DemoSource:
                         else None
                     ),
                     shared_pool_id=item.get("shared_pool_id"),
+                    share_percent=(
+                        item["share_percent"] if not unknown and "share_percent" in item else None
+                    ),
                     detail=detail,
                 )
             )
