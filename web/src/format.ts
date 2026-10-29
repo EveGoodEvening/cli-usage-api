@@ -208,3 +208,41 @@ export function fullLocal(ms: number | null): string {
 export function utcText(value: string | null | undefined): string {
   return typeof value === "string" && value ? value : UNKNOWN;
 }
+
+// ---------------------------------------------------------------------------
+// Time zone presentation. Values stay UTC on the wire; only display is local.
+
+/** The browser's IANA zone name, e.g. "Asia/Shanghai"; null when unavailable. */
+export function browserZone(): string | null {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zone === "string" && zone ? zone : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Local UTC offset at that instant (DST-correct), e.g. "UTC+08:00", "UTC-04:00". */
+export function utcOffset(ms: number): string {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "UTC";
+  const minutes = -d.getTimezoneOffset();
+  const sign = minutes < 0 ? "-" : "+";
+  const abs = Math.abs(minutes);
+  return `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
+/** Full local timestamp with its offset, e.g. "2026-10-28 22:00:00 UTC+08:00". */
+export function fullLocalZoned(ms: number | null): string {
+  const text = fullLocal(ms);
+  return text === UNKNOWN || ms === null ? UNKNOWN : `${text} ${utcOffset(ms)}`;
+}
+
+/** Hover text for a time: local time with zone and offset, then the raw UTC value. */
+export function timeTitle(raw: string | null | undefined, ms: number | null, prefix = ""): string {
+  if (ms === null || Number.isNaN(new Date(ms).getTime())) return `${prefix}${UNKNOWN}`;
+  const zone = browserZone();
+  const offset = utcOffset(ms);
+  const utc = typeof raw === "string" && raw ? raw : new Date(ms).toISOString();
+  return `${prefix}本地 ${fullLocal(ms)}（${zone ? `${zone}，${offset}` : offset}）\nUTC ${utc}`;
+}

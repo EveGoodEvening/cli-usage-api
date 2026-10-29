@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   UNKNOWN,
   barFill,
+  browserZone,
+  fullLocalZoned,
+  timeTitle,
+  utcOffset,
   formatMoney,
   formatMoneyAmount,
   overagePercent,
@@ -116,5 +120,67 @@ describe("relative time", () => {
     expect(shortLocal(local + 5 * 3600_000, local)).toBe("今天 14:00");
     expect(shortLocal(local + 24 * 3600_000, local)).toBe("明天 09:00");
     expect(shortLocal(new Date(2027, 0, 2, 8, 5).getTime(), local)).toBe("2027-01-02 08:05");
+  });
+});
+
+describe("time zone presentation", () => {
+  const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+
+  function withTZ<T>(zone: string, run: () => T): T {
+    const previous = env.TZ;
+    env.TZ = zone;
+    try {
+      return run();
+    } finally {
+      if (previous === undefined) delete env.TZ;
+      else env.TZ = previous;
+    }
+  }
+
+  const instant = Date.parse("2026-10-28T14:00:00Z");
+
+  it("shows the local offset at that instant", () => {
+    withTZ("Asia/Shanghai", () => {
+      expect(utcOffset(instant)).toBe("UTC+08:00");
+      expect(fullLocalZoned(instant)).toBe("2026-10-28 22:00:00 UTC+08:00");
+    });
+    withTZ("UTC", () => {
+      expect(utcOffset(instant)).toBe("UTC+00:00");
+      expect(fullLocalZoned(instant)).toBe("2026-10-28 14:00:00 UTC+00:00");
+    });
+  });
+
+  it("is DST-correct across a switch", () => {
+    withTZ("America/New_York", () => {
+      // US daylight time ends 2026-11-01 06:00 UTC.
+      expect(utcOffset(Date.parse("2026-10-31T12:00:00Z"))).toBe("UTC-04:00");
+      expect(utcOffset(Date.parse("2026-11-02T12:00:00Z"))).toBe("UTC-05:00");
+    });
+  });
+
+  it("keeps unknown as a dash", () => {
+    expect(fullLocalZoned(null)).toBe(UNKNOWN);
+    expect(timeTitle(null, null, "重置 ")).toBe("重置 —");
+  });
+
+  it("titles a time with local time, zone and the raw UTC", () => {
+    withTZ("Asia/Shanghai", () => {
+      const title = timeTitle("2026-10-28T14:00:00Z", instant, "重置 ");
+      expect(title).toContain("重置 本地 2026-10-28 22:00:00");
+      expect(title).toContain("UTC+08:00");
+      expect(title).toContain("Asia/Shanghai");
+      expect(title).toContain("UTC 2026-10-28T14:00:00Z");
+    });
+  });
+
+  it("reports no zone when Intl is unavailable", () => {
+    const spy = vi.spyOn(Intl, "DateTimeFormat").mockImplementation(() => {
+      throw new Error("unavailable");
+    });
+    try {
+      expect(browserZone()).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

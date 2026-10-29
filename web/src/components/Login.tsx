@@ -3,7 +3,7 @@ import { ApiError, MOCK_ENABLED, createClient, type UsageClient } from "../api";
 import { isPlausibleToken, normalizeBaseUrl, type Credentials } from "../auth";
 import type { SessionInfo } from "../types";
 import { DEFAULT_RETRY_AFTER, useTick, type SignOutNotice } from "../hooks";
-import { GaugeIcon } from "./icons";
+import { DemoBadge } from "./Header";
 
 const MOCK_BASE = "http://mock.invalid";
 
@@ -67,37 +67,52 @@ export function Login({
 
   return (
     <div className="login">
-      <form className="login__card" onSubmit={submit} noValidate>
-        <div className="login__brand">
-          <span className="login__logo" aria-hidden="true">
-            <GaugeIcon />
-          </span>
-          <div>
-            <h1>用量面板</h1>
-            <p>连接到 usage api serve，只读查看各账号的额度与余额。</p>
-          </div>
-        </div>
+      <form className="login__col" onSubmit={submit} noValidate>
+        <header className="login__head">
+          <h1 className="login__mark">
+            CLIUsageAPI
+            {MOCK_ENABLED ? <DemoBadge /> : null}
+          </h1>
+          <p>只读查看各账号的额度与余额。</p>
+        </header>
 
-        {MOCK_ENABLED ? (
-          <p className="banner banner--warn">开发模式：使用内置 DEMO 合成数据，不连接任何服务器。令牌填任意值即可，填 invalid 可测试失效。</p>
-        ) : null}
+        {MOCK_ENABLED ? <p className="rule-note">开发模式：内置合成数据，不连服务器。令牌任填；填 invalid 测试失效。</p> : null}
         {notice ? (
-          <p className="banner banner--error" role="alert">
-            {notice.message}
-          </p>
+          <div className="rule-note rule-note--error">
+            {/* Only the static message is live; the per-second countdown sits outside the alert. */}
+            <p role="alert">{notice.message}</p>
+            {waitSeconds > 0 ? <p>{waitSeconds} 秒后才能重新连接。</p> : null}
+          </div>
         ) : null}
 
         {MOCK_ENABLED ? (
-          <label className="field">
-            <span>演示场景</span>
-            <select value={scenario} onChange={(e) => setScenario(e.target.value as "healthy" | "errors")}>
-              <option value="healthy">正常</option>
-              <option value="errors">各种错误</option>
-            </select>
-          </label>
+          <div className="field">
+            <span className="field__label" id="scenario-label">
+              演示场景
+            </span>
+            <div className="segmented segmented--wide" role="radiogroup" aria-labelledby="scenario-label">
+              {(
+                [
+                  ["healthy", "正常"],
+                  ["errors", "各种错误"],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value} className={scenario === value ? "is-on" : undefined}>
+                  <input
+                    type="radio"
+                    name="scenario"
+                    value={value}
+                    checked={scenario === value}
+                    onChange={() => setScenario(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
         ) : (
           <label className="field">
-            <span>API 地址</span>
+            <span className="field__label">API 地址</span>
             <input
               type="url"
               inputMode="url"
@@ -112,7 +127,7 @@ export function Login({
         )}
 
         <label className="field">
-          <span>API 令牌</span>
+          <span className="field__label">API 令牌</span>
           <input
             type="password"
             autoComplete="current-password"
@@ -122,15 +137,15 @@ export function Login({
             onChange={(e) => setToken(e.target.value)}
             required
           />
-          <small>在服务器上运行 usage api token create 获取。令牌只发送到上面的 API 地址。</small>
+          <small className="field__help">
+            在服务器运行 <code>usage api token create</code> 获取 · 只发送到此地址
+          </small>
         </label>
 
         <label className="check">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          <span>
-            在这台设备上记住
-            <small>{remember ? "保存在浏览器本地，直到你退出。" : "只保存在当前标签页，关闭后需要重新输入。"}</small>
-          </span>
+          <span>在这台设备上记住</span>
+          <small>{remember ? "保存在本机，直到退出" : "关闭标签页即清除"}</small>
         </label>
 
         {error ? (
@@ -139,14 +154,8 @@ export function Login({
           </p>
         ) : null}
 
-        {waitSeconds > 0 ? (
-          <p className="banner banner--warn" role="status">
-            {waitSeconds} 秒后才能重新连接。
-          </p>
-        ) : null}
-
-        <button type="submit" className="button button--primary" disabled={busy || waitSeconds > 0}>
-          {busy ? "正在验证" : waitSeconds > 0 ? `请等待 ${waitSeconds} 秒` : "连接"}
+        <button type="submit" className="button" disabled={busy || waitSeconds > 0}>
+          {busy ? "正在验证…" : waitSeconds > 0 ? `请等待 ${waitSeconds} 秒` : "连接"}
         </button>
       </form>
     </div>
