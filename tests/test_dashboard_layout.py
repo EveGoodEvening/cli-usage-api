@@ -88,6 +88,56 @@ async def test_headers_are_never_highlighted_and_enter_opens_metric():
         await pilot.press("escape", "q")
 
 
+async def test_escape_clears_selection_through_refresh_and_filter_rebuilds():
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("end")
+        await pilot.pause()
+        assert app.highlighted_row() == app.rows[-1]
+        scroll = app.listing.scroll_offset
+        await pilot.press("escape")
+        assert app.listing.highlighted is None
+        assert app.focused is app.listing
+        assert app.listing.scroll_offset == scroll
+
+        await pilot.press("escape", "enter", "r")
+        assert len(app.screen_stack) == 1
+        app._tick()
+        assert app.highlighted_row() is None
+        snapshot = app.snapshots[app.accounts[0].id]
+        extra = replace(snapshot.metrics[0], id="claude.subscription.extra", label="Extra")
+        app.publish_snapshot(replace(snapshot, metrics=(*snapshot.metrics, extra)))
+        assert app.highlighted_row() is None
+        app.selector.value = app.accounts[0].id
+        await pilot.pause()
+        assert app.highlighted_row() is None
+
+        await pilot.press("down")
+        assert app.highlighted_row() == app.rows[0]
+        await pilot.press("enter")
+        assert isinstance(app.screen, InformationScreen)
+        await pilot.press("escape", "q")
+
+
+async def test_escape_closes_account_dropdown_before_clearing_metric_selection():
+    app = UsageApp(mode="demo")
+    async with app.run_test() as pilot:
+        await pilot.press("down")
+        selected = app.highlighted_row()
+        assert selected == app.rows[0]
+        account_filter = app.selector.value
+        await pilot.press("shift+tab", "enter")
+        assert app.selector.expanded
+        await pilot.press("escape")
+        assert not app.selector.expanded
+        assert app.highlighted_row() == selected
+        await pilot.press("escape")
+        assert app.highlighted_row() is None
+        assert app.selector.value == account_filter
+        assert app.focused is app.selector
+        await pilot.press("q")
+
+
 async def test_selection_survives_tick_and_earlier_extra_insertion():
     app = UsageApp(mode="demo")
     async with app.run_test(size=(110, 40)) as pilot:

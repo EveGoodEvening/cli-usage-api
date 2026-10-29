@@ -333,6 +333,7 @@ class UsageApp(App[None]):
         Binding("ctrl+c", "quit", "退出", priority=True),
         Binding("r", "refresh", "刷新"),
         Binding("a", "accounts", "账号"),
+        Binding("escape", "clear_selection", "取消选择"),
         Binding("?", "help", "帮助"),
     )
 
@@ -1128,6 +1129,10 @@ class UsageApp(App[None]):
                 )
         return "\n".join(lines)
 
+    def action_clear_selection(self) -> None:
+        if self.screen is self.listing.screen:
+            self.listing.highlighted = None
+
     async def action_refresh(self) -> None:
         if self.scheduler is None or self._refreshing:
             return
@@ -1187,7 +1192,7 @@ class UsageApp(App[None]):
         self.push_screen(
             InformationScreen(
                 "帮助 / Help",
-                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
+                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 主界面取消选择；弹窗返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
             )
         )
 

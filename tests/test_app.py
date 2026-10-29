@@ -40,21 +40,28 @@ async def test_actual_demo_surface_and_keyboard(size, scenario, monkeypatch):
         assert app.listing.virtual_size.height > app.listing.size.height
         if size == (40, 12):
             assert "窗口较小" in str(app.hint.content)
-        await pilot.press("down", "enter")
+        await pilot.press("down")
+        selected = app.highlighted_row()
+        await pilot.press("enter")
         assert isinstance(app.screen, InformationScreen)
         assert "provenance" in app.screen.content
         await pilot.press("escape", "?")
         assert isinstance(app.screen, InformationScreen)
+        assert app.highlighted_row() == selected
         assert "Ctrl-C" in app.screen.content
         assert "Codex weekly (7d)" in app.screen.content
         assert "Codex 5h" in app.screen.content
         assert "契约仍阻塞" not in app.screen.content
         await pilot.press("escape", "a")
         assert isinstance(app.screen, AccountManagerScreen)
+        assert app.highlighted_row() == selected
         assert app.screen.readonly
         await pilot.press("escape", "r")
         assert len(app.screen_stack) == 1
         assert "refresh pending" in str(app.status_line.content)
+        assert app.highlighted_row() == selected
+        await pilot.press("escape")
+        assert app.highlighted_row() is None
         await pilot.press("tab", "shift+tab")
         await pilot.press("q")
     stop.assert_awaited_once_with()
