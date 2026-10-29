@@ -81,6 +81,7 @@ class FakeScheduler:
     def __init__(self, events, publish):
         self.events = events
         self.publish = publish
+        self.updates = []
 
     async def start(self):
         self.events.append("scheduler.start")
@@ -88,8 +89,9 @@ class FakeScheduler:
     async def refresh(self, account_id=None):
         self.events.append("scheduler.refresh")
 
-    async def update_accounts(self, accounts):
+    async def update_accounts(self, accounts, **kwargs):
         self.events.append("scheduler.update")
+        self.updates.append((tuple(account.id for account in accounts), kwargs.get("invalidate")))
 
     async def stop(self):
         self.events.append("scheduler.stop")
@@ -108,13 +110,14 @@ class FakeFactory:
         self.events.append("factory.close")
 
 
-def embed(app, token_store=None, *, allow_unauthenticated=False):
+def embed(app, token_store=None, *, allow_unauthenticated=False, operations=None):
     sock = api.bind_socket("127.0.0.1", 0)
     port = sock.getsockname()[1]
     usage_api = api.create_app(
         api.AppHub.attach(app),
         token_store,
         allow_unauthenticated=allow_unauthenticated,
+        operations=operations,
     )
     server = api.EmbeddedServer(usage_api, sock, address=f"127.0.0.1:{port}")
     app.add_service(server)
@@ -630,6 +633,171 @@ def test_live_dashboard_api_with_token(monkeypatch):
     monkeypatch.setattr(cli.UsageApp, "run", run)
     assert cli.main(["--api", "--api-port", str(_free_port())]) == 0
     assert seen == {"mode": "live", "auth": "token", "hub_mode": "live"}
+
+
+def test_live_dashboard_api_composes_operations_on_the_app(monkeypatch):
+    ApiTokenStore().create("live")
+    seen = {}
+
+    def run(app):
+        server = next(item for item in app.services if isinstance(item, api.EmbeddedServer))
+        seen["operations"] = server.api.operations
+
+        operations = server.api.operations
+        if operations is not None:
+            seen["host"] = operations.host is app
+            seen["shared"] = operations.credentials is operations.resolver._store
+
+    monkeypatch.setattr(cli.UsageApp, "run", run)
+    assert cli.main(["--api", "--api-port", str(_free_port())]) == 0
+    assert seen["host"] and seen["shared"]
+    seen.clear()
+    assert cli.main(["--api", "--read-only", "--api-port", str(_free_port())]) == 0
+    assert seen == {"operations": None}
+
+
+@pytest.fixture
+def no_keyring(monkeypatch):
+    from cli_usage_api import storage
+
+    def unavailable():
+        raise RuntimeError("no real keyring in tests")
+
+    monkeypatch.setattr(storage.keyring, "get_keyring", unavailable)
+
+
+def _live_app(events, accounts, *, keepalive_service=None):
+    from cli_usage_api.credentials import CredentialResolver
+    from cli_usage_api.operations import AccountOperations
+    from cli_usage_api.storage import AccountStore, CredentialStore
+
+    store = AccountStore()
+    store.save(tuple(accounts))
+    credentials = CredentialStore()
+    factory = FakeFactory(events)
+    app = UsageApp(
+        mode="live",
+        accounts=store.load(),
+        scheduler_factory=factory,
+        account_store=store,
+        credential_store=credentials,
+    )
+    if keepalive_service is not None:
+        app.add_observer(keepalive_service)
+    operations = AccountOperations(
+        host=app,
+        account_store=store,
+        credential_store=credentials,
+        resolver=CredentialResolver(credentials),
+        console_discovery=None,
+    )
+    return app, factory, store, operations
+
+
+async def test_web_writes_drive_the_dashboard(tmp_path, no_keyring):
+    login = _grok_login(tmp_path)
+    login.chmod(0o600)
+    login.parent.chmod(0o700)
+    token, _ = ApiTokenStore().create("embedded")
+    headers = {"Authorization": f"Bearer {token}"}
+    first, second = account(FIRST), account(SECOND, "Second")
+    service = cli.KeepaliveService(["grok"], None, (), echo=False, log_file=[].append)
+    target = service.keepalive.targets[0]
+    events = []
+    app, factory, store, operations = _live_app(events, (first, second), keepalive_service=service)
+    server, base = embed(app, ApiTokenStore(), operations=operations)
+    async with app.run_test() as pilot:
+        factory.scheduler.publish(snapshot(FIRST))
+        factory.scheduler.publish(snapshot(SECOND, used="40"))
+        await pilot.pause()
+        hub = server.api.hub
+        async with client(base) as http:
+            session = (await http.get("/api/v1/session", headers=headers)).json()
+            assert session["capabilities"] == {"writable": True, "secure_store_available": False}
+            prepared = await http.post(
+                "/api/v1/accounts/prepare",
+                headers=headers,
+                json={
+                    "provider": "grok_subscription",
+                    "credential_kind": "grok_auth_file",
+                    "reference": "default",
+                },
+            )
+            assert prepared.status_code == 200
+            assert [choice["legacy"] for choice in prepared.json()["choices"]] == [True, False]
+            created = await http.post(
+                "/api/v1/accounts",
+                headers=headers,
+                json={
+                    "provider": "grok_subscription",
+                    "label": "Grok web",
+                    "source": {
+                        "credential_kind": "grok_auth_file",
+                        "prepare_id": prepared.json()["prepare_id"],
+                        "choice_id": "c2",
+                    },
+                },
+            )
+            assert created.status_code == 201
+            new_id = created.json()["account"]["id"]
+            assert [item.id for item in app.accounts] == [FIRST, SECOND, new_id]
+            assert hub.accounts == app.accounts
+            assert factory.scheduler.updates[-1] == ((FIRST, SECOND, new_id), {new_id})
+            assert target.protected == frozenset({"https://auth.x.ai::abc"})
+            # Untouched accounts keep their observations in the app and the mirror.
+            assert set(app.snapshots) == set(hub.snapshots) == {FIRST, SECOND}
+
+            revision = created.json()["accounts"][0]["revision"]
+            renamed = await http.patch(
+                f"/api/v1/accounts/{FIRST}",
+                headers={**headers, "If-Match": revision},
+                json={"label": "Renamed"},
+            )
+            assert renamed.status_code == 200
+            assert app.accounts[0].label == "Renamed"
+            assert factory.scheduler.updates[-1][1] == frozenset()
+            assert set(hub.snapshots) == {FIRST, SECOND}
+
+            ordered = await http.put(
+                "/api/v1/accounts/order", headers=headers, json={"ids": [new_id, SECOND, FIRST]}
+            )
+            assert ordered.status_code == 200
+            assert [item.id for item in app.accounts] == [new_id, SECOND, FIRST]
+            assert store.load() == app.accounts
+            assert factory.scheduler.updates[-1] == ((new_id, SECOND, FIRST), frozenset())
+            dashboard = (await http.get("/api/v1/dashboard", headers=headers)).json()
+            assert [item["account"]["id"] for item in dashboard["accounts"]] == [
+                new_id,
+                SECOND,
+                FIRST,
+            ]
+            assert dashboard["accounts"][2]["snapshot"] is not None
+            assert dashboard["accounts"][2]["account"]["label"] == "Renamed"
+            # The TUI dashboard follows the same order.
+            assert [item.id for item in app.accounts] == [new_id, SECOND, FIRST]
+        await pilot.press("ctrl+c")
+    assert not server.running
+
+
+async def test_embedded_read_only_rejects_writes(no_keyring):
+    token, _ = ApiTokenStore().create("embedded")
+    events = []
+    app, _, _, _ = _live_app(events, (account(FIRST),))
+    _, base = embed(app, ApiTokenStore())
+    async with app.run_test() as pilot:
+        async with client(base) as http:
+            response = await http.post(
+                "/api/v1/accounts",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"provider": "grok_subscription", "label": "x", "source": None},
+            )
+            session = (
+                await http.get("/api/v1/session", headers={"Authorization": f"Bearer {token}"})
+            ).json()
+        assert (response.status_code, response.json()) == (403, {"error": "read_only"})
+        assert session["capabilities"]["writable"] is False
+        assert [item.id for item in app.accounts] == [FIRST]
+        await pilot.press("ctrl+c")
 
 
 def _free_port():

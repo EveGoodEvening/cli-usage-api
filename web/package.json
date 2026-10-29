@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Read-only web dashboard for the usage API (front end only).",
+  "description": "Web dashboard and account management for the usage API (front end only).",
   "engines": {
     "node": ">=22.23.4 <23"
   },

@@ -10,15 +10,19 @@ import pytest
 from textual.widgets import Input, OptionList, Select
 
 from cli_usage_api.accounts import AccountForm, AccountManagerScreen
+from cli_usage_api.api import AppHub
 from cli_usage_api.app import InformationScreen, UsageApp
 from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     CredentialKind,
+    FetchState,
     ProviderId,
     ResolvedCredential,
+    Snapshot,
 )
 from cli_usage_api.providers.grok import GrokProvider
+from cli_usage_api.reorder import ReorderableOptionList
 from cli_usage_api.transport import Transport
 
 
@@ -105,6 +109,7 @@ class InjectedScheduler:
         self.stopped = False
         self.refreshes = []
         self.updates = []
+        self.invalidations = []
 
     async def start(self):
         self.started = True
@@ -112,8 +117,9 @@ class InjectedScheduler:
     async def refresh(self, account_id=None):
         self.refreshes.append(account_id)
 
-    async def update_accounts(self, accounts):
+    async def update_accounts(self, accounts, **kwargs):
         self.updates.append(accounts)
+        self.invalidations.append(kwargs.get("invalidate"))
 
     async def stop(self):
         self.stopped = True
@@ -369,3 +375,129 @@ async def test_nonpriority_q_quits_dashboard_and_account_manager(open_manager, m
             assert isinstance(app.screen, AccountManagerScreen)
         await pilot.press("q")
         quit_action.assert_awaited_once_with()
+
+
+def synthetic(number, provider=ProviderId.CLAUDE_SUBSCRIPTION, **fields):
+    return Account(
+        id=f"{number}{number}{number}{number}{number}{number}{number}{number}-1111-4111-8111-111111111111",
+        provider=provider,
+        label=f"Synthetic {number}",
+        **fields,
+    )
+
+
+def observed(account):
+    now = datetime.now(UTC)
+    return Snapshot(account.id, (), (), FetchState.OK, attempted_at=now, fetched_at=now)
+
+
+async def test_accounts_changed_keeps_snapshots_by_credential_identity():
+    first, second, third, fourth = (
+        synthetic(1),
+        synthetic(2, credential_kind=CredentialKind.MANUAL_BEARER, credential_ref="session:a"),
+        synthetic(3),
+        synthetic(4),
+    )
+    factory = InjectedFactory()
+    app = UsageApp(mode="live", accounts=(first, second, third, fourth), scheduler_factory=factory)
+    hub = AppHub.attach(app)
+    async with app.run_test(size=(120, 45)) as pilot:
+        for account in app.accounts:
+            factory.publish(observed(account))
+        selector = app.query_one("#account-selector", Select)
+        updated = (
+            replace(fourth, label="Renamed"),  # Same identity: kept, and reordered first.
+            replace(second, credential_ref="session:b"),  # New credential: dropped.
+            first,  # Explicitly invalidated (a source submission): dropped.
+            replace(third, enabled=False),  # Toggle keeps the observation.
+        )
+        await app.accounts_changed(updated, invalidate=frozenset({first.id}))
+        await pilot.pause()
+        assert set(app.snapshots) == {fourth.id, third.id}
+        assert factory.scheduler.updates[-1] == updated
+        assert factory.scheduler.invalidations[-1] == frozenset({first.id})
+        assert hub.accounts == updated
+        assert hub.snapshots == app.snapshots
+        assert [value for _, value in selector._options[1:]] == [a.id for a in updated]
+        assert [account.id for account, _ in app._groups()] == [a.id for a in updated]
+        assert "Renamed" in str(app.listing.get_option_at_index(0).prompt)
+        await app.accounts_changed(updated)
+        assert app.snapshots == {} and hub.snapshots == {}
+        assert factory.scheduler.invalidations[-1] is None
+        await pilot.press("q")
+
+
+async def test_open_manager_reloads_from_tuple_and_cancels_a_drag(monkeypatch):
+    first, second = synthetic(1), synthetic(2)
+    factory = InjectedFactory()
+    store = Mock()
+    store.load.return_value = (first, second)
+    app = UsageApp(
+        mode="live",
+        accounts=(first, second),
+        scheduler_factory=factory,
+        account_store=store,
+        credential_store=Mock(),
+    )
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        manager = app.screen
+        assert isinstance(manager, AccountManagerScreen)
+        listing = manager.query_one("#accounts", ReorderableOptionList)
+        await pilot.mouse_down(listing, offset=(3, listing.gutter.top))
+        assert listing.dragging
+        store.load.side_effect = AssertionError("A host reload must not read the store")
+        added = synthetic(3)
+        # A web write publishes through the app while the manager is open.
+        async with app.account_lock:
+            await app.accounts_changed((second, first, added), invalidate=frozenset({added.id}))
+        await pilot.pause()
+        assert manager.accounts == (second, first, added)
+        assert listing.option_count == 3
+        assert not listing.dragging
+        await pilot.hover(listing, offset=(3, listing.gutter.top + 2))
+        await pilot.mouse_up(listing, offset=(3, listing.gutter.top + 2))
+        await pilot.pause()
+        store.mutate.assert_not_called()
+        assert manager.accounts == (second, first, added)
+        await pilot.press("ctrl+c")
+
+
+async def test_manager_writes_notify_app_once_with_invalidate_sets(tmp_path):
+    from cli_usage_api.storage import AccountStore, CredentialStore
+
+    first, second = synthetic(1), synthetic(2)
+    store = AccountStore(tmp_path / "private" / "accounts.json")
+    store.save((first, second))
+    factory = InjectedFactory()
+    app = UsageApp(
+        mode="live",
+        accounts=(first, second),
+        scheduler_factory=factory,
+        account_store=store,
+        credential_store=CredentialStore(),
+    )
+    async with app.run_test() as pilot:
+        for account in app.accounts:
+            factory.publish(observed(account))
+        await pilot.press("a")
+        manager = app.screen
+        reloads = []
+        original = manager.reload
+
+        async def counted(accounts=None):
+            reloads.append(accounts)
+            await original(accounts)
+
+        manager.reload = counted
+        await pilot.press("shift+down")
+        await pilot.pause()
+        assert app.accounts == (second, first) == store.load()
+        assert factory.scheduler.invalidations == [frozenset()]
+        # The reporting manager renders once; the app does not reload it again.
+        assert reloads == [(second, first)]
+        assert set(app.snapshots) == {first.id, second.id}
+        await pilot.press("escape")
+        await pilot.pause()
+        assert [account.id for account, _ in app._groups()] == [second.id, first.id]
+        await pilot.press("q")

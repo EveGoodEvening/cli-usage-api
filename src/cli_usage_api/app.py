@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
+from collections.abc import Collection
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -21,7 +23,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
-from cli_usage_api.accounts import GUIDANCE, AccountManagerScreen
+from cli_usage_api.accounts import GUIDANCE, AccountManagerScreen, credential_identity
 from cli_usage_api.demo import DemoSource
 from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
@@ -329,7 +331,10 @@ class UsageApp(App[None]):
     stopping it. A configured live dashboard requires this explicit factory.
 
     Observers (``add_observer``) mirror accepted snapshots and account changes, e.g.
-    the embedded API hub; they never own or drive the scheduler. Services
+    the embedded API hub; they never own or drive the scheduler. Every account
+    writer (the account manager, the embedded API) holds ``account_lock`` across
+    its commit and ``accounts_changed`` so publication order matches commit order;
+    ``accounts_changed`` itself never takes it. Services
     (``add_service``: ``async start(app)``, ``async stop()``, optional ``note``)
     start after the scheduler on mount and stop before it on unmount.
     """
@@ -393,6 +398,9 @@ class UsageApp(App[None]):
         self._refreshing = False
         self._notice = ""
         self._observers: list = []
+        self.account_lock = asyncio.Lock()
+        # The manager reporting a change reloads itself; others reload from the tuple.
+        self._account_origin = None
         self.services: list = []
         self._services_started: list = []
         self.scheduler = None
@@ -602,6 +610,12 @@ class UsageApp(App[None]):
         selected = self.highlighted_row()
         previous = self._row_index(self.listing.highlighted)
         self.rows = self._visible_rows() if rows is None else rows
+        if selected is not None:
+            # Row identity is the account ID and metric: a rename or reorder keeps it.
+            selected = next(
+                (row for row in self.rows if row[0].id == selected[0].id and row[1] == selected[1]),
+                selected,
+            )
         self._row_option = []
         self.listing.clear_options()
         options = []
@@ -1185,11 +1199,31 @@ class UsageApp(App[None]):
         finally:
             self._refreshing = False
 
-    async def accounts_changed(self, accounts: tuple[Account, ...]) -> None:
+    async def accounts_changed(
+        self, accounts: tuple[Account, ...], *, invalidate: Collection[str] | None = None
+    ) -> None:
+        """Publish a committed account tuple; the caller holds ``account_lock``.
+
+        ``invalidate=None`` discards every observation (legacy). With a set, a
+        snapshot survives when its account remains, is not named in the set, and
+        keeps its credential identity, so a rename, toggle or reorder keeps data.
+        """
+        old = {account.id: account for account in self.accounts}
         self.accounts = tuple(accounts)
-        # A mutation may replace credentials under the same reference: discard UI
-        # observations and let Scheduler invalidate all supplied generations.
-        self.snapshots.clear()
+        if invalidate is None:
+            self.snapshots.clear()
+        else:
+            keep = {
+                account.id
+                for account in self.accounts
+                if account.id not in invalidate
+                and account.id in old
+                and credential_identity(old[account.id]) == credential_identity(account)
+            }
+            for account_id in tuple(self.snapshots):
+                if account_id not in keep:
+                    del self.snapshots[account_id]
+        # Observers (the embedded API hub) mirror the already-filtered snapshots.
         self._notify_observers("accounts_changed", self.accounts)
         if self.selected_account not in {account.id for account in self.accounts}:
             self.selected_account = None
@@ -1197,7 +1231,12 @@ class UsageApp(App[None]):
         self.selector.value = self.selected_account or "all"
         self._rebuild()
         if self.scheduler is not None:
-            await self.scheduler.update_accounts(self.accounts)
+            await self.scheduler.update_accounts(self.accounts, invalidate=invalidate)
+        for screen in tuple(self.screen_stack):
+            if isinstance(screen, AccountManagerScreen) and screen is not self._account_origin:
+                # Another writer (e.g. the web) changed accounts: render without disk I/O.
+                with contextlib.suppress(Exception):
+                    await screen.reload(self.accounts)
 
     async def reconnect(self, account_id: str) -> None:
         if self.scheduler is not None:
@@ -1234,7 +1273,7 @@ class UsageApp(App[None]):
         self.push_screen(
             InformationScreen(
                 "帮助 / Help",
-                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 主界面取消选择；弹窗返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
+                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理（Shift+↑↓ 或拖动调整账号顺序）；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 主界面取消选择；弹窗返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
             )
         )
 

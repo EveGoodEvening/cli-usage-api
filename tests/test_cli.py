@@ -13,9 +13,16 @@ from uuid import uuid4
 import pytest
 
 from cli_usage_api import cli
+from cli_usage_api.accounts import AccountFlowError
 from cli_usage_api.domain import Account, CredentialKind, ProviderId
 from cli_usage_api.providers.console import OrganizationChoice
-from cli_usage_api.storage import AccountStore, ConfigCommittedError, ConfigError, CredentialStore
+from cli_usage_api.storage import (
+    AccountStore,
+    ConfigCommittedError,
+    ConfigError,
+    CredentialError,
+    CredentialStore,
+)
 
 SECRET = "synthetic-cli-secret-never-display"
 
@@ -62,6 +69,12 @@ class MemoryCredentials(CredentialStore):
     def delete(self, ref):
         self.deleted.append(ref)
         self.values.pop(ref, None)
+
+    def secure_available(self):
+        return True
+
+    def session_present(self, ref):
+        return isinstance(ref, str) and ref.startswith("session:") and ref in self.values
 
 
 @pytest.fixture
@@ -332,7 +345,9 @@ def test_console_single_result_is_not_autoselected(monkeypatch, credentials):
 
 
 def test_grok_scope_is_explicit_and_external_file_survives(isolated_home, monkeypatch, credentials):
-    path = isolated_home / "grok-auth.json"
+    # Custom references must name the login file itself (auth.json for Grok).
+    (isolated_home / "grok-login").mkdir()
+    path = isolated_home / "grok-login" / "auth.json"
     path.write_text('{"https://auth.x.ai::synthetic":{"key":"synthetic-token"}}')
     path.chmod(0o600)
     item = account(ProviderId.GROK_SUBSCRIPTION)
@@ -778,6 +793,8 @@ def test_api_serve_live_composes_factory_and_origins(monkeypatch, capsys):
     class FakeFactory:
         def __init__(self, credentials):
             built.append(credentials)
+            self.resolver = SimpleNamespace(store=credentials)
+            self.console_discovery = None
 
         async def aclose(self):
             pass
@@ -809,8 +826,80 @@ def test_api_serve_live_composes_factory_and_origins(monkeypatch, capsys):
     assert app.hub.accounts == (item,)
     assert app.trust_proxy is True
     assert app.allowed_origins == {"https://usage.example.com", "http://localhost:5173"}
+    # Writes are on by default and share the resolver's credential store.
+    operations = app.operations
+    assert operations is not None and operations.host is app.hub
+    assert operations.credentials is built[0]
+    assert operations.resolver.store is built[0]
     out = capsys.readouterr().out
-    assert "restart serve after changing accounts" in out
+    assert (
+        "1 account(s) loaded. Account changes over the API are ENABLED for every API token "
+        "(use --read-only to disable)." in out
+    )
+    assert "Credentials are resolved by the server process only." in out
+    assert "restart serve after changing accounts" not in out
+
+
+def test_api_serve_read_only_has_no_operations(monkeypatch, capsys):
+    capture = ServeCapture(monkeypatch)
+    make_api_token()
+    assert cli.main(["api", "serve", "--read-only"]) == 0
+    assert capture.app.operations is None
+    assert capture.app.hub.mode == "live"
+    out = capsys.readouterr().out
+    assert "0 account(s) loaded. API is read-only (--read-only)." in out
+    assert "ENABLED" not in out
+    assert "Add accounts with usage accounts add --provider ..., then restart serve." in out
+
+
+def test_api_serve_zero_accounts_points_to_the_web(monkeypatch, capsys):
+    capture = ServeCapture(monkeypatch)
+    make_api_token()
+    assert cli.main(["api", "serve"]) == 0
+    assert capture.app.operations is not None
+    out = capsys.readouterr().out
+    assert "No accounts configured. Add accounts in the web UI or with usage accounts add" in out
+
+
+def test_api_serve_demo_is_always_read_only(monkeypatch):
+    capture = ServeCapture(monkeypatch)
+    forbid_live(monkeypatch)
+    monkeypatch.setattr(
+        cli, "AccountOperations", lambda **kwargs: pytest.fail("demo must not build operations")
+    )
+    assert cli.main(["api", "serve", "--demo"]) == 0
+    assert capture.app.operations is None
+
+
+def test_real_live_factory_shares_credentials_with_operations(monkeypatch):
+    capture = ServeCapture(monkeypatch)
+    make_api_token()
+    assert cli.main(["api", "serve"]) == 0
+    operations = capture.app.operations
+    assert operations.resolver._store is operations.credentials
+    assert operations.service.credentials is operations.credentials
+    assert operations.console_discovery is not None
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--read-only"], "require --api"),
+        (["--read-only", "accounts", "list"], "apply only to the dashboard"),
+    ],
+)
+def test_dashboard_read_only_requires_api(monkeypatch, capsys, args, message):
+    monkeypatch.setattr(cli.UsageApp, "run", lambda app: pytest.fail("TUI must not start"))
+    assert cli.main(args) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_read_only_parses_on_both_entry_points():
+    parser = cli._parser()
+    assert parser.parse_args(["api", "serve", "--read-only"]).serve_read_only is True
+    assert parser.parse_args(["api", "serve"]).serve_read_only is False
+    assert parser.parse_args(["--api", "--read-only"]).dashboard_read_only is True
+    assert parser.parse_args([]).dashboard_read_only is False
 
 
 def test_api_serve_bind_failure_is_curated(monkeypatch, capsys):
@@ -913,6 +1002,10 @@ def test_api_token_lifecycle(monkeypatch, capsys):
     token = next(line for line in out.splitlines() if line.startswith("usk_"))
     assert out.count(token) == 1
     assert "shown only once" in out
+    assert (
+        "This token can add, edit and remove accounts unless the server runs with --read-only."
+        in out
+    )
     (record,) = ApiTokenStore().load()
     assert record.label == "laptop"
     assert record.sha256 == api_token_digest(token)
@@ -970,3 +1063,60 @@ def test_api_unknown_arguments_are_not_echoed(capsys):
     assert cli.main(["api", "serve", "--token", "usk_pasted_secret_value"]) == 2
     captured = capsys.readouterr()
     assert "usk_pasted_secret_value" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    ("kind_answer", "provider", "reference", "basename"),
+    [
+        ("2", ProviderId.CODEX_SUBSCRIPTION, "/srv/codex/other.json", "auth.json"),
+        ("2", ProviderId.CODEX_SUBSCRIPTION, "/srv/../srv/codex/auth.json", "auth.json"),
+        ("2", ProviderId.CLAUDE_SUBSCRIPTION, "/srv/claude/auth.json", ".credentials.json"),
+        ("2", ProviderId.GROK_SUBSCRIPTION, "/proc/self/root/auth.json", "auth.json"),
+        ("2", ProviderId.GROK_SUBSCRIPTION, "relative/auth.json", "auth.json"),
+    ],
+)
+def test_custom_reference_must_name_the_login_file(
+    monkeypatch, credentials, capsys, kind_answer, provider, reference, basename
+):
+    item = account(provider)
+    seed(item)
+    answers(monkeypatch, kind_answer, reference)
+    assert cli.main(["accounts", "key", "set", item.id]) == 2
+    assert AccountStore().load() == (item,)
+    assert capsys.readouterr().err.strip() == f"Choose default or an absolute path to {basename}."
+
+
+@pytest.mark.parametrize(
+    ("code", "context", "exit_code", "hint"),
+    [
+        ("conflict", None, 2, False),
+        ("config_unavailable", ConfigError("x"), 2, False),
+        ("committed_uncertain", ConfigCommittedError(()), 2, False),
+        ("secure_store_unavailable", CredentialError("x"), 3, True),
+        ("cleanup_failed", RuntimeError("x"), 3, True),
+        ("credential_cleanup_failed", RuntimeError("x"), 3, True),
+        ("save_failed", ConfigError("x"), 3, False),
+        ("too_many_accounts", None, 3, False),
+        ("invalid_reference", None, 3, False),
+        # Unclassified errors keep the original context-based mapping.
+        ("failed", None, 3, False),
+        ("failed", ConfigError("x"), 2, False),
+        ("failed", CredentialError("x"), 3, True),
+    ],
+)
+def test_account_flow_exit_codes_follow_error_code(
+    monkeypatch, capsys, code, context, exit_code, hint
+):
+    def fail(args):
+        if context is None:
+            raise AccountFlowError("Curated message.", code=code)
+        try:
+            raise context
+        except Exception:  # noqa: BLE001 - Build the same context as AccountService.
+            raise AccountFlowError("Curated message.", code=code) from None
+
+    monkeypatch.setattr(cli, "_accounts", fail)
+    assert cli.main(["accounts", "list"]) == exit_code
+    err = capsys.readouterr().err
+    assert err.startswith("Curated message.\n")
+    assert ("encrypted OS-keyring persistence" in err) == hint

@@ -378,3 +378,27 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   `/etc/passwd`, PATH reset by `/etc/profile`) while keeping `WORKDIR`; `railway ssh`
   is not the only entry path. Restore HOME/PATH from `/etc/bash.bashrc` (Debian's
   login profile sources it) and whitelist new `docker/` files in `.dockerignore`.
+- HTTP account mutation goes through `AccountOperations` → `AccountService`, and every
+  writer (HTTP and TUI) holds the host's `account_lock` across commit and notification,
+  with the lock taken inside the shielded task, so publication order matches commit
+  order. Notify with an explicit `invalidate` set: unchanged credential identity keeps
+  scheduler state and snapshots (`put` never reuses refs), but an explicit source
+  submission invalidates even an equal file reference, because file contents can change
+  behind it. Conflicts carry `AccountFlowError.code` and trigger a resync. Never expose
+  paths, selectors, organization IDs or org-ID fallback labels; restrict file references
+  by basename and require regular files before open.
+- `[tool.uv] required-version` is `==0.13.6`; a host `uv` 0.13.5 refuses every
+  `uv sync/run` gate. Use a uv 0.13.6 binary rather than loosening the pin or
+  bypassing `uv run` with a stale `.venv`.
+- A shielded commit must own every input it still needs: clearing a secret in the
+  cancellable request's `finally` lets the commit save a placeholder ref and delete
+  the old secret. Reserve per-account throttles before the first await, schedule
+  prepare expiry with a timer (lazy sweeps leave secrets past their TTL), and keep
+  in-memory session puts on the loop so a cancelled thread cannot orphan the secret.
+  A kept scheduler generation must still apply a shorter interval to its due time.
+- Web forms: a conflict reload must rebase untouched draft fields (three-way against
+  the old account), Esc/取消 must not close a form with a save in flight, and a
+  lost/timed-out save may already be committed, so reload the list. Abort an
+  in-flight prepare whenever its inputs change. Password managers ignore
+  `autocomplete="off"`: use `new-password`, manager opt-outs and no native submit.
+  TUI drags must report their end (drop/Esc/reload) and block row shortcuts mid-drag.

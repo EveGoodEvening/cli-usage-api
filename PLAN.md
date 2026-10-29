@@ -1209,6 +1209,10 @@ token refresh of first-party logins; live/authenticated provider acceptance.
   `uv sync --locked --no-dev`; `HOME=/data/home` (`0700`, created by the entrypoint
   under `tini`); `CMD ["sleep","infinity"]`. Only file-backed Claude Code, Codex and
   Grok logins work (no OS keyring); Claude Platform is unsupported in the container.
+- Amended by §18 (2026-10-29): for live servers without `--read-only`, "GET/HEAD/OPTIONS
+  only", "Out of scope: any HTTP mutation of accounts" and "Account config is read once
+  at startup" are superseded; the read-only contract above still holds for `--read-only`
+  and demo.
 
 ### 15.3 Research sources (2026-10-29)
 
@@ -1649,3 +1653,161 @@ caches were removed. No user-owned service, credential file, account state, host
 runtime installation or cloud setting was changed. Operators must deploy the new
 images (not restart old ones), update local uv, and apply the documented managed
 platform settings; Railway's manually started API/tmux sessions need restarting.
+
+## 18. User-requested web account management and reorder — 2026-10-29
+
+User request (translated): add and edit accounts from the web UI (file-backed login
+references, a Console `sessionKey`, or a manual bearer/API key where allowed) so the
+operator needs only `usage api serve --keepalive`, without the TUI, including for
+Claude Platform; support the Railway flow "deploy on `sleep infinity` → log in over
+`railway ssh` → create a token → switch the start command to `usage api serve …
+--keepalive` → add accounts on the web"; and drag-to-reorder accounts in the web UI
+and the TUI account manager, with every dashboard following that order.
+
+**Amendment:** §15.2's "GET/HEAD/OPTIONS only" and "Account config is read once at
+startup" (and §15.1's "Out of scope: any HTTP mutation of accounts") are superseded
+for live servers without `--read-only`. `--read-only` and demo keep the §15.2
+read-only surface, except that a write method on an account write route returns
+`403 read_only` rather than `405` (session and dashboard still answer `405`).
+
+### 18.1 Fixed decisions and non-goals
+
+- Writes are on by default for token-authenticated live serving on both `usage api
+  serve` and `usage --api`; `--read-only` disables them on both; demo is always
+  read-only. Writes use the existing bearer tokens: there is no new token type or
+  scope, so upgrading grants existing tokens write power (startup `ENABLED` line,
+  token-create line, CHANGELOG breaking note and web "remember" note say so).
+- `persist=true` stores a secret in the exact supported Secret Service backend or
+  fails `503 secure_store_unavailable` without downgrading; `persist=false` keeps it
+  session-only in that server process. `secure_store_available` is advertised but
+  reflects only the backend type.
+- File kinds accept `default` or a normalized absolute path with the kind's basename
+  (`.credentials.json` for Claude Code, `auth.json` for Codex/Grok), never under
+  `/proc`, `/sys` or `/dev`. This is a deliberate tightening that also applies to the
+  CLI and TUI for new entries; saved references are not revalidated. Grok requires an
+  explicit scope choice and Console an explicit organization choice, even for one.
+- Order is the `accounts.json` array order. `AccountService.reorder` validates an
+  exact permutation under the config lock; a stale list is a curated conflict.
+- Standalone `serve` becomes dynamic (`SnapshotHub.accounts_changed`); embedded writes
+  go through `UsageApp.accounts_changed`. `AccountService` is the single mutation core.
+- Non-goals: token scopes; watching `accounts.json` for edits by another process (they
+  apply on the next API write, a conflict resync, or restart); migration over HTTP (a
+  legacy ChatGPT config is `503 config_unavailable`); provider/transport changes; TUI
+  dashboard reorder; a non-root Docker `USER`; any live/authenticated/keyring claim.
+
+### 18.2 Condensed contract
+
+- Dispatch: OPTIONS (full method set and `Authorization, Content-Type, If-Match`
+  advertised even when read-only, so browsers get a readable `403`) → unknown method
+  `405` → long path `404` → public `/healthz` (GET/HEAD) → authentication (unchanged;
+  a valid token never consults the limiter) → route (`404`, or `405` with per-route
+  `Allow`) → per-request write gate (operations present, live hub, not anonymous;
+  otherwise `403 read_only` without reading the body) → body → handler.
+- Bodies (writes only): `application/json` (optional `charset=utf-8`), ≤ 64 KiB
+  (declared or streamed `413`), one 10 s read deadline (`408`), strict UTF-8 JSON with
+  duplicate-key, `NaN`/`Infinity`, deep-nesting, oversized-int and lone-surrogate
+  rejection (`400 invalid_request`), exact key whitelists and strict bool/int types.
+  DELETE and reconnect require an empty body. Errors are `{"error": code}` (plus
+  `retry_after` for `discovery_busy`) and never echo input.
+- Routes: `GET/HEAD /api/v1/accounts` (new `AccountConfig` list + `capabilities`);
+  `POST /api/v1/accounts` (201); `POST /api/v1/accounts/prepare` (Grok scope or
+  Console organization choices); `PUT /api/v1/accounts/order`; `PATCH` and `DELETE
+  /api/v1/accounts/{id}` with a required `If-Match` revision (`428` missing, `409`
+  stale after a resync); `POST /api/v1/accounts/{id}/reconnect` (`{"status":"queued"}`).
+  Session and account lists carry `capabilities {writable, secure_store_available}`.
+- `AccountConfig` exposes provider, label, enabled, configured/effective interval,
+  kind, storage class, `reference` as `default|custom|null`, `session_available`,
+  scope/organization-selected flags and a per-process HMAC `revision`. It never returns
+  custom paths, Grok selectors, Console organization IDs, org-ID fallback labels or
+  credential refs.
+- Prepare records: 300 s TTL, at most 4 (oldest evicted), bound to account, provider,
+  kind and revision; Console temp secrets are session refs no account references,
+  deleted on consume, failure, expiry (a loop timer at the TTL, not the next write),
+  eviction and shutdown; the commit task, not the cancellable request, owns a secret
+  until it is stored. Grok selectors are
+  re-verified against the file at commit (`410 prepare_expired`). Console discovery is
+  one at a time with a 10 s cooldown and 6 per 600 s (`409 discovery_busy` +
+  `Retry-After`; never `429`, which the web treats as session end). Reconnect is
+  coalesced per account (≥ 30 s or the effective poll interval). At most 100 accounts.
+- File resolution on save collapses every failure except `credential_expired` (a
+  committed write with a warning) into `422 credential_unavailable`; file reads are
+  limited to 2 concurrent; `_read_file` requires a regular file via `lstat` before open.
+- Commit and publication: the host owns `account_lock`; every writer (HTTP, conflict
+  resync, TUI manager, account form, reorder) holds it across commit and host
+  notification, and HTTP takes it inside a shielded task so a cancelled request still
+  publishes in commit order. Committed-but-uncertain outcomes are `200/201` with a
+  `warning` (`committed_uncertain`, `cleanup_failed`, `host_refresh_failed`,
+  `credential_expired`).
+- Scheduler: `update_accounts(accounts, *, invalidate=None)`. `None` keeps the previous
+  behaviour; a set keeps scheduler state and snapshots for accounts whose credential
+  identity is unchanged and that were not explicitly resubmitted, so renames, toggles
+  and reorders keep observations, while an explicit source submission (even an equal
+  file reference) starts a fresh generation. A kept generation whose interval shrinks
+  is due no later than now + the new interval (embargoes unchanged), and an in-flight
+  fetch schedules from the current interval.
+- Process: `serve` and `usage --api` disable core dumps (best-effort `RLIMIT_CORE` 0 and
+  Linux `PR_SET_DUMPABLE` 0). Keepalive protection of Grok scopes is now lexical against
+  the default path forms resolved once at startup (a reference as written or
+  `normpath`-normalized); references already saved at startup are also realpath'd
+  once then, so symlinked or unnormalized saved paths keep protection. References
+  added later over HTTP are never resolved.
+- TUI: the account manager reorders with Shift+↑/↓ (Ctrl+↑/↓ aliases) and mouse drag;
+  it holds `app.account_lock` and notifies with explicit invalidate sets. Ending a drag
+  (drop, Esc, or a reload from another writer) replaces the "Esc cancels" status;
+  mutating shortcuts are ignored while a drag is active. Web: an
+  `#accounts` view with an account form, grip drag/keyboard reorder and fixed zh error
+  copy (owned and documented by `web/`).
+
+### 18.3 Critique dispositions (short)
+
+Security: accepted the host-owned publication lock, lock-inside-shield commits, explicit
+invalidation instead of value-equality preservation, basename/normalization/pseudo-fs and
+regular-file rules with collapsed file errors and a 2-read semaphore, keyring calls
+outside the session lock, discovery/reconnect throttles and a 100-account cap, strict
+parsing, secret-lifetime hygiene, per-request gating and revision-bound prepare records.
+Rejected for this change: a non-root container `USER` (volume ownership/HOME impact;
+documented and deferred), duplicate-source rejection and Idempotency-Key (duplicates are
+legitimate; buttons are disabled in flight). Fit: unchanged `main` exit codes, Console
+`label:null` when the name equals the organization ID, `**kwargs` on every scheduler
+fake, `AppHub` mirroring the app's filtered snapshots, manager reload without disk I/O.
+UX: dashboard reorder removed (bindings would leak under modals), click suppression
+only for in-region releases, drags cancelled by reloads, Escape layering and Back
+history in the web, no TUI autoscroll (keyboard documented).
+
+### 18.4 Units
+
+| Unit | Owned paths | Status |
+|---|---|---|
+| A1 backend core | `accounts.py` (through `AccountService`), `storage.py`, `scheduler.py`, `demo.py`, `keepalive.py`, `credentials.py` (`_read_file`), CLI error mapping | Landed in the working tree; unit-reported tests green (below) |
+| A2 HTTP/operations | `operations.py` (new), `api.py`, `cli.py` composition | Landed in the working tree; unit-reported tests green (below) |
+| A3 docs | this section, §15.2 pointer, SECURITY, README, CHANGELOG, `docs/deploy-railway.md`, AGENTS lesson | Landed |
+| B web | `web/` | Implemented concurrently; status not recorded here |
+| C TUI | `accounts.py` (from `ConfirmDialog`), `app.py`, `reorder.py`, `app.tcss` | Implemented concurrently; status not recorded here |
+
+Extra beyond the request: the reconnect endpoint (reuses `host.reconnect`, throttled).
+Deferred: TUI dashboard reorder; non-root Docker `USER`.
+
+### 18.5 Acceptance checklist
+
+Unit-reported evidence (run with `.venv/bin` directly because `uv run` refuses host uv
+0.13.5 against the required 0.13.6; partial trees, not the merged gate): A1 — its nine
+test files 570 passed, full suite 1,496 passed, Ruff check/format clean; A2 — its four
+test files 245 passed, full suite 1,602 passed, `ruff format --check` clean, `ruff
+check` one F401 (unused `Path` import in `accounts.py`, pending whichever unit lands
+last).
+
+- [ ] Merged offline backend gate: `uv sync --locked`, `uv run ruff check .`, `uv run
+  ruff format --check .`, `uv run pytest -q` on the merged tree — pending orchestrator.
+- [ ] Merged web gate: `npm ci`, typecheck, lint, test, build in `web/` — pending.
+- [ ] Standalone socket smoke: `usage api serve --allow-origin http://localhost:5173`
+  with a token; add a Codex default-reference account, reorder, check
+  `/api/v1/dashboard` order — pending.
+- [ ] Embedded smoke: a web edit appears in the `usage --api` TUI; installed-entry PTY
+  evidence per the harness lesson — pending.
+- [ ] Browser check of the accounts view (one browser through the heavy gate) — pending.
+- [ ] Independent review — pending.
+
+Boundary: green synthetic tests do not establish live Console organization discovery,
+real Secret Service persistence, Railway custom start-command behaviour (the documented
+form follows Railway's docs, see `docs/deploy-railway.md`), Railway healthchecks or any
+authenticated provider read. Those remain under §9/§11/§15 prerequisites.

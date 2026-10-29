@@ -2,7 +2,7 @@ import type { ReactNode, RefObject } from "react";
 import type { AccountView, ApiMode } from "../types";
 import { browserZone, relativeAge, timeTitle, utcOffset } from "../format";
 import { accountHealth } from "../semantics";
-import { MoreIcon, RefreshIcon } from "./icons";
+import { AccountsIcon, MoreIcon, RefreshIcon } from "./icons";
 
 export function DemoBadge() {
   return (
@@ -86,6 +86,8 @@ export function Header({
   onMenu,
   menuButton,
   menu,
+  accountsOpen,
+  onAccounts,
 }: {
   mode: ApiMode;
   status: ReactNode;
@@ -96,6 +98,8 @@ export function Header({
   onMenu: () => void;
   menuButton: RefObject<HTMLButtonElement>;
   menu: ReactNode;
+  accountsOpen: boolean;
+  onAccounts: () => void;
 }) {
   const zone = browserZone();
   const offset = utcOffset(now);
@@ -112,6 +116,16 @@ export function Header({
         >
           {offset}
         </span>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={onAccounts}
+          aria-label="账号管理"
+          aria-pressed={accountsOpen}
+          title="账号管理"
+        >
+          <AccountsIcon />
+        </button>
         <button
           type="button"
           className="icon-btn"

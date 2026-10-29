@@ -143,6 +143,15 @@ def _codex_expiry(claims: dict) -> datetime | None:
 def _read_file(path: Path) -> bytes:
     if os.name != "posix":
         raise _error("unsafe_credential_file")
+    # Devices, FIFOs and sockets are never opened, even non-blocking: opening a
+    # device can have side effects. The post-open fstat still closes the race.
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            raise _error("unsafe_credential_file")
+    except FileNotFoundError:
+        raise _error("credential_unavailable") from None
+    except (OSError, ValueError):
+        raise _error("unsafe_credential_file") from None
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     except FileNotFoundError:

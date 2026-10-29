@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, MAX_BODY_BYTES, REQUEST_TIMEOUT_MS, createHttpClient, isDashboard, parseRetryAfter } from "./api";
+import {
+  API_ERROR_MESSAGES,
+  ApiError,
+  ERROR_CODE_MESSAGES,
+  MAX_BODY_BYTES,
+  MAX_ERROR_BODY_BYTES,
+  PREPARE_TIMEOUT_MS,
+  REQUEST_TIMEOUT_MS,
+  createHttpClient,
+  isDashboard,
+  parseRetryAfter,
+} from "./api";
+import { endsSession } from "./hooks";
+import type { AccountConfig, MutationResult } from "./types";
 import fixture from "./mock/demo-dashboard.json";
 
 const creds = { baseUrl: "https://api.example.com", token: "usk_secret-token" };
@@ -236,5 +249,247 @@ describe("request deadline", () => {
     const fetchMock = vi.fn(async () => new Response(stream, { status: 200 }));
     const client = createHttpClient(creds, fetchMock as unknown as typeof fetch);
     expect(await client.dashboard()).toEqual(payload);
+  });
+});
+
+const ID = "0f0e0d0c-0b0a-4908-8706-050403020100";
+const REV = "0123456789abcdef0123456789abcdef";
+const SECRET = "sk-ant-sid01-super-secret";
+const CAPS = { writable: true, secure_store_available: false };
+
+const CONFIG: AccountConfig = {
+  id: ID,
+  provider: "codex_subscription",
+  label: "Codex",
+  enabled: true,
+  poll_interval_seconds: 60,
+  effective_poll_interval_seconds: 60,
+  credential_kind: "codex_auth_file",
+  storage: "external_file",
+  reference: "default",
+  session_available: null,
+  scope_selected: false,
+  organization_selected: false,
+  revision: REV,
+};
+const RESULT: MutationResult = { account: CONFIG, accounts: [CONFIG], capabilities: CAPS, warning: null };
+
+type Call = [string, RequestInit];
+
+function call(mock: ReturnType<typeof vi.fn>, index = 0): { url: string; init: RequestInit; headers: Record<string, string> } {
+  const [url, init] = mock.mock.calls[index] as unknown as Call;
+  return { url, init, headers: init.headers as Record<string, string> };
+}
+
+describe("account management calls", () => {
+  it("sends each call with its method, path, headers and the fixed init flags", async () => {
+    const cases: Array<{
+      run: (c: ReturnType<typeof createHttpClient>) => Promise<unknown>;
+      reply: unknown;
+      method: string;
+      path: string;
+      body: unknown;
+      ifMatch?: string;
+    }> = [
+      { run: (c) => c.accounts(), reply: { accounts: [CONFIG], capabilities: CAPS }, method: "GET", path: "/api/v1/accounts", body: undefined },
+      {
+        run: (c) => c.createAccount({ provider: "codex_subscription", label: "C", source: null }),
+        reply: RESULT,
+        method: "POST",
+        path: "/api/v1/accounts",
+        body: { provider: "codex_subscription", label: "C", source: null },
+      },
+      {
+        run: (c) => c.updateAccount(ID, REV, { enabled: false }),
+        reply: RESULT,
+        method: "PATCH",
+        path: `/api/v1/accounts/${ID}`,
+        body: { enabled: false },
+        ifMatch: `"${REV}"`,
+      },
+      {
+        run: (c) => c.removeAccount(ID, REV),
+        reply: { ...RESULT, account: null },
+        method: "DELETE",
+        path: `/api/v1/accounts/${ID}`,
+        body: undefined,
+        ifMatch: `"${REV}"`,
+      },
+      {
+        run: (c) => c.reorderAccounts([ID]),
+        reply: { ...RESULT, account: null },
+        method: "PUT",
+        path: "/api/v1/accounts/order",
+        body: { ids: [ID] },
+      },
+      {
+        run: (c) => c.reconnectAccount(ID),
+        reply: { status: "queued" },
+        method: "POST",
+        path: `/api/v1/accounts/${ID}/reconnect`,
+        body: undefined,
+      },
+      {
+        run: (c) =>
+          c.prepare({ account_id: null, revision: null, provider: "grok_subscription", credential_kind: "grok_auth_file", reference: "default" }),
+        reply: { prepare_id: "p", expires_in: 300, kind: "grok_scope", choices: [{ id: "c1", label: null, legacy: false, current: false }] },
+        method: "POST",
+        path: "/api/v1/accounts/prepare",
+        body: { account_id: null, revision: null, provider: "grok_subscription", credential_kind: "grok_auth_file", reference: "default" },
+      },
+    ];
+    for (const item of cases) {
+      const fetchMock = respond(200, item.reply);
+      await item.run(createHttpClient(creds, fetchMock as unknown as typeof fetch));
+      const { url, init, headers } = call(fetchMock);
+      expect(url).toBe(creds.baseUrl + item.path);
+      expect(init.method).toBe(item.method);
+      expect(headers.Authorization).toBe(`Bearer ${creds.token}`);
+      expect(init.credentials).toBe("omit");
+      expect(init.redirect).toBe("error");
+      expect(init.cache).toBe("no-store");
+      expect(init.referrerPolicy).toBe("no-referrer");
+      expect(init.mode).toBe("cors");
+      if (item.body === undefined) {
+        expect(init.body).toBeUndefined();
+        expect(headers).not.toHaveProperty("Content-Type");
+      } else {
+        expect(JSON.parse(init.body as string)).toEqual(item.body);
+        expect(headers["Content-Type"]).toBe("application/json");
+      }
+      if (item.ifMatch) expect(headers["If-Match"]).toBe(item.ifMatch);
+      else expect(headers).not.toHaveProperty("If-Match");
+    }
+  });
+
+  it("keeps secrets in the body, never the URL, and encodes ids", async () => {
+    const fetchMock = respond(200, { prepare_id: "p", expires_in: 300, kind: "console_organization", choices: [] });
+    const client = createHttpClient(creds, fetchMock as unknown as typeof fetch);
+    await client.prepare({ account_id: null, revision: null, provider: "claude_platform", credential_kind: "console_session", secret: SECRET });
+    const { url, init } = call(fetchMock);
+    expect(url).not.toContain(SECRET);
+    expect(init.body).toContain(SECRET);
+    const update = respond(200, RESULT);
+    await createHttpClient(creds, update as unknown as typeof fetch).updateAccount("a/b", REV, {
+      source: { credential_kind: "api_key", secret: SECRET, persist: false },
+    });
+    expect(call(update).url).toBe(`${creds.baseUrl}/api/v1/accounts/a%2Fb`);
+    expect(call(update).url).not.toContain(SECRET);
+  });
+
+  it("names only whitelisted error codes and falls back to the kind message", async () => {
+    const known = createHttpClient(creds, respond(503, { error: "secure_store_unavailable" }) as unknown as typeof fetch);
+    const error = (await known.updateAccount(ID, REV, {}).catch((e: unknown) => e)) as ApiError;
+    expect(error).toMatchObject({ kind: "unavailable", status: 503, code: "secure_store_unavailable" });
+    expect(error.message).toBe(ERROR_CODE_MESSAGES.secure_store_unavailable);
+
+    const unknown = createHttpClient(creds, respond(422, { error: "<b>evil server text</b>" }) as unknown as typeof fetch);
+    const other = (await unknown.createAccount({ provider: "codex_subscription", label: "x", source: null }).catch((e: unknown) => e)) as ApiError;
+    expect(other).toMatchObject({ kind: "invalid", code: null });
+    expect(other.message).toBe(API_ERROR_MESSAGES.invalid);
+    expect(other.message).not.toContain("evil");
+
+    for (const [status, kind] of [
+      [400, "invalid"],
+      [403, "forbidden"],
+      [404, "not_found"],
+      [409, "conflict"],
+      [410, "expired"],
+      [413, "too_large"],
+      [428, "invalid"],
+      [500, "server"],
+      [502, "server"],
+    ] as const) {
+      const client = createHttpClient(creds, respond(status, {}) as unknown as typeof fetch);
+      await expect(client.reorderAccounts([])).rejects.toMatchObject({ kind, status, code: null });
+    }
+  });
+
+  it("reads retry_after for discovery_busy, which never ends the session", async () => {
+    const client = createHttpClient(
+      creds,
+      respond(409, { error: "discovery_busy", retry_after: 7 }, { "Retry-After": "7" }) as unknown as typeof fetch,
+    );
+    const error = (await client
+      .prepare({ account_id: null, revision: null, provider: "claude_platform", credential_kind: "console_session", secret: "k" })
+      .catch((e: unknown) => e)) as ApiError;
+    expect(error).toMatchObject({ kind: "conflict", code: "discovery_busy", retryAfter: 7 });
+    expect(endsSession(error)).toBe(false);
+  });
+
+  it("ends the session on 401 and 429 from account calls", async () => {
+    const unauthorized = createHttpClient(creds, respond(401, { error: "unauthorized" }) as unknown as typeof fetch);
+    const a = (await unauthorized.removeAccount(ID, REV).catch((e: unknown) => e)) as ApiError;
+    expect(endsSession(a)).toBe(true);
+    const limited = createHttpClient(creds, respond(429, {}, { "Retry-After": "30" }) as unknown as typeof fetch);
+    const b = (await limited.accounts().catch((e: unknown) => e)) as ApiError;
+    expect(b).toMatchObject({ kind: "rate_limited", retryAfter: 30 });
+    expect(endsSession(b)).toBe(true);
+  });
+
+  it("does not read error bodies on dashboard reads", async () => {
+    const client = createHttpClient(creds, respond(403, { error: "read_only" }) as unknown as typeof fetch);
+    await expect(client.dashboard()).rejects.toMatchObject({ kind: "forbidden", code: null });
+  });
+
+  it("reads at most 4 KiB of an error body", async () => {
+    let sent = 0;
+    let cancelled = false;
+    const head = new TextEncoder().encode('{"error":"conflict","pad":"');
+    const pad = new Uint8Array(1024).fill(0x61);
+    const stream = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ctrl.enqueue(head);
+        sent += head.byteLength;
+      },
+      pull(ctrl) {
+        sent += pad.byteLength;
+        ctrl.enqueue(pad);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(stream, { status: 409 }));
+    const client = createHttpClient(creds, fetchMock as unknown as typeof fetch);
+    await expect(client.reorderAccounts([])).rejects.toMatchObject({ kind: "conflict", code: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThanOrEqual(MAX_ERROR_BODY_BYTES + 2 * pad.byteLength);
+    const declared = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "conflict" }), {
+          status: 409,
+          headers: { "Content-Length": String(MAX_ERROR_BODY_BYTES + 1) },
+        }),
+    );
+    await expect(
+      createHttpClient(creds, declared as unknown as typeof fetch).reorderAccounts([]),
+    ).rejects.toMatchObject({ code: null });
+  });
+});
+
+describe("prepare deadline", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("allows 40 s for discovery while other calls keep 10 s", async () => {
+    vi.useFakeTimers();
+    const hanging = vi.fn(() => new Promise<Response>(() => undefined));
+    const client = createHttpClient(creds, hanging as unknown as typeof fetch);
+    const prepare = client
+      .prepare({ account_id: null, revision: null, provider: "claude_platform", credential_kind: "console_session", secret: "k" })
+      .catch((e: unknown) => e);
+    const accounts = client.accounts().catch((e: unknown) => e);
+    let settled = false;
+    void prepare.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    expect(await accounts).toMatchObject({ kind: "timeout" });
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(PREPARE_TIMEOUT_MS - REQUEST_TIMEOUT_MS);
+    expect(await prepare).toMatchObject({ kind: "timeout" });
   });
 });

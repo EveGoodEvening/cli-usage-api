@@ -423,7 +423,10 @@ class CredentialStore:
 
     Session references are scoped to this instance and never contact a keyring.
     Persistent references survive instances, but carry neither secrets nor suffixes.
-    Replacement creates a new reference; callers remove the old one after saving.
+    Every put mints a fresh reference and never reuses one, so a secret never
+    changes behind an unchanged reference; callers remove the old one after saving.
+    ``_lock`` guards only the session dict: keyring backends serialize themselves,
+    and a slow or blocked backend call must not delay session reads.
     """
 
     def __init__(self, backend: object | None = None) -> None:
@@ -440,6 +443,23 @@ class CredentialStore:
         except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
             raise _credential_error() from None
 
+    def secure_available(self) -> bool:
+        """Whether the exact secure backend type is selected; stores nothing, never falls back.
+
+        This reflects only the backend type, so a later persistent put can still fail.
+        """
+        try:
+            self._secure_backend()
+        except Exception:  # noqa: BLE001 - Any backend failure means unavailable.
+            return False
+        return True
+
+    def session_present(self, ref: object) -> bool:
+        if not isinstance(ref, str) or not ref.startswith("session:"):
+            return False
+        with self._lock:
+            return ref in self._session
+
     def put(self, account_id: str, secret: str, *, persist: bool) -> str:
         if (
             not _uuid(account_id)
@@ -449,44 +469,44 @@ class CredentialStore:
             or type(persist) is not bool
         ):
             raise _credential_error()
-        with self._lock:
-            if not persist:
-                ref = f"session:{uuid4()}"
+        if not persist:
+            ref = f"session:{uuid4()}"
+            with self._lock:
                 self._session[ref] = secret
-                return ref
-            ref = f"keyring:{account_id}:{uuid4()}"
-            try:
-                self._secure_backend().set_password(_SERVICE, ref, secret)
-            except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
-                raise _credential_error() from None
             return ref
+        ref = f"keyring:{account_id}:{uuid4()}"
+        try:
+            self._secure_backend().set_password(_SERVICE, ref, secret)
+        except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
+            raise _credential_error() from None
+        return ref
 
     def get(self, ref: str) -> str:
         parts = _reference(ref)
-        with self._lock:
-            if parts[0] == "session":
+        if parts[0] == "session":
+            with self._lock:
                 secret = self._session.get(ref)
-            else:
-                try:
-                    secret = self._secure_backend().get_password(_SERVICE, ref)
-                except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
-                    raise _credential_error() from None
-            if not isinstance(secret, str) or not secret or len(secret) > MAX_FILE_BYTES:
-                raise _credential_error()
-            return secret
+        else:
+            try:
+                secret = self._secure_backend().get_password(_SERVICE, ref)
+            except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
+                raise _credential_error() from None
+        if not isinstance(secret, str) or not secret or len(secret) > MAX_FILE_BYTES:
+            raise _credential_error()
+        return secret
 
     def delete(self, ref: str) -> None:
         parts = _reference(ref)
-        with self._lock:
-            if parts[0] == "session":
+        if parts[0] == "session":
+            with self._lock:
                 self._session.pop(ref, None)
-                return
-            try:
-                backend = self._secure_backend()
-                if backend.get_password(_SERVICE, ref) is not None:
-                    backend.delete_password(_SERVICE, ref)
-            except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
-                raise _credential_error() from None
+            return
+        try:
+            backend = self._secure_backend()
+            if backend.get_password(_SERVICE, ref) is not None:
+                backend.delete_password(_SERVICE, ref)
+        except Exception:  # noqa: BLE001 - Redact arbitrary backend errors.
+            raise _credential_error() from None
 
 
 API_TOKEN_PREFIX = "usk_"
@@ -532,7 +552,7 @@ class ApiToken:
 
 
 class ApiTokenStore(_ConfigFile):
-    """Private read-only API bearer-token digests beside the account configuration.
+    """Private API bearer-token digests beside the account configuration.
 
     The file holds only SHA-256 digests plus nonsecret metadata, using the shared
     private, locked and atomically replaced file primitives. signature() is a cheap

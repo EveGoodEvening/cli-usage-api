@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from datetime import datetime, timedelta
 from importlib.resources import files
 
@@ -141,7 +141,10 @@ class DemoSource:
         if self._running and not self._closed:
             self._emit(account_id)
 
-    async def update_accounts(self, accounts: Iterable[Account]) -> None:
+    async def update_accounts(
+        self, accounts: Iterable[Account], *, invalidate: Collection[str] | None = None
+    ) -> None:
+        """Validate demo accounts; ``invalidate`` is accepted and ignored (no live state)."""
         if self._closed:
             return
         accounts = tuple(accounts)

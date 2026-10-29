@@ -960,3 +960,78 @@ def test_standalone_main_protects_saved_selectors(tmp_path, monkeypatch, capsys)
     assert seen["protected"] == frozenset()
     out = capsys.readouterr().out
     assert "accounts unavailable; no protected Grok scopes" in out
+
+
+def test_grok_custom_reference_protection_is_lexical(tmp_path, monkeypatch):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "grok").symlink_to(real)
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "grok"))
+    forms = keepalive.grok_default_forms()
+    assert forms == {str(tmp_path / "grok" / "auth.json"), str(real / "auth.json")}
+    accounts = (
+        _grok_account(1, "https://auth.x.ai::literal", ref=str(tmp_path / "grok" / "auth.json")),
+        _grok_account(2, "https://auth.x.ai::resolved", ref=str(real / "auth.json")),
+        _grok_account(3, "https://auth.x.ai::default"),
+        _grok_account(4, "https://auth.x.ai::dots", ref=f"{tmp_path}/grok/./auth.json"),
+        _grok_account(5, "https://auth.x.ai::elsewhere", ref=str(tmp_path / "x" / "auth.json")),
+    )
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("custom references must never be resolved")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(keepalive.os.path, "realpath", forbidden)
+        protected = keepalive.grok_protected_scopes(accounts, default_forms=forms)
+    # normpath is lexical: an unnormalized saved reference still matches.
+    assert protected == frozenset(
+        {
+            "https://auth.x.ai::literal",
+            "https://auth.x.ai::resolved",
+            "https://auth.x.ai::default",
+            "https://auth.x.ai::dots",
+        }
+    )
+
+
+def test_saved_symlinked_grok_reference_keeps_protection(tmp_path, monkeypatch):
+    # A saved reference reaching the default file through a symlinked directory is
+    # resolved once at startup; later lexical matching reuses that result.
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "grok"))
+    (tmp_path / "grok").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "grok")
+    selector = "https://auth.x.ai::linked"
+    accounts = (
+        _grok_account(1, selector, ref=str(tmp_path / "link" / "auth.json")),
+        _grok_account(2, "https://auth.x.ai::other", ref=str(tmp_path / "x" / "auth.json")),
+    )
+    forms = keepalive.grok_default_forms()
+    assert keepalive.grok_protected_scopes(accounts, default_forms=forms) == frozenset()
+    resolved = keepalive.resolve_grok_references(accounts)
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("observer-time matching must not resolve references")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(keepalive.os.path, "realpath", forbidden)
+        protected = keepalive.grok_protected_scopes(
+            accounts, default_forms=forms, resolved=resolved
+        )
+    assert protected == frozenset({selector})
+
+
+def test_standalone_main_protects_saved_symlinked_selector(tmp_path, monkeypatch):
+    _homes(tmp_path, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    (tmp_path / "link").symlink_to(tmp_path / "GROK_HOME")
+    seen = {}
+
+    def build(names, mode, *, log, grok_protected_scopes=()):
+        seen["protected"] = frozenset(grok_protected_scopes)
+        return Keepalive([], log=log)
+
+    monkeypatch.setattr(keepalive, "build", build)
+    selector = "https://auth.x.ai::linked"
+    AccountStore().save((_grok_account(1, selector, ref=str(tmp_path / "link" / "auth.json")),))
+    assert keepalive.main(["--once"]) == 0
+    assert seen["protected"] == frozenset({selector})

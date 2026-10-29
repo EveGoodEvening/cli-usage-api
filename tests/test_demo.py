@@ -402,3 +402,20 @@ def test_unknown_scenario_is_rejected_before_fixture_access(monkeypatch):
     monkeypatch.setattr("cli_usage_api.demo.files", forbidden)
     with pytest.raises(ValueError, match="scenario"):
         DemoSource(scenario="live-fallback", publish=lambda snapshot: None)
+
+
+@pytest.mark.asyncio
+async def test_update_accounts_accepts_and_ignores_invalidate():
+    published = []
+    source = DemoSource(publish=published.append)
+    original = source.accounts
+    await source.start()
+    try:
+        await source.update_accounts(original[::-1], invalidate=frozenset())
+        assert source.accounts == original[::-1]
+        await source.update_accounts((original[0],), invalidate={original[0].id})
+        assert source.accounts == (original[0],)
+        with pytest.raises(ValueError, match="fictional"):
+            await source.update_accounts((original[0], original[0]), invalidate=frozenset())
+    finally:
+        await source.stop()

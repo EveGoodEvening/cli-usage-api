@@ -667,3 +667,39 @@ async def test_selection_stays_visible_when_a_row_grows_on_tick():
         assert listing.highlighted == index
         assert top <= start and end <= top + listing.scrollable_content_region.height
         await pilot.press("q")
+
+
+def header_heights(app) -> dict[str, int]:
+    return {account.id: header(app, account).count("\n") for account, _ in app._groups()}
+
+
+@pytest.mark.parametrize("size", [(110, 40), (80, 24)])
+async def test_reorder_moves_headers_and_keeps_selection_state(size):
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        heights = header_heights(app)
+        reordered = tuple(reversed(app.accounts))
+        snapshots = dict(app.snapshots)
+        async with app.account_lock:
+            await app.accounts_changed(reordered, invalidate=frozenset())
+        await pilot.pause()
+        # An unselected dashboard stays unselected through a reorder.
+        assert app.listing.highlighted is None and app.highlighted_row() is None
+        assert [account for account, _ in app._groups()] == list(reordered)
+        headers = [str(o.prompt) for o in app.listing._options if o.disabled]
+        assert len(headers) == len(reordered)
+        assert all(account.label in text for account, text in zip(reordered, headers, strict=True))
+        assert set(app.snapshots) == set(snapshots)
+        assert header_heights(app) == heights
+        target = row(app, "codex.subscription.weekly")
+        app.listing.highlighted = app.option_index(target)
+        await pilot.pause()
+        async with app.account_lock:
+            await app.accounts_changed(tuple(reversed(reordered)), invalidate=frozenset())
+        await pilot.pause()
+        # The selected row keeps its account and metric, not its old position.
+        assert app.highlighted_row() == target
+        assert [account for account, _ in app._groups()] == list(reversed(reordered))
+        assert header_heights(app) == heights
+        await pilot.press("q")

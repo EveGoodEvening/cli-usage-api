@@ -6,13 +6,11 @@ import argparse
 import asyncio
 import contextlib
 import getpass
-import json
 import sys
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import uuid4
 
 from cli_usage_api import api as api_server
@@ -24,6 +22,10 @@ from cli_usage_api.accounts import (
     KINDS,
     AccountFlowError,
     AccountService,
+    allowed_kinds,
+    grok_scopes,
+    validate_reference,
+    validate_secret,
 )
 from cli_usage_api.api import DEFAULT_HOST, DEFAULT_PORT, OriginError, is_loopback_host
 from cli_usage_api.app import UsageApp
@@ -33,13 +35,13 @@ from cli_usage_api.credentials import (
     _read_file,
 )
 from cli_usage_api.domain import (
-    READ_CREDENTIAL_KINDS,
     Account,
     CredentialKind,
     DomainError,
     ProviderId,
     sanitize_text,
 )
+from cli_usage_api.operations import AccountOperations
 from cli_usage_api.providers.base import build_providers
 from cli_usage_api.scheduler import Scheduler
 from cli_usage_api.storage import (
@@ -53,7 +55,7 @@ from cli_usage_api.storage import (
     CredentialStore,
     SettingsStore,
 )
-from cli_usage_api.transport import Transport, TransportError, _cookie_value, _header_token
+from cli_usage_api.transport import Transport, TransportError
 
 PROVIDER_NAMES = {
     "claude-subscription": ProviderId.CLAUDE_SUBSCRIPTION,
@@ -61,6 +63,14 @@ PROVIDER_NAMES = {
     "codex-subscription": ProviderId.CODEX_SUBSCRIPTION,
     "grok-subscription": ProviderId.GROK_SUBSCRIPTION,
 }
+
+
+# AccountFlowError codes: exit 2 (config/conflict) and the keyring hint set match
+# the earlier context-based mapping, so CLI messages and exit codes are unchanged.
+_CONFIG_EXIT_CODES = frozenset({"conflict", "config_unavailable", "committed_uncertain"})
+_KEYRING_HINT_CODES = frozenset(
+    {"secure_store_unavailable", "cleanup_failed", "credential_cleanup_failed"}
+)
 
 
 class CommandError(ValueError):
@@ -166,8 +176,9 @@ def _parser() -> Parser:
     parser.add_argument(
         "--api",
         action="store_true",
-        help="Also serve the read-only HTTP API from this dashboard process; it reads the "
-        "same snapshots the TUI shows (including session-only credentials entered here).",
+        help="Also serve the HTTP API from this dashboard process; it reads the same "
+        "snapshots the TUI shows (including session-only credentials entered here), and "
+        "accounts can be managed over HTTP unless --read-only.",
     )
     parser.add_argument(
         "--api-host", default=None, help=f"With --api: bind host (default {DEFAULT_HOST})"
@@ -189,6 +200,12 @@ def _parser() -> Parser:
         action="store_true",
         help="With --api: use the right-most X-Forwarded-For entry for failed-auth limiting.",
     )
+    parser.add_argument(
+        "--read-only",
+        dest="dashboard_read_only",
+        action="store_true",
+        help="With --api: disable account changes over HTTP.",
+    )
     _keepalive_arguments(parser, prefix="")
     commands = parser.add_subparsers(dest="command")
     accounts = commands.add_parser("accounts", help="Manage local accounts and secure credentials")
@@ -208,12 +225,13 @@ def _parser() -> Parser:
     for name in ("set", "delete"):
         action = key_actions.add_parser(name)
         action.add_argument("account_id")
-    api = commands.add_parser("api", help="Read-only HTTP API for usage data")
+    api = commands.add_parser("api", help="HTTP API for usage data and account management")
     api_actions = api.add_subparsers(dest="api_action", required=True)
     serve = api_actions.add_parser(
         "serve",
-        help="Serve read-only usage JSON (headless). Accounts are read once at startup; "
-        "restart after changing accounts.",
+        help="Serve usage JSON (headless). Account changes made over the API apply "
+        "immediately; changes from `usage accounts` in another process apply on the next "
+        "API write or restart.",
     )
     serve.add_argument("--host", default=DEFAULT_HOST, help=f"Bind host (default {DEFAULT_HOST})")
     serve.add_argument(
@@ -239,6 +257,12 @@ def _parser() -> Parser:
         help="Use the right-most X-Forwarded-For entry as the client address for "
         "failed-auth limiting (only behind a trusted reverse proxy).",
     )
+    serve.add_argument(
+        "--read-only",
+        dest="serve_read_only",
+        action="store_true",
+        help="Disable account changes over HTTP (demo is always read-only).",
+    )
     serve.add_argument("--debug-log", dest="serve_debug_log", metavar="PATH", default=None)
     serve.add_argument(
         "--debug-provider",
@@ -249,7 +273,7 @@ def _parser() -> Parser:
         default=None,
     )
     _keepalive_arguments(serve, prefix="serve_")
-    token = api_actions.add_parser("token", help="Manage read-only API bearer tokens")
+    token = api_actions.add_parser("token", help="Manage API bearer tokens")
     token_actions = token.add_subparsers(dest="token_action", required=True)
     create = token_actions.add_parser("create", help="Create a token; it is shown only once")
     create.add_argument("--label", default=None)
@@ -308,21 +332,17 @@ def _secret(kind: CredentialKind) -> str:
         raise Cancelled
     if not value or len(value) > 1_048_576:
         raise CommandError("Secret must be nonempty and at most 1 MiB; no changes were made.")
-    if not _header_token(value) or (
-        kind == CredentialKind.CONSOLE_SESSION and not _cookie_value(value)
-    ):
-        raise CommandError("Invalid credential value; enter only the value, not headers or a HAR.")
-    return value
+    try:
+        return validate_secret(kind, value)
+    except AccountFlowError as error:
+        raise CommandError(str(error)) from None
 
 
 def _source(account: Account, credentials: CredentialStore) -> tuple[Account, str | None]:
-    allowed = set(READ_CREDENTIAL_KINDS[account.provider])
-    if account.provider != ProviderId.CODEX_SUBSCRIPTION:
-        allowed.add(CredentialKind.API_KEY)
     kind = _choose(
         "Credential source number",
         [("No credential / local profile", None)]
-        + [(label, kind) for kind, label in KINDS.items() if kind in allowed],
+        + [(KINDS[kind], kind) for kind in allowed_kinds(account.provider)],
     )
     draft = replace(
         account,
@@ -341,19 +361,18 @@ def _source(account: Account, credentials: CredentialStore) -> tuple[Account, st
             reference = _ask(
                 "External credential reference: default or absolute file path", "default"
             )
-            if reference != "default" and not Path(reference).is_absolute():
-                raise CommandError("Choose default or an absolute external-file path.")
+            try:
+                reference = validate_reference(kind, reference)
+            except AccountFlowError as error:
+                raise CommandError(str(error)) from None
             draft = replace(draft, credential_ref=reference)
             if kind == CredentialKind.GROK_AUTH_FILE:
-                payload = json.loads(_read_file(resolver._path(draft)))
-                if not isinstance(payload, dict):
-                    raise CommandError("Invalid Grok auth file; sign in with Grok again.", 3)
-                scopes = [
-                    scope
-                    for scope in payload
-                    if scope == "https://accounts.x.ai/sign-in"
-                    or (scope.startswith("https://auth.x.ai::") and scope != "https://auth.x.ai::")
-                ]
+                try:
+                    scopes = grok_scopes(_read_file(resolver._path(draft)))
+                except AccountFlowError:
+                    raise CommandError(
+                        "Invalid Grok auth file; sign in with Grok again.", 3
+                    ) from None
                 selector = _choose(
                     "Select intended Grok scope explicitly",
                     [
@@ -536,6 +555,9 @@ def _api_tokens(args) -> int:
         print("Copy it now; it is shown only once and only its SHA-256 digest is stored.")
         print(token)
         print("Use it as: Authorization: Bearer <token>. Revoke with usage api token revoke ID.")
+        print(
+            "This token can add, edit and remove accounts unless the server runs with --read-only."
+        )
         return 0
     token_id = args.token_id
     if not any(item.id == token_id for item in store.load()):
@@ -559,6 +581,7 @@ class ApiPlan:
         *,
         demo: bool,
         trust_proxy: bool,
+        read_only: bool = False,
         options: tuple[str, str] = ("--host", "--port"),
     ) -> None:
         host_option, port_option = options
@@ -586,6 +609,8 @@ class ApiPlan:
         self.host_option = host_option
         self.demo = demo
         self.trust_proxy = trust_proxy
+        # Demo is always read-only; live writes are on unless --read-only.
+        self.read_only = read_only or demo
         self.loopback = is_loopback_host(host)
         self.token_store: ApiTokenStore | None = None
         self.allow_unauthenticated = False
@@ -603,13 +628,14 @@ class ApiPlan:
             )
         self.token_store = token_store
 
-    def create_app(self, hub) -> api_server.UsageApi:
+    def create_app(self, hub, operations: AccountOperations | None = None) -> api_server.UsageApi:
         return api_server.create_app(
             hub,
             self.token_store,
             self.origins,
             trust_proxy=self.trust_proxy,
             allow_unauthenticated=self.allow_unauthenticated,
+            operations=None if self.read_only or self.demo else operations,
         )
 
     def bind(self):
@@ -665,12 +691,20 @@ class KeepaliveService:
         self._file = log_file if log_file is not None else keepalive.file_logger()
         self._echo = echo
         self._alert: Callable[[str], None] | None = None
+        # Resolved once here: later account changes are matched lexically, so
+        # token-supplied references never cause filesystem lookups on the loop.
+        self._grok_defaults = keepalive.grok_default_forms()
+        # References already saved at startup are resolved now, before the loop runs,
+        # so a symlinked or unnormalized saved path keeps its protection.
+        self._grok_resolved = keepalive.resolve_grok_references(accounts)
         try:
             self.keepalive = keepalive.build(
                 names,
                 claude_mode or "hybrid",
                 log=self.log,
-                grok_protected_scopes=keepalive.grok_protected_scopes(accounts),
+                grok_protected_scopes=keepalive.grok_protected_scopes(
+                    accounts, default_forms=self._grok_defaults, resolved=self._grok_resolved
+                ),
             )
         except keepalive.KeepaliveError as error:
             raise CommandError(str(error)) from None
@@ -684,7 +718,12 @@ class KeepaliveService:
 
     def accounts_changed(self, accounts: Sequence[Account]) -> None:
         """Observer hook: protect the selectors the changed accounts now read."""
-        self.keepalive.set_protected("grok", keepalive.grok_protected_scopes(tuple(accounts)))
+        self.keepalive.set_protected(
+            "grok",
+            keepalive.grok_protected_scopes(
+                tuple(accounts), default_forms=self._grok_defaults, resolved=self._grok_resolved
+            ),
+        )
 
     @property
     def note(self) -> str:
@@ -781,6 +820,7 @@ def _serve(args) -> int:
         args.allow_origins,
         demo=args.serve_demo,
         trust_proxy=args.trust_proxy,
+        read_only=args.serve_read_only,
     )
     if args.serve_scenario is not None and not args.serve_demo:
         raise CommandError("--scenario requires --demo.")
@@ -797,25 +837,41 @@ def _serve(args) -> int:
     plan.authorize()
     with contextlib.ExitStack() as stack:
         services = []
+        operations = None
         # Branch demo before constructing any live store, resolver, provider or transport.
         if args.serve_demo:
             hub = api_server.demo_hub(args.serve_scenario or "healthy")
         else:
             if args.serve_debug_log is not None:
                 _configure_debug(args.serve_debug_log, args.serve_debug_provider)
-            accounts = AccountStore().load()
+            store = AccountStore()
+            accounts = store.load()
+            keepalive_service = None
             if args.serve_keepalive:
-                service = KeepaliveService(
+                keepalive_service = KeepaliveService(
                     args.serve_keepalive_cli,
                     args.serve_keepalive_claude_mode,
                     accounts,
                     echo=True,
                 )
-                stack.enter_context(_keepalive_lock(service))
-                services.append(service)
-            factory = LiveFactory(CredentialStore())
+                stack.enter_context(_keepalive_lock(keepalive_service))
+                services.append(keepalive_service)
+            # One credential store: the resolver reads session secrets the API stores.
+            credentials = CredentialStore()
+            factory = LiveFactory(credentials)
             hub = api_server.live_hub(accounts, factory)
-        app = plan.create_app(hub)
+            if keepalive_service is not None:
+                # API account writes update the protected Grok scopes.
+                hub.add_observer(keepalive_service)
+            if not plan.read_only:
+                operations = AccountOperations(
+                    host=hub,
+                    account_store=store,
+                    credential_store=credentials,
+                    resolver=factory.resolver,
+                    console_discovery=factory.console_discovery,
+                )
+        app = plan.create_app(hub, operations)
         try:
             sock = plan.bind()
         except CommandError:
@@ -837,12 +893,26 @@ def _serve_bound(args, plan: ApiPlan, hub, app, sock, services) -> int:
     else:
         print("Bearer token required. Token revocation applies within seconds.")
     if hub.mode == "live":
-        print(
-            f"{len(hub.accounts)} account(s) loaded; restart serve after changing accounts. "
-            "Credentials are resolved by the server process only."
-        )
+        writable = app.operations is not None
+        if writable:
+            print(
+                f"{len(hub.accounts)} account(s) loaded. Account changes over the API are "
+                "ENABLED for every API token (use --read-only to disable)."
+            )
+        else:
+            print(f"{len(hub.accounts)} account(s) loaded. API is read-only (--read-only).")
+        print("Credentials are resolved by the server process only.")
         if not hub.accounts:
-            print("No accounts configured. Add accounts with usage accounts add --provider ...")
+            if writable:
+                print(
+                    "No accounts configured. Add accounts in the web UI or with usage accounts "
+                    "add --provider ..."
+                )
+            else:
+                print(
+                    "No accounts configured. Add accounts with usage accounts add --provider "
+                    "..., then restart serve."
+                )
     if origins:
         print("Allowed browser origins: " + ", ".join(origins))
     elif not loopback:
@@ -890,12 +960,14 @@ def _dashboard(args) -> int:
             args.dashboard_allow_origins,
             demo=args.demo,
             trust_proxy=args.dashboard_trust_proxy,
+            read_only=args.dashboard_read_only,
             options=("--api-host", "--api-port"),
         )
         plan.authorize()
     settings = SettingsStore()
     with contextlib.ExitStack() as stack:
         services = []
+        operations = None
         if args.demo:
             app = UsageApp(
                 mode="demo", scenario=args.scenario or "healthy", settings_store=settings
@@ -925,9 +997,19 @@ def _dashboard(args) -> int:
             if keepalive_service is not None:
                 # Account edits in the TUI update the protected Grok scopes.
                 app.add_observer(keepalive_service)
+            if plan is not None and not plan.read_only:
+                # Web writes go through the app (its lock, scheduler and manager).
+                operations = AccountOperations(
+                    host=app,
+                    account_store=store,
+                    credential_store=credentials,
+                    resolver=factory.resolver,
+                    console_discovery=factory.console_discovery,
+                )
         if plan is not None:
+            api_server.harden_process()
             # One app hub mirrors what the TUI shows: same scheduler, same credentials.
-            usage_api = plan.create_app(api_server.AppHub.attach(app))
+            usage_api = plan.create_app(api_server.AppHub.attach(app), operations)
             sock = plan.bind()
             stack.callback(sock.close)
             services.append(api_server.EmbeddedServer(usage_api, sock, address=plan.address))
@@ -958,6 +1040,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             or args.api_port is not None
             or args.dashboard_allow_origins is not None
             or args.dashboard_trust_proxy
+            or args.dashboard_read_only
         )
         keepalive_options = (
             args.keepalive
@@ -966,12 +1049,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if args.command is not None and (args.api or dashboard_api_options or keepalive_options):
             raise CommandError(
-                "--api, --allow-origin, --trust-proxy and --keepalive options before a command "
-                "apply only to the dashboard; use usage api serve options instead."
+                "--api, --allow-origin, --trust-proxy, --read-only and --keepalive options "
+                "before a command apply only to the dashboard; use usage api serve options "
+                "instead."
             )
         if dashboard_api_options and not args.api:
             raise CommandError(
-                "--api-host, --api-port, --allow-origin and --trust-proxy require --api."
+                "--api-host, --api-port, --allow-origin, --trust-proxy and --read-only "
+                "require --api."
             )
         if args.command == "accounts":
             return _accounts(args)
@@ -990,13 +1075,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         # The reusable service distinguishes a committed write from rejection.
         # Its curated messages may be printed, but never its arbitrary context.
         print(str(error), file=sys.stderr)
-        if isinstance(error.__context__, CredentialError):
+        if error.code == "failed":
+            # Unclassified host errors keep the original context-based mapping.
+            keyring_hint = isinstance(error.__context__, CredentialError)
+            config = isinstance(error.__context__, (ConfigError, AccountFlowError))
+        else:
+            keyring_hint = error.code in _KEYRING_HINT_CODES
+            config = error.code in _CONFIG_EXIT_CODES
+        if keyring_hint:
             print(
                 "CLI secrets require encrypted OS-keyring persistence. Unlock the keyring "
                 "or use the TUI for explicit session-only mode.",
                 file=sys.stderr,
             )
-        return 2 if isinstance(error.__context__, (ConfigError, AccountFlowError)) else 3
+        return 2 if config else 3
     except ConfigError:
         print(
             "Cannot read/write config. Check private directory/file permissions and schema. "

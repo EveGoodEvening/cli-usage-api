@@ -73,7 +73,7 @@ export function Login({
             CLIUsageAPI
             {MOCK_ENABLED ? <DemoBadge /> : null}
           </h1>
-          <p>只读查看各账号的额度与余额。</p>
+          <p>查看各账号的额度与余额；服务器允许时也可在网页管理账号。</p>
         </header>
 
         {MOCK_ENABLED ? <p className="rule-note">开发模式：内置合成数据，不连服务器。令牌任填；填 invalid 测试失效。</p> : null}
@@ -146,6 +146,7 @@ export function Login({
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
           <span>在这台设备上记住</span>
           <small>{remember ? "保存在本机，直到退出" : "关闭标签页即清除"}</small>
+          <small className="check__note">此令牌可能可以修改服务器上的账号；共享设备上不要记住它。</small>
         </label>
 
         {error ? (

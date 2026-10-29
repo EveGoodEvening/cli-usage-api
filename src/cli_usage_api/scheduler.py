@@ -12,12 +12,13 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from cli_usage_api import debuglog
+from cli_usage_api.accounts import credential_identity
 from cli_usage_api.credentials import CredentialResolutionError, CredentialResolver
 from cli_usage_api.domain import (
     Account,
@@ -116,9 +117,15 @@ class Scheduler:
     bypass the normal polling interval, including Claude's three-minute floor.
     Requests during a fetch coalesce into one follow-up, still subject to retry
     embargoes and provider start spacing.
-    update_accounts() invalidates every supplied generation, even when a secret
-    was replaced behind an unchanged reference. Same-provider retry embargoes
-    survive that operation. Removed/replaced generations can never publish.
+    update_accounts() without ``invalidate`` replaces every supplied generation,
+    even when a secret was replaced behind an unchanged reference. With an
+    ``invalidate`` set it keeps the generation of each account outside that set
+    whose credential identity is unchanged (a rename, interval, enable or order
+    change). That is sound because keyring and session secrets never change
+    behind an unchanged reference (each put mints a new one); file contents can,
+    so an explicit source submission must name the account in ``invalidate``.
+    Same-provider retry embargoes survive replacement. Removed/replaced
+    generations can never publish.
     Eligible accounts run oldest account deadline first, before origin spacing is
     applied, so periodic polls cannot overtake an account's initial observation.
     """
@@ -177,20 +184,44 @@ class Scheduler:
             state.due = self._clock.monotonic()
         self._wake.set()
 
-    async def update_accounts(self, accounts: Iterable[Account]) -> None:
+    async def update_accounts(
+        self, accounts: Iterable[Account], *, invalidate: Collection[str] | None = None
+    ) -> None:
         if self._closed:
             return
         states = self._make_states(accounts)
+        kept = set()
         for key, state in states.items():
             old = self._states.get(key)
-            if old is not None and old.account.provider == state.account.provider:
+            if old is None:
+                continue
+            if (
+                invalidate is not None
+                and key not in invalidate
+                and credential_identity(old.account) == credential_identity(state.account)
+            ):
+                # Same generation: due, embargo, suspension and in-flight work stay.
+                if state.account.enabled and not old.account.enabled:
+                    old.pending = True
+                    old.suspended = False
+                seconds = state.account.effective_poll_interval_seconds
+                if seconds < old.account.effective_poll_interval_seconds:
+                    # A shorter interval applies now; the retry embargo is separate
+                    # and never shortened.
+                    old.due = min(old.due, self._clock.monotonic() + seconds)
+                old.account = state.account
+                states[key] = old
+                kept.add(key)
+                continue
+            if old.account.provider == state.account.provider:
                 state.retry_deadline = old.retry_deadline
                 state.failures = old.failures
                 if old.account == state.account:
                     state.snapshot = old.snapshot
         self._states = states
-        for task in tuple(self._active):
-            task.cancel()
+        for task, key in tuple(self._active.items()):
+            if key not in kept:
+                task.cancel()
         self._wake.set()
 
     async def stop(self) -> None:
@@ -359,7 +390,8 @@ class Scheduler:
             )
             state.failures = 0
             state.retry_deadline = 0.0
-            seconds = account.effective_poll_interval_seconds
+            # The current account: an interval edit may have landed mid-fetch.
+            seconds = state.account.effective_poll_interval_seconds
             offset = self._rng.uniform(-seconds * 0.1, seconds * 0.1)
             floor = seconds if account.provider == ProviderId.CLAUDE_SUBSCRIPTION else 30
             interval = max(float(floor), seconds + offset)

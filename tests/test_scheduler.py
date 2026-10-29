@@ -944,3 +944,179 @@ async def test_claude_retry_after_cannot_shorten_local_cooldown(server_delay, ex
         assert len(provider.calls) == 2
     finally:
         await scheduler.stop()
+
+
+async def test_identity_preserving_rename_keeps_generation_and_publishes_in_flight():
+    scheduler, _clock, provider, resolver, published = setup()
+    provider.gate = asyncio.Event()
+    await scheduler.start()
+    await settle()
+    key = account().id
+    state = scheduler._states[key]
+    renamed = replace(account(), label="Renamed", poll_interval_seconds=300)
+    await scheduler.update_accounts((renamed,), invalidate=frozenset())
+    await settle()
+    assert scheduler._states[key] is state and state.account == renamed
+    assert provider.cancellations == 0 and len(scheduler._active) == 1
+    provider.gate.set()
+    await settle()
+    assert len(published) == 1 and published[-1].account_id == key
+    due = state.due
+    await scheduler.update_accounts((replace(renamed, label="Again"),), invalidate=frozenset())
+    await settle()
+    assert state.due == due and state.snapshot is published[-1]
+    assert len(provider.calls) == len(resolver.calls) == 1
+    await scheduler.stop()
+
+
+async def test_shorter_interval_reschedules_kept_generation():
+    long = account(3, ProviderId.GROK_SUBSCRIPTION, poll_interval_seconds=3600)
+    scheduler, clock, provider, _, _ = setup((long,))
+    await scheduler.start()
+    await settle()
+    assert len(provider.calls) == 1
+    state = scheduler._states[long.id]
+    short = replace(long, poll_interval_seconds=60)
+    await scheduler.update_accounts((short,), invalidate=frozenset())
+    assert scheduler._states[long.id] is state
+    await clock.advance(60)
+    assert len(provider.calls) == 2
+    # A longer interval never pulls the deadline in.
+    due = state.due
+    await scheduler.update_accounts((long,), invalidate=frozenset())
+    assert state.due == due
+    await scheduler.stop()
+
+
+async def test_interval_edit_during_fetch_schedules_from_new_interval():
+    long = account(3, ProviderId.GROK_SUBSCRIPTION, poll_interval_seconds=3600)
+    scheduler, clock, provider, _, _ = setup((long,))
+    provider.gate = asyncio.Event()
+    await scheduler.start()
+    await settle()
+    state = scheduler._states[long.id]
+    await scheduler.update_accounts(
+        (replace(long, poll_interval_seconds=60),), invalidate=frozenset()
+    )
+    provider.gate.set()
+    await settle()
+    assert state.due <= clock.monotonic() + 66
+    await clock.advance(66)
+    assert len(provider.calls) == 2
+    await scheduler.stop()
+
+
+async def test_identity_preserving_update_keeps_suspension_and_reenable_sets_pending():
+    scheduler, clock, provider, _, _ = setup()
+    provider.results = [TransportError(FetchState.AUTH_REQUIRED, "auth_required")]
+    await scheduler.start()
+    await settle()
+    state = scheduler._states[account().id]
+    assert state.suspended
+    await scheduler.update_accounts((replace(account(), label="Renamed"),), invalidate=frozenset())
+    await clock.advance(10000)
+    assert state.suspended and len(provider.calls) == 1
+    disabled = replace(account(), enabled=False)
+    await scheduler.update_accounts((disabled,), invalidate=frozenset())
+    await settle()
+    assert scheduler._states[account().id] is state and state.suspended
+    await scheduler.update_accounts((account(),), invalidate=frozenset())
+    assert state.pending and not state.suspended
+    await settle()
+    assert len(provider.calls) == 2
+    await scheduler.stop()
+
+
+async def test_pure_permutation_cancels_nothing_and_fetches_nothing():
+    first, second = account(1), account(2, ProviderId.GROK_SUBSCRIPTION)
+    scheduler, clock, provider, resolver, _published = setup((first, second))
+    await scheduler.start()
+    await clock.advance(5)
+    assert len(provider.calls) == 2
+    provider.gate = asyncio.Event()
+    states = dict(scheduler._states)
+    await scheduler.update_accounts((second, first), invalidate=frozenset())
+    await settle()
+    assert list(scheduler._states) == [second.id, first.id]
+    assert all(scheduler._states[key] is value for key, value in states.items())
+    assert len(provider.calls) == len(resolver.calls) == 2
+    assert provider.cancellations == 0
+    await scheduler.stop()
+
+
+async def test_explicit_invalidation_of_equal_account_starts_fresh_generation():
+    scheduler, clock, provider, _, published = setup()
+    provider.gate = asyncio.Event()
+    await scheduler.start()
+    await settle()
+    old = scheduler._states[account().id]
+    await scheduler.update_accounts((account(),), invalidate={account().id})
+    await settle()
+    assert scheduler._states[account().id] is not old
+    assert provider.cancellations == 1
+    provider.gate.set()
+    await clock.advance(5)
+    # Only the fresh generation's observation is published.
+    assert len(published) == 1 and len(provider.calls) == 2
+    await scheduler.stop()
+
+
+async def test_explicit_invalidation_unsuspends_equal_account():
+    scheduler, clock, provider, _, _ = setup()
+    provider.results = [TransportError(FetchState.AUTH_REQUIRED, "auth_required")]
+    await scheduler.start()
+    await settle()
+    assert scheduler._states[account().id].suspended
+    await scheduler.update_accounts((account(),), invalidate=[account().id])
+    await clock.advance(5)
+    assert len(provider.calls) == 2
+    await scheduler.stop()
+
+
+async def test_changed_reference_is_fresh_even_with_empty_invalidate_set():
+    scheduler, clock, provider, _, published = setup()
+    provider.gate = asyncio.Event()
+    await scheduler.start()
+    await settle()
+    replacement = replace(account(), credential_ref="replacement")
+    await scheduler.update_accounts((replacement,), invalidate=frozenset())
+    await settle()
+    assert provider.cancellations == 1
+    provider.gate.set()
+    await clock.advance(5)
+    assert provider.calls[-1][0] == replacement
+    assert [item.account_id for item in published] == [replacement.id]
+    await scheduler.stop()
+
+
+async def test_removed_account_task_cancelled_while_kept_account_continues():
+    first, second = account(1), account(2, ProviderId.GROK_SUBSCRIPTION)
+    scheduler, clock, provider, _, published = setup((first, second))
+    provider.gate = asyncio.Event()
+    await scheduler.start()
+    await clock.advance(5)
+    assert len(scheduler._active) == 2
+    await scheduler.update_accounts((second,), invalidate=frozenset())
+    await settle()
+    assert provider.cancellations == 1
+    assert set(scheduler._active.values()) == {second.id}
+    provider.gate.set()
+    await settle()
+    assert [item.account_id for item in published] == [second.id]
+    await scheduler.stop()
+
+
+async def test_same_provider_embargo_survives_fresh_generation_with_invalidate():
+    scheduler, clock, provider, _, _published = setup()
+    deadline = clock.now() + timedelta(hours=3)
+    provider.results = [TransportError(FetchState.RATE_LIMITED, "rate_limited", retry_at=deadline)]
+    await scheduler.start()
+    await settle()
+    await scheduler.update_accounts(
+        (replace(account(), credential_ref="replacement"),), invalidate={account().id}
+    )
+    await clock.advance(10799)
+    assert len(provider.calls) == 1
+    await clock.advance(1)
+    assert len(provider.calls) == 2
+    await scheduler.stop()

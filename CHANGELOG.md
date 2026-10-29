@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+**Breaking:** existing API tokens gain account write access unless the server runs
+with `--read-only`; writes no longer return 405; custom login-file paths must end in
+`auth.json`/`.credentials.json`.
+
+### Added — account management over the API/web and account reorder
+
+- `usage api serve` and `usage --api` accept account writes from any API token unless
+  started with `--read-only` (demo is always read-only): `GET /api/v1/accounts`,
+  `POST /api/v1/accounts`, `POST /api/v1/accounts/prepare` (explicit Grok scope or
+  Console organization choice), `PUT /api/v1/accounts/order`, `PATCH`/`DELETE
+  /api/v1/accounts/{id}` with `If-Match` revisions, and a throttled
+  `POST /api/v1/accounts/{id}/reconnect`. Session and account-list responses carry
+  `capabilities`. Startup prints whether writes are ENABLED; `token create` says the
+  token can change accounts.
+- Bodies are strict JSON (64 KiB, 10 s, duplicate-key/NaN/deep-nesting/surrogate
+  rejection); secrets are body-only, never echoed or logged, stored in the exact OS
+  keyring (`503` without one, never downgraded) or session-only in the server
+  process. Responses never expose custom paths, Grok selectors, organization IDs or
+  credential refs. Console discovery and reconnect are throttled; at most 100
+  accounts. Serving processes disable core dumps best-effort.
+- Standalone `serve` is now dynamic: API changes apply immediately; edits from
+  `usage accounts` in another process apply on the next API write, a conflict reload
+  or a restart. In one-process mode, web edits appear in the TUI immediately.
+- Renames, toggles and reorders keep scheduler state and snapshots; an explicit
+  credential submission starts a fresh read. API and TUI writers share one lock, so
+  publication order matches commit order.
+- Web UI accounts view (`#accounts`): add/edit/remove/enable/reconnect accounts and
+  drag or keyboard reorder. TUI account manager: Shift+↑/↓ (Ctrl+↑/↓) and mouse drag
+  reorder. Dashboards (TUI, web, `/api/v1/dashboard`) follow the saved order.
+- Custom file references (CLI, TUI and HTTP) must be normalized absolute paths named
+  `auth.json` (Codex, Grok) or `.credentials.json` (Claude Code), outside `/proc`,
+  `/sys` and `/dev`; saved references are not revalidated. Credential files must be
+  regular files (checked before open).
+- Web account form secret inputs opt out of browser password managers
+  (`autocomplete="new-password"` plus manager opt-outs, no native form submit); Esc
+  and 取消 cannot discard a save in flight, and a timed-out or lost save reloads the
+  list. A retry after a revision conflict sends only the user's own edits.
+- The Railway guide documents adding accounts on the web after switching the start
+  command to `usage api serve … --keepalive`, including Claude Platform session-only.
+  PLAN.md §18 records the contract and pending acceptance.
+
 ### Fixed — Railway web console shell environment
 
 - Railway's web console starts a login shell that does not inherit the image

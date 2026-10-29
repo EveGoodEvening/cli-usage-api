@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiError, UsageClient } from "../api";
+import { READ_ONLY, type ApiError, type UsageClient } from "../api";
 import type { ThemeChoice } from "../auth";
-import type { AccountView, ProviderId, SessionInfo } from "../types";
+import type { AccountView, Capabilities, ProviderId, SessionInfo } from "../types";
 import { useDashboard, useTick } from "../hooks";
 import { PROVIDER_ORDER, accountHealth } from "../semantics";
+import { AccountsPanel, EmptyAccounts } from "./AccountsPanel";
 import { Board } from "./Board";
 import { FilterBar, filterItems, type Filter } from "./FilterBar";
 import { DemoStrip, Header, Status } from "./Header";
@@ -38,6 +39,45 @@ function saveFilter(value: Filter): void {
   }
 }
 
+const ACCOUNTS_HASH = "#accounts";
+
+type View = "board" | "accounts";
+
+function hashView(): View {
+  return typeof window !== "undefined" && window.location.hash === ACCOUNTS_HASH ? "accounts" : "board";
+}
+
+/** The accounts view lives at #accounts, so browser Back returns to the board. */
+function useView() {
+  const [view, setView] = useState<View>(hashView);
+  useEffect(() => {
+    const sync = () => setView(hashView());
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
+    };
+  }, []);
+  const open = useCallback(() => {
+    if (window.location.hash !== ACCOUNTS_HASH) {
+      window.history.pushState({ usageView: "accounts" }, "", ACCOUNTS_HASH);
+    }
+    setView("accounts");
+  }, []);
+  const close = useCallback(() => {
+    const state = window.history.state as { usageView?: string } | null;
+    if (state?.usageView === "accounts") {
+      // Our own entry: going back keeps history tidy; popstate sets the view.
+      window.history.back();
+    } else {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    setView("board");
+  }, []);
+  return { view, open, close };
+}
+
 function needsAttention(view: AccountView): boolean {
   const health = accountHealth(view);
   return health === "warn" || health === "error";
@@ -50,6 +90,9 @@ export function Shell({ client, session, remembered, theme, onTheme, onLogout }:
   const [stored, setStored] = useState<Filter>(loadFilter);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const { view, open: openAccounts, close: closeAccounts } = useView();
+  const [capabilities, setCapabilities] = useState<Capabilities>(session.capabilities ?? READ_ONLY);
+  const [startCreate, setStartCreate] = useState(false);
 
   const all = useMemo(() => state.data?.accounts ?? [], [state.data]);
   const mode = state.data?.mode ?? session.mode;
@@ -106,9 +149,13 @@ export function Shell({ client, session, remembered, theme, onTheme, onLogout }:
     );
   } else if (all.length === 0) {
     body = (
-      <div className="board-empty">
-        <p>服务器还没有配置账号。在服务器上运行 usage accounts add 后重启 usage api serve。</p>
-      </div>
+      <EmptyAccounts
+        writable={capabilities.writable && mode === "live"}
+        onCreate={() => {
+          setStartCreate(true);
+          openAccounts();
+        }}
+      />
     );
   } else {
     body = (
@@ -137,6 +184,12 @@ export function Shell({ client, session, remembered, theme, onTheme, onLogout }:
         menuOpen={menuOpen}
         onMenu={() => setMenuOpen((open) => !open)}
         menuButton={menuButton}
+        accountsOpen={view === "accounts"}
+        onAccounts={() => {
+          setStartCreate(false);
+          if (view === "accounts") closeAccounts();
+          else openAccounts();
+        }}
         menu={
           menuOpen ? (
             <MenuPopover
@@ -161,7 +214,22 @@ export function Shell({ client, session, remembered, theme, onTheme, onLogout }:
           <p className="col">读取失败：{state.error.message} · 下面是上一次成功读取的数据</p>
         </div>
       ) : null}
-      <main className="col main">{body}</main>
+      <main className="col main">
+        {view === "accounts" ? (
+          <AccountsPanel
+            client={client}
+            capabilities={mode === "live" ? capabilities : READ_ONLY}
+            onCapabilities={setCapabilities}
+            onChanged={state.reload}
+            onLogout={onLogout}
+            onClose={closeAccounts}
+            menuOpen={menuOpen}
+            startCreate={startCreate}
+          />
+        ) : (
+          body
+        )}
+      </main>
     </div>
   );
 }

@@ -239,3 +239,86 @@ def test_backend_returned_secret_must_be_valid(encrypted, invalid):
     encrypted.values["cli-usage-api", ref] = invalid
     with pytest.raises(CredentialError):
         store.get(ref)
+
+
+def test_secure_available_reports_exact_backend_type_without_raising(encrypted, monkeypatch):
+    class Chain:
+        backends = (encrypted,)
+        priority = 9999
+
+    assert CredentialStore(encrypted).secure_available() is True
+    for backend in (FakePlaintext(), Chain(), null.Keyring(), fail.Keyring()):
+        assert CredentialStore(backend).secure_available() is False
+    # The default discovery failing (autouse fixture raises) is unavailable, not an error.
+    assert CredentialStore().secure_available() is False
+    monkeypatch.setattr(storage.sys, "platform", "darwin")
+    assert CredentialStore(encrypted).secure_available() is False
+    assert encrypted.calls == []  # Probing never stores, reads or deletes anything.
+
+
+def test_session_present_only_for_live_session_refs(encrypted):
+    store = CredentialStore(encrypted)
+    ref = store.put(ACCOUNT_ID, SECRET, persist=False)
+    persistent = store.put(ACCOUNT_ID, SECRET, persist=True)
+    assert store.session_present(ref) is True
+    assert store.session_present(persistent) is False
+    assert CredentialStore().session_present(ref) is False
+    for invalid in (None, 1, "", "session:", "default", f"session:{ACCOUNT_ID}"):
+        assert store.session_present(invalid) is False
+    store.delete(ref)
+    assert store.session_present(ref) is False
+    assert encrypted.calls == ["set"]
+
+
+def test_put_always_mints_a_fresh_reference(encrypted):
+    store = CredentialStore(encrypted)
+    refs = [store.put(ACCOUNT_ID, SECRET, persist=persist) for persist in (False, True) * 20]
+    assert len(set(refs)) == len(refs)
+
+
+def test_blocked_backend_never_delays_session_reads(monkeypatch):
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Blocking(FakeEncrypted):
+        def set_password(self, service, username, password):
+            entered.set()
+            assert release.wait(10)
+            super().set_password(service, username, password)
+
+    monkeypatch.setattr(storage, "_SECURE_BACKEND_TYPES", (Blocking,))
+    monkeypatch.setattr(storage.sys, "platform", "linux")
+    store = CredentialStore(Blocking())
+    ref = store.put(ACCOUNT_ID, SECRET, persist=False)
+    errors = []
+
+    def persist():
+        try:
+            store.put(ACCOUNT_ID, SECRET, persist=True)
+        except Exception as error:  # noqa: BLE001 - Report to the main thread.
+            errors.append(error)
+
+    worker = threading.Thread(target=persist)
+    worker.start()
+    try:
+        assert entered.wait(10)
+        done = threading.Event()
+        results = []
+
+        def read():
+            results.append((store.get(ref), store.session_present(ref)))
+            store.delete(store.put(ACCOUNT_ID, "other", persist=False))
+            done.set()
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        # The session operations finish while set_password is still blocked.
+        assert done.wait(5)
+        assert worker.is_alive()
+        assert results == [(SECRET, True)]
+    finally:
+        release.set()
+        worker.join(10)
+    assert not errors

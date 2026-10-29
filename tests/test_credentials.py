@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import socket
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from cli_usage_api import credentials as credentials_module
 from cli_usage_api.credentials import MAX_FILE_BYTES, CredentialResolutionError, CredentialResolver
 from cli_usage_api.domain import Account, CredentialKind, FetchState, ProviderId
 from cli_usage_api.storage import CredentialStore
@@ -667,3 +669,30 @@ def test_codex_missing_file_never_uses_grok_or_keyring(tmp_path, monkeypatch):
         CredentialKind.CODEX_AUTH_FILE,
     )
     assert_error(account, "credential_unavailable")
+
+
+def test_non_regular_files_are_rejected_before_open(tmp_path, monkeypatch):
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo, 0o600)
+    socket_path = tmp_path / "socket"
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(str(socket_path))
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "missing")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("A non-regular credential file was opened")
+
+    monkeypatch.setattr(credentials_module.os, "open", forbidden)
+    try:
+        for path in (directory, fifo, socket_path, Path("/dev/null"), link):
+            with pytest.raises(CredentialResolutionError) as error:
+                credentials_module._read_file(path)
+            assert error.value.code == "unsafe_credential_file"
+        with pytest.raises(CredentialResolutionError) as error:
+            credentials_module._read_file(tmp_path / "absent")
+        assert error.value.code == "credential_unavailable"
+    finally:
+        server.close()

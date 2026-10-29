@@ -6,12 +6,14 @@ import asyncio
 import json
 import os
 import stat
+import uuid
 from datetime import UTC, datetime
 
 import httpx
 import pytest
 
-from cli_usage_api import api
+from cli_usage_api import api, storage
+from cli_usage_api.credentials import CredentialResolver
 from cli_usage_api.domain import (
     Account,
     CredentialKind,
@@ -25,7 +27,15 @@ from cli_usage_api.domain import (
     SourceKind,
     SourceRef,
 )
-from cli_usage_api.storage import ApiTokenStore, ConfigError, api_token_digest
+from cli_usage_api.operations import AccountOperations
+from cli_usage_api.providers.console import OrganizationChoice
+from cli_usage_api.storage import (
+    AccountStore,
+    ApiTokenStore,
+    ConfigError,
+    CredentialStore,
+    api_token_digest,
+)
 
 SECURITY_HEADERS = {
     "cache-control": "no-store",
@@ -224,6 +234,8 @@ async def test_valid_token_reads_and_unknown_paths_404_after_auth(token_store, t
             "version": api.package_version(),
             "server_time": "2026-10-28T12:00:00Z",
             "auth": "token",
+            # Read-only app (no operations): never writable.
+            "capabilities": {"writable": False, "secure_store_available": False},
         }
         assert_security(session)
         assert session.headers["content-type"] == "application/json; charset=utf-8"
@@ -451,8 +463,15 @@ async def test_cors_allowed_denied_and_preflight(token_store, token):
         assert preflight.status_code == 204
         assert preflight.content == b""
         assert preflight.headers["access-control-allow-origin"] == ORIGIN
-        assert preflight.headers["access-control-allow-headers"] == "Authorization"
-        assert preflight.headers["access-control-allow-methods"] == "GET, HEAD, OPTIONS"
+        assert (
+            preflight.headers["access-control-allow-headers"]
+            == "Authorization, Content-Type, If-Match"
+        )
+        # The full set even read-only, so browsers see a readable 403 read_only.
+        assert (
+            preflight.headers["access-control-allow-methods"]
+            == "GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE"
+        )
         assert preflight.headers["access-control-max-age"] == "600"
         assert preflight.headers["vary"] == "Origin"
         assert_security(preflight)
@@ -520,12 +539,12 @@ async def test_plain_options_without_origin(token_store):
     async with client_for(app) as client:
         response = await client.options("/api/v1/session")
     assert response.status_code == 204
-    assert response.headers["allow"] == "GET, HEAD, OPTIONS"
+    assert response.headers["allow"] == "GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE"
     assert_security(response)
 
 
-@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "TRACE"])
-async def test_mutating_methods_are_rejected(token_store, token, method):
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+async def test_wrong_method_on_read_route_is_405_with_route_allow(token_store, token, method):
     hub, _ = static_hub()
     app = api.create_app(hub, token_store)
     async with client_for(app) as client:
@@ -535,6 +554,17 @@ async def test_mutating_methods_are_rejected(token_store, token, method):
     assert response.status_code == 405
     assert response.json() == {"error": "method_not_allowed"}
     assert response.headers["allow"] == "GET, HEAD, OPTIONS"
+    assert_security(response)
+
+
+@pytest.mark.parametrize("method", ["TRACE", "PROPFIND"])
+async def test_unknown_methods_are_405_before_auth(token_store, method):
+    hub, _ = static_hub()
+    app = api.create_app(hub, token_store)
+    async with client_for(app) as client:
+        response = await client.request(method, "/api/v1/dashboard")
+    assert response.status_code == 405
+    assert response.headers["allow"] == "GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE"
     assert_security(response)
 
 
@@ -895,3 +925,515 @@ def test_token_store_revoke_and_signature(token_store):
     assert token_store.revoke(first.id)
     assert token_store.load() == ()
     assert token_store.signature() != signature
+
+
+# --- account management over HTTP ------------------------------------------------------
+
+BEARER = "synthetic-bearer-never-echo"
+ALL_METHODS = "GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE"
+
+
+@pytest.fixture
+def no_keyring(monkeypatch):
+    calls = []
+
+    def unavailable():
+        calls.append("get_keyring")
+        raise RuntimeError("no real keyring in tests")
+
+    monkeypatch.setattr(storage.keyring, "get_keyring", unavailable)
+    return calls
+
+
+class RecordingSource(StaticSource):
+    def __init__(self, publish, snapshots):
+        super().__init__(publish, snapshots)
+        self.updates = []
+        self.refreshes = []
+
+    async def update_accounts(self, accounts, **kwargs):
+        self.updates.append((tuple(accounts), kwargs.get("invalidate")))
+
+    async def refresh(self, account_id=None):
+        self.refreshes.append(account_id)
+
+
+class Writable:
+    """A live standalone hub with AccountOperations over a private temp config."""
+
+    def __init__(self, tmp_path, token_store, accounts=(), snapshots=(), origins=()):
+        directory = tmp_path / "accounts"
+        directory.mkdir(mode=0o700)
+        self.store = AccountStore(directory / "accounts.json")
+        if accounts:
+            self.store.save(tuple(accounts))
+        self.holder = {}
+
+        def factory(publish):
+            self.holder["source"] = RecordingSource(publish, snapshots)
+            return self.holder["source"]
+
+        self.hub = api.SnapshotHub(
+            mode="live", accounts=self.store.load(), source_factory=factory, now=lambda: NOW
+        )
+        self.credentials = CredentialStore()
+        self.ops = AccountOperations(
+            host=self.hub,
+            account_store=self.store,
+            credential_store=self.credentials,
+            resolver=CredentialResolver(self.credentials),
+            console_discovery=None,
+        )
+        self.app = api.create_app(self.hub, token_store, origins, operations=self.ops)
+
+
+def plain(label, **kwargs):
+    return Account(
+        id=str(uuid.uuid4()), provider=ProviderId.GROK_SUBSCRIPTION, label=label, **kwargs
+    )
+
+
+async def raw_call(app, method, path, headers=(), chunks=(b"",), *, receive_fails=False):
+    """Drive the ASGI app directly to control streamed bodies and receive()."""
+    messages = [
+        {"type": "http.request", "body": chunk, "more_body": index < len(chunks) - 1}
+        for index, chunk in enumerate(chunks)
+    ]
+    sent = []
+
+    async def receive():
+        if receive_fails:
+            raise AssertionError("request body must not be read")
+        if messages:
+            return messages.pop(0)
+        await asyncio.sleep(3600)
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(key.lower().encode(), value.encode()) for key, value in headers],
+        "client": ("203.0.113.7", 50000),
+    }
+    await app(scope, receive, send)
+    if not sent:
+        return None, None, {}
+    response_headers = {key.decode(): value.decode() for key, value in sent[0]["headers"]}
+    body = sent[1]["body"]
+    return sent[0]["status"], (json.loads(body) if body else None), response_headers
+
+
+def json_headers(token, *extra):
+    return (("authorization", f"Bearer {token}"), ("content-type", "application/json"), *extra)
+
+
+async def test_writes_are_forbidden_without_reading_the_body(tmp_path, token_store, token):
+    hub, _ = static_hub()
+    read_only = api.create_app(hub, token_store)
+    demo = api.create_app(api.demo_hub(), None)
+    for app, headers in ((read_only, json_headers(token)), (demo, (("content-type", "x"),))):
+        for method, path in (
+            ("POST", "/api/v1/accounts"),
+            ("PUT", "/api/v1/accounts/order"),
+            ("PATCH", f"/api/v1/accounts/{CLAUDE_ID}"),
+            ("DELETE", f"/api/v1/accounts/{CLAUDE_ID}"),
+            ("POST", f"/api/v1/accounts/{CLAUDE_ID}/reconnect"),
+            ("POST", "/api/v1/accounts/prepare"),
+        ):
+            status, body, _ = await raw_call(app, method, path, headers, receive_fails=True)
+            assert (status, body) == (403, {"error": "read_only"})
+
+
+def test_operations_with_demo_hub_are_refused(tmp_path, token_store, no_keyring):
+    writable = Writable(tmp_path, token_store)
+    with pytest.raises(ValueError):
+        api.create_app(api.demo_hub(), None, operations=writable.ops)
+
+
+async def test_unauthenticated_writes_are_401_and_valid_tokens_skip_the_limiter(
+    tmp_path, token_store, token, no_keyring
+):
+    writable = Writable(tmp_path, token_store)
+    status, _, headers = await raw_call(
+        writable.app,
+        "POST",
+        "/api/v1/accounts",
+        (("content-type", "application/json"),),
+        receive_fails=True,
+    )
+    assert status == 401 and headers["www-authenticate"] == "Bearer"
+
+    class Forbidden:
+        def retry_after(self, key):
+            pytest.fail("valid token consulted the limiter")
+
+        record = retry_after
+
+    writable.app.limiter = Forbidden()
+    status, body, _ = await raw_call(
+        writable.app,
+        "POST",
+        "/api/v1/accounts",
+        json_headers(token),
+        (json.dumps({"provider": "grok_subscription", "label": "x", "source": None}).encode(),),
+    )
+    assert status == 201 and body["account"]["label"] == "x"
+
+
+async def test_per_route_405_allow(token_store, token):
+    hub, _ = static_hub()
+    app = api.create_app(hub, token_store)
+    cases = [
+        ("PUT", "/api/v1/accounts", "GET, HEAD, POST, OPTIONS"),
+        ("DELETE", "/api/v1/accounts/prepare", "POST, OPTIONS"),
+        ("POST", "/api/v1/accounts/order", "PUT, OPTIONS"),
+        ("POST", f"/api/v1/accounts/{CLAUDE_ID}", "GET, HEAD, PATCH, DELETE, OPTIONS"),
+        ("GET", f"/api/v1/accounts/{CLAUDE_ID}/reconnect", "POST, OPTIONS"),
+        ("POST", "/api/v1/session", "GET, HEAD, OPTIONS"),
+        ("POST", "/healthz", "GET, HEAD, OPTIONS"),
+    ]
+    for method, path, allow in cases:
+        status, body, headers = await raw_call(app, method, path, json_headers(token))
+        assert (status, body, headers["allow"]) == (405, {"error": "method_not_allowed"}, allow)
+    for method, path in (
+        ("GET", "/api/v1/accounts/prepare"),
+        ("GET", "/api/v1/accounts/order"),
+        ("GET", "/api/v1/accounts/AAAAAAAA-1111-4111-8111-111111111111"),
+        ("POST", f"/api/v1/accounts/{CLAUDE_ID}/other"),
+    ):
+        status, _, _ = await raw_call(app, method, path, json_headers(token))
+        assert status == 404
+
+
+@pytest.mark.parametrize(
+    ("headers", "chunks", "status", "code"),
+    [
+        ((("content-type", "text/plain"),), (b"{}",), 415, "unsupported_media_type"),
+        ((("content-type", "application/json; charset=latin-1"),), (b"{}",), 415, None),
+        ((("content-type", "application/json; charset=utf-8; x=y"),), (b"{}",), 415, None),
+        ((), (b"{}",), 415, "unsupported_media_type"),
+        ((("content-type", "application/json"), ("content-length", "70000")), (), 413, None),
+        ((("content-type", "application/json"), ("content-length", "x")), (b"{}",), 400, None),
+        (
+            (
+                ("content-type", "application/json"),
+                ("content-length", "2"),
+                ("content-length", "2"),
+            ),
+            (b"{}",),
+            400,
+            None,
+        ),
+        ((("content-type", "application/json"),), (b"a" * 40_000, b"a" * 40_000), 413, None),
+        ((("content-type", "Application/JSON; Charset=UTF-8"),), (b'{"a":1,"a":2}',), 400, None),
+        ((("content-type", "application/json"),), (b'{"x": NaN}',), 400, None),
+        ((("content-type", "application/json"),), (b"[" * 100_000,), 413, None),
+        ((("content-type", "application/json"),), (b"[" * 30_000 + b"]" * 30_000,), 400, None),
+        ((("content-type", "application/json"),), (b'{"x": ' + b"9" * 5000 + b"}",), 400, None),
+        ((("content-type", "application/json"),), (b'{"label": "\\ud800"}',), 400, None),
+        ((("content-type", "application/json"),), (b"\xff\xfe",), 400, None),
+        ((("content-type", "application/json"),), (b"[]",), 400, None),
+        ((("content-type", "application/json"),), (b'{"unknown": 1}',), 400, None),
+        (
+            (("content-type", "application/json"),),
+            (b'{"provider":"grok_subscription","label":"x","source":null,"enabled":1}',),
+            400,
+            None,
+        ),
+    ],
+)
+async def test_body_rules(tmp_path, token_store, token, no_keyring, headers, chunks, status, code):
+    writable = Writable(tmp_path, token_store)
+    auth_header = (("authorization", f"Bearer {token}"),)
+    got, body, _ = await raw_call(
+        writable.app, "POST", "/api/v1/accounts", auth_header + headers, chunks
+    )
+    expected = (
+        code
+        or {
+            400: "invalid_request",
+            413: "payload_too_large",
+            415: "unsupported_media_type",
+        }[status]
+    )
+    assert (got, body) == (status, {"error": expected})
+    assert writable.store.load() == ()
+
+
+async def test_body_deadline_and_disconnect(tmp_path, token_store, token, no_keyring, monkeypatch):
+    writable = Writable(tmp_path, token_store)
+    monkeypatch.setattr(api, "BODY_TIMEOUT_SECONDS", 0.05)
+    sent = []
+
+    async def stalled():
+        await asyncio.sleep(3600)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/accounts",
+        "raw_path": b"/api/v1/accounts",
+        "query_string": b"",
+        "headers": [(key.encode(), value.encode()) for key, value in json_headers(token)],
+        "client": ("203.0.113.7", 1),
+    }
+    await writable.app(scope, stalled, send)
+    assert sent[0]["status"] == 408
+    assert json.loads(sent[1]["body"]) == {"error": "request_timeout"}
+
+    sent.clear()
+
+    async def gone():
+        return {"type": "http.disconnect"}
+
+    await writable.app(scope, gone, send)
+    assert sent == []
+
+
+async def test_if_match_and_no_body_rules(tmp_path, token_store, token, no_keyring):
+    item = plain("Grok")
+    writable = Writable(tmp_path, token_store, (item,))
+    path = f"/api/v1/accounts/{item.id}"
+    status, body, _ = await raw_call(writable.app, "PATCH", path, json_headers(token), (b"{}",))
+    assert (status, body) == (428, {"error": "precondition_required"})
+    revision = writable.ops.revision(item)
+    for value in (f'W/"{revision}"', revision[:-1], f'"{revision}', revision.upper()):
+        status, _, _ = await raw_call(
+            writable.app, "PATCH", path, json_headers(token, ("if-match", value)), (b"{}",)
+        )
+        assert status == 400
+    status, _, _ = await raw_call(
+        writable.app,
+        "PATCH",
+        path,
+        json_headers(token, ("if-match", revision), ("if-match", revision)),
+        (b"{}",),
+    )
+    assert status == 400
+    status, _, _ = await raw_call(
+        writable.app, "PATCH", path, json_headers(token, ("if-match", f'"{revision}"')), (b"{}",)
+    )
+    assert status == 200
+    # DELETE ignores Content-Type but must have no body.
+    auth_only = (("authorization", f"Bearer {token}"), ("if-match", revision))
+    status, _, _ = await raw_call(writable.app, "DELETE", path, auth_only, (b"{}",))
+    assert status == 400
+    status, body, _ = await raw_call(writable.app, "DELETE", path, (auth_only[0],))
+    assert (status, body) == (428, {"error": "precondition_required"})
+    status, body, _ = await raw_call(writable.app, "DELETE", path, auth_only)
+    assert status == 200 and body["accounts"] == [] and body["account"] is None
+    assert writable.store.load() == ()
+
+
+async def test_capabilities_live_read_only_and_demo(tmp_path, token_store, token, no_keyring):
+    writable = Writable(tmp_path, token_store)
+    await writable.ops.start()
+    assert no_keyring == ["get_keyring"]
+    async with client_for(writable.app) as client:
+        session = (await client.get("/api/v1/session", headers=auth(token))).json()
+        listing = (await client.get("/api/v1/accounts", headers=auth(token))).json()
+    expected = {"writable": True, "secure_store_available": False}
+    assert session["capabilities"] == listing["capabilities"] == expected
+    # GET polling never re-probes the keyring.
+    assert no_keyring == ["get_keyring"]
+    hub, _ = static_hub()
+    async with client_for(api.create_app(hub, token_store)) as client:
+        listing = (await client.get("/api/v1/accounts", headers=auth(token))).json()
+    assert listing["capabilities"] == {"writable": False, "secure_store_available": False}
+    assert all(item["revision"] is None for item in listing["accounts"])
+    async with client_for(api.create_app(api.demo_hub(), None)) as client:
+        session = (await client.get("/api/v1/session")).json()
+        accounts = (await client.get("/api/v1/accounts")).json()
+    assert (
+        session["capabilities"]
+        == accounts["capabilities"]
+        == {
+            "writable": False,
+            "secure_store_available": False,
+        }
+    )
+    assert no_keyring == ["get_keyring"]
+
+
+async def test_account_list_redacts_paths_selectors_orgs_and_refs(
+    tmp_path, token_store, token, no_keyring
+):
+    custom = live_accounts()
+    session_ref = Account(
+        id=str(uuid.uuid4()),
+        provider=ProviderId.CLAUDE_SUBSCRIPTION,
+        label="Session",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref="session:" + str(uuid.uuid4()),
+    )
+    writable = Writable(tmp_path, token_store, (*custom, session_ref))
+    async with client_for(writable.app) as client:
+        response = await client.get("/api/v1/accounts", headers=auth(token))
+    text = response.text
+    for secretish in (
+        "/home/someone",
+        "selector-value",
+        "org-secretish-123",
+        SECRET_REF,
+        session_ref.credential_ref,
+        "keyring:",
+        "session:",
+    ):
+        assert secretish not in text
+    views = {item["id"]: item for item in response.json()["accounts"]}
+    assert [item["id"] for item in response.json()["accounts"]] == [
+        *(item.id for item in custom),
+        session_ref.id,
+    ]
+    assert views[CLAUDE_ID]["reference"] == "custom"
+    assert views[CLAUDE_ID]["storage"] == "external_file"
+    assert views[PLATFORM_ID] | {"revision": None} == {
+        "id": PLATFORM_ID,
+        "provider": "claude_platform",
+        "label": "Console",
+        "enabled": True,
+        "poll_interval_seconds": 60,
+        "effective_poll_interval_seconds": 60,
+        "credential_kind": "console_session",
+        "storage": "keyring",
+        "reference": None,
+        "session_available": None,
+        "scope_selected": False,
+        "organization_selected": True,
+        "revision": None,
+    }
+    assert len(views[PLATFORM_ID]["revision"]) == 32
+    assert views[DISABLED_ID]["reference"] == "default"
+    assert views[DISABLED_ID]["scope_selected"] is True
+    # A session secret lost with a restart is reported, never revealed.
+    assert views[session_ref.id]["storage"] == "session"
+    assert views[session_ref.id]["session_available"] is False
+
+
+async def test_secret_never_echoed_and_dynamic_hub(tmp_path, token_store, token, no_keyring):
+    keep, other = plain("Keep"), plain("Other")
+    writable = Writable(
+        tmp_path, token_store, (keep, other), snapshots=(snapshot(keep.id), snapshot(other.id))
+    )
+    observed = []
+
+    class Observer:
+        def accounts_changed(self, accounts):
+            observed.append(tuple(accounts))
+
+    writable.hub.add_observer(Observer())
+    await writable.hub.start()
+    source = writable.holder["source"]
+    body = {
+        "provider": "claude_subscription",
+        "label": "Bearer",
+        "source": {"credential_kind": "manual_bearer", "secret": BEARER, "persist": False},
+    }
+    async with client_for(writable.app) as client:
+        created = await client.post("/api/v1/accounts", headers=auth(token), json=body)
+        assert created.status_code == 201
+        assert BEARER not in created.text
+        new_id = created.json()["account"]["id"]
+        assert created.json()["account"]["session_available"] is True
+        assert created.json()["warning"] is None
+        assert [item.id for item in writable.hub.accounts] == [keep.id, other.id, new_id]
+        assert source.updates[-1][1] == frozenset({new_id})
+        assert observed[-1] == writable.hub.accounts
+        # Untouched accounts keep their observations.
+        assert set(writable.hub.snapshots) == {keep.id, other.id}
+        # Rename keeps the snapshot and the new label is rendered with it.
+        revision = created.json()["accounts"][0]["revision"]
+        renamed = await client.patch(
+            f"/api/v1/accounts/{keep.id}",
+            headers={**auth(token), "If-Match": f'"{revision}"'},
+            json={"label": "Renamed"},
+        )
+        assert renamed.status_code == 200
+        assert source.updates[-1][1] == frozenset()
+        single = (await client.get(f"/api/v1/accounts/{keep.id}", headers=auth(token))).json()
+        assert single["account"]["label"] == "Renamed" and single["snapshot"] is not None
+        # Reorder: the dashboard follows the config order.
+        ordered = await client.put(
+            "/api/v1/accounts/order",
+            headers=auth(token),
+            json={"ids": [new_id, other.id, keep.id]},
+        )
+        assert ordered.status_code == 200
+        dashboard = (await client.get("/api/v1/dashboard", headers=auth(token))).json()
+        assert [item["account"]["id"] for item in dashboard["accounts"]] == [
+            new_id,
+            other.id,
+            keep.id,
+        ]
+        assert dashboard["accounts"][1]["snapshot"] is not None
+        stale = await client.put(
+            "/api/v1/accounts/order", headers=auth(token), json={"ids": [keep.id]}
+        )
+        assert (stale.status_code, stale.json()) == (409, {"error": "conflict"})
+        reconnect = await client.post(f"/api/v1/accounts/{other.id}/reconnect", headers=auth(token))
+        assert (reconnect.status_code, reconnect.json()) == (200, {"status": "queued"})
+        assert source.refreshes == [other.id]
+        missing = await client.post(
+            f"/api/v1/accounts/{uuid.uuid4()}/reconnect", headers=auth(token)
+        )
+        assert (missing.status_code, missing.json()) == (404, {"error": "not_found"})
+        invalid = await client.post(
+            "/api/v1/accounts",
+            headers=auth(token),
+            json={**body, "source": {**body["source"], "secret": "bad value " + BEARER}},
+        )
+        assert invalid.status_code == 422 and BEARER not in invalid.text
+    await writable.hub.stop()
+
+
+async def test_discovery_busy_carries_retry_after(tmp_path, token_store, token, no_keyring):
+    writable = Writable(tmp_path, token_store, origins=[ORIGIN])
+
+    async def discovery(credential):
+        return (OrganizationChoice("org-1", "One"),)
+
+    writable.ops.console_discovery = discovery
+    body = {
+        "provider": "claude_platform",
+        "credential_kind": "console_session",
+        "secret": "sk-ant-sid01-synthetic",
+    }
+    async with client_for(writable.app) as client:
+        first = await client.post("/api/v1/accounts/prepare", headers=auth(token), json=body)
+        assert first.status_code == 200 and first.json()["choices"][0]["label"] == "One"
+        assert "sk-ant" not in first.text and "org-1" not in first.text
+        busy = await client.post(
+            "/api/v1/accounts/prepare", headers={**auth(token), "Origin": ORIGIN}, json=body
+        )
+    assert busy.status_code == 409
+    assert busy.json() == {"error": "discovery_busy", "retry_after": 10}
+    assert busy.headers["retry-after"] == "10"
+    assert "Retry-After" in busy.headers["access-control-expose-headers"]
+
+
+async def test_write_gate_is_evaluated_per_request(tmp_path, token_store, token, no_keyring):
+    writable = Writable(tmp_path, token_store)
+    body = json.dumps({"provider": "grok_subscription", "label": "x", "source": None}).encode()
+    status, _, _ = await raw_call(
+        writable.app, "POST", "/api/v1/accounts", json_headers(token), (body,)
+    )
+    assert status == 201
+    # Anonymous serving (never a live default) makes the same app read-only at once.
+    writable.app._anonymous = lambda: True
+    status, payload, _ = await raw_call(
+        writable.app, "POST", "/api/v1/accounts", json_headers(token), receive_fails=True
+    )
+    assert (status, payload) == (403, {"error": "read_only"})
+    async with client_for(writable.app) as client:
+        session = (await client.get("/api/v1/session")).json()
+    assert session["capabilities"]["writable"] is False
+    assert len(writable.store.load()) == 1

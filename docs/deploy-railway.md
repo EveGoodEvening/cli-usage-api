@@ -1,8 +1,12 @@
-# 在 Railway 上部署只读 usage API 后端
+# 在 Railway 上部署 usage API 后端
 
-本文说明如何把 `usage api serve`（只读 HTTP API）部署到 Railway。镜像只负责准备
-环境；登录各 CLI、配置账号、创建 API 令牌和启动 API 都由你通过 `railway ssh`
-手动完成。镜像里不包含任何凭据、令牌或登录状态。
+本文说明如何把 `usage api serve`（HTTP API：用量数据 + 账号管理）部署到 Railway。
+镜像只负责准备环境；登录各 CLI 和创建 API 令牌由你通过 `railway ssh` 手动完成，
+之后把服务的启动命令切换为 `usage api serve … --keepalive`，再在网页前端里添加账号。
+镜像里不包含任何凭据、令牌或登录状态。
+
+> **注意：** 未加 `--read-only` 时，**任何** API 令牌都可以添加、修改、删除账号并提交
+> 密钥（包括本功能上线前创建的旧令牌）。令牌需要广泛分享时，用 `--read-only` 启动。
 
 > **状态：** 仓库内的 `Dockerfile` 已在本地构建并做过容器冒烟（见 PLAN.md §15、§17），
 > 但**尚未在真实 Railway 服务上部署验证**，也没有在容器里完成过任何真实登录或
@@ -105,7 +109,9 @@ Codex 0.165.0 的源码依赖图包含已修复的 rustls-webpki，但原生程�
    curl、Python HTTPX、Node／uv 路径，至少覆盖 emSign 和 AAA 交叉签名两种链，并先用正常
    HTTPS 站点确认网络可用。**必须观察到证书验证拒绝**；DNS 错误、超时或普通 HTTP 错误都不是修复证据。
    浏览器、curl 或某个 CLI 单项通过，不代表其他路径通过。仓库实际执行的证据与限制记录在 PLAN.md §17。
-5. 更新后重新启动第 8 步的服务。卷不会因此丢失，但 tmux 进程和 session-only 凭据会消失。
+5. 重新部署后，按第 8 步设置的自定义启动命令会自动启动 API（若改用 tmux 一进程模式，
+   需要再次手动启动）。卷不会因此丢失，但 session-only 凭据（例如 Claude Platform 的
+   `sessionKey`）会消失，需要在网页里重新输入。
 
 不要用 `curl -k`、`verify=False`、`NODE_TLS_REJECT_UNAUTHORIZED=0`、关闭 npm `strict-ssl`
 或 uv 的不安全主机选项消除错误；也不要 pin 上游站点的叶证书，正常换证会使它失效。
@@ -113,25 +119,31 @@ Codex 0.165.0 的源码依赖图包含已修复的 rustls-webpki，但原生程�
 自定义域名／自管源站／上传 CA 要另行检查；若确实使用受影响链，应更换并撤销旧证书。
 没有发现泄露证据时不把所有项目密钥视为已泄露；有可疑拦截或凭据暴露证据时，再撤销相应会话与令牌。
 
-## 只能使用文件型凭据
+## 凭据：文件型登录可持久，其余只能“仅本次会话”
 
 容器里**没有** OS keyring（Secret Service）。因此：
 
-- 可用：**External Claude Code file**（`~/.claude/.credentials.json`）、
+- 可持久使用：**External Claude Code file**（`~/.claude/.credentials.json`）、
   **External Codex auth file**（`~/.codex/auth.json`）、**External Grok auth file**
-  （`~/.grok/auth.json`）。这些文件由各官方 CLI 写在卷上的 `HOME` 里。
-- 无法**持久保存**：**Claude Platform（Console session）** 以及任何手动密钥。CLI 的
-  持久密钥存储要求受支持的 keyring，没有时会如实失败。
-- **Claude Platform 余额只能用“一进程模式”**：`usage --api …` 让 TUI 和 API 运行在
-  同一个进程、共用同一个调度器和快照。在这个 TUI 的账号管理（`a`）里添加 Claude
-  Platform 账号并选择 **Session only — lost on exit**，这个 `sessionKey` 就只保存在该
-  进程内存中，API 返回的就是 TUI 显示的同一份余额。代价见第 8 步。单独运行的
-  `usage api serve` 是另一个进程，读不到任何 TUI 的 session-only 凭据。
+  （`~/.grok/auth.json`）。这些文件由各官方 CLI 写在卷上的 `HOME` 里。网页里选“默认位置”
+  即可；自定义路径必须是规范化的绝对路径，文件名为 `auth.json`（Claude 为
+  `.credentials.json`），且是属于服务进程用户（容器里是 root）、权限 `0600` 的普通文件。
+- 无法**持久保存**：**Claude Platform（Console session）** 以及任何手动密钥。持久存储
+  要求受支持的 keyring；没有时 CLI 和 API 都会如实失败（API 返回
+  `secure_store_unavailable`，不会悄悄降级），网页里的“加密保存到服务器系统密钥环”
+  选项也会被禁用。
+- **Claude Platform 现在可以直接用无头 `serve`**：在网页的账号管理里添加 Claude
+  Platform 账号，阅读高敏感度警告后只输入 `sessionKey` 的值，发现并明确选择组织，
+  存储方式选 **仅本次会话**。这个 `sessionKey` 只保存在 `serve` 进程内存中，
+  **每次重启或重新部署都会丢失**；之后该账号显示“会话凭据已丢失”，在网页里编辑该
+  账号重新输入即可。其余代价（高敏感度会话、Console 会话过期、keepalive 不覆盖）见第 8 步。
+- 一进程模式（`usage --api …`，TUI 与 API 同进程）仍可作为替代：在 TUI 的账号管理里
+  选择 **Session only — lost on exit**，效果相同。两个进程之间不共享 session-only 凭据。
 - 本项目的读取进程从不刷新令牌。官方 CLI 只有在被运行时才会自己续期；在所查看的源码
   版本中（Claude Code 2.1.311/2.1.312 的 npm 包、Codex `a29c7b97` 与 `rust-v0.165.0`、
   grok-build `2bdd1d6`），三者都只在访问令牌**到期前约 5 分钟内**才续期。镜像固定的
   Claude Code 2.1.308 与 Grok 1.0.70 未逐一核对（见 PLAN.md §15.6 未知项）。无人使用的服务器上令牌会过期，API 会显示
-  认证失败/过期诊断。请按第 9 步运行 `usage-keepalive` 让官方 CLI 自己续期；若仍失败，
+  认证失败/过期诊断。请按第 9 步运行 keepalive 让官方 CLI 自己续期；若仍失败，
   `railway ssh` 进去重新登录对应 CLI 即可，不需要重启 `serve`（凭据在每次读取时重新解析）。
 
 ## 部署步骤
@@ -143,8 +155,8 @@ Codex 0.165.0 的源码依赖图包含已修复的 rustls-webpki，但原生程�
    仓库里的 `railway.json`（`builder: DOCKERFILE`）只是显式声明；Railway 已把
    Config as Code 标为弃用，**新服务不能再启用它**，旧服务只用到 2026-12-01。
    对新服务来说起作用的是根目录 `Dockerfile` 的自动识别，`railway.json` 被忽略也没关系。
-3. 不要给这个服务配置 healthcheck 路径：容器默认只执行 `sleep infinity`，API 是你
-   之后手动启动的，部署时没有任何端口在监听。
+3. 先**不要**给这个服务配置 healthcheck 路径：容器默认只执行 `sleep infinity`，
+   部署时没有任何端口在监听。等第 8 步切换启动命令后再按需配置。
 
 前端是**另一个**服务：在同一项目里再从本仓库创建一个服务，把 **Root Directory**
 设为 `web`，它使用 `web/` 自己的 `Dockerfile`/`railway.json`（见
@@ -262,7 +274,10 @@ ls -l ~/.grok/auth.json
 
 不要用 `XAI_API_KEY` 代替登录：API key 不能读取订阅用量。
 
-### 6. 配置本项目的账号
+### 6. 配置本项目的账号（可选）
+
+推荐在第 8 步启动 API 后**直接在网页的账号管理里添加账号**（文件型登录选“默认位置”）。
+也可以现在在终端里添加：
 
 ```sh
 usage accounts add --provider claude-subscription   # 选 External Claude Code file，引用填 default
@@ -272,9 +287,10 @@ usage accounts list
 ```
 
 这些命令需要 TTY，`railway ssh` 提供交互终端即可。不要用 CLI 添加 `claude-platform`
-（没有 keyring 会失败）；它在第 8 步的 TUI 里以 session-only 方式添加。
-无头 `serve` 只在启动时读取一次账号配置，修改账号后要重启它；一进程模式下在 TUI
-里修改账号会立即反映到 API。
+（没有 keyring 会失败，且 CLI 进程退出后 session-only 凭据就消失）；它在网页里以
+“仅本次会话”方式添加。
+通过 API／网页修改的账号会立即生效；在另一个进程里用 `usage accounts` 修改的账号，
+要等下一次 API 写操作、冲突重载或重启 `serve` 才生效（服务不监视 `accounts.json`）。
 
 ### 7. 创建 API 令牌
 
@@ -284,6 +300,7 @@ usage api token create --label web
 
 令牌（`usk_` 开头）只打印**一次**，立即复制到前端登录框或你的密码管理器。
 文件 `~/.config/cli-usage-api/api_tokens.json` 里只保存它的 SHA-256 哈希。
+命令会提示：除非服务以 `--read-only` 运行，这个令牌可以添加、修改和删除账号。
 
 ```sh
 usage api token list          # 只显示 id、label、创建时间
@@ -292,9 +309,45 @@ usage api token revoke <id>   # 需要确认；正在运行的 serve 会在约 1
 
 没有任何令牌时，非 demo 的 `serve` 和 `usage --api` 都会拒绝启动。
 
-### 8. 启动 API（推荐：一进程模式）
+### 8. 启动 API（推荐：自定义启动命令 + 网页添加账号）
 
-在 `tmux` 会话的一个窗口里运行：
+完成第 5 步登录和第 7 步创建令牌后（没有令牌时 `serve` 会拒绝启动；加
+`--keepalive` 时至少要有一个官方 CLI 登录文件，否则也会拒绝启动），在服务的
+**Settings → Deploy → Custom Start Command** 中填写（一整行）：
+
+```
+/usr/bin/tini -- /usr/local/bin/usage-entrypoint usage api serve --host 0.0.0.0 --port 8787 --trust-proxy --allow-origin https://<你的前端域名> --keepalive
+```
+
+- Railway 文档说明：对 Dockerfile／镜像服务，启动命令以 **exec 形式**运行并**覆盖镜像的
+  `ENTRYPOINT`**；exec 形式**不做变量展开**（需要变量时要自己包一层 shell）。Railway
+  员工在论坛中进一步说明它同时覆盖 `ENTRYPOINT` 和 `CMD`（见文末来源）。因此：
+  - 命令里必须显式写出 `/usr/bin/tini -- /usr/local/bin/usage-entrypoint`，否则不会有
+    tini 作为 PID 1 转发信号，入口脚本也不会准备 `0700` 的 `HOME`；
+  - 端口写**字面量 `8787`**，不要写 `"$PORT"`（不会被展开）。它与第 3 步的 `PORT=8787`
+    变量和公开域名的目标端口一致。
+- 保存后 **Redeploy**。卷上的登录、账号和令牌都会保留。启动日志应包含
+  `Account changes over the API are ENABLED for every API token` 和 keepalive 日志行
+  （`serve --keepalive` 同时打印到标准输出，即 Railway 日志）。
+- 可选：在 **Settings → Deploy → Healthcheck Path** 填 `/healthz`。Railway 只在新部署
+  上线前检查，使用注入的 `PORT`（这里为 8787）；上线后不再监控。若以后把启动命令
+  改回 `sleep infinity`，要先删除这个 healthcheck 路径，否则部署会失败。
+- 然后用浏览器打开前端，填写后端地址和令牌，进入“账号管理”添加账号：文件型登录选
+  “默认位置”；Grok 读取登录范围并明确选择；Claude Platform 按上一节以“仅本次会话”添加。
+- 要只读运行时在命令末尾加 `--read-only`（此时只能用第 6 步的 CLI 添加账号，修改后
+  需要重新部署）。
+- 这组操作步骤依据 Railway 官方文档整理，**尚未在真实 Railway 服务上执行验证**
+  （见 PLAN.md §18）。
+
+**keepalive 注意事项：**
+
+- keepalive 只覆盖 **`serve` 启动时已存在**的默认位置登录文件。之后通过 `railway ssh`
+  新登录了另一个 CLI，需要重启（重新部署）服务才会纳入。
+- 自定义路径的账号**永远不会**被 keepalive 续期。
+- 对已覆盖的 CLI 通过 `railway ssh` 重新登录，不需要重启。
+- keepalive 日志写到标准输出（Railway 日志）和 `~/.local/state/usage-keepalive/keepalive.log`。
+
+**备选：一进程模式（tmux）。** 也可以保留 `sleep infinity`，在 `tmux` 会话的一个窗口里运行：
 
 ```sh
 usage --api --api-host 0.0.0.0 --api-port "$PORT" \
@@ -302,34 +355,32 @@ usage --api --api-host 0.0.0.0 --api-port "$PORT" \
   --trust-proxy --keepalive
 ```
 
-这会在**同一个进程**里运行 TUI 仪表盘、只读 API 和 keepalive（第 9 步）。API 读取的
-就是 TUI 显示的快照；TUI 里添加、修改、删除、启用/停用账号会立即反映到
-`/api/v1/dashboard`。顶部横幅显示 `API 0.0.0.0:<端口> 令牌认证` 和
+这会在**同一个进程**里运行 TUI 仪表盘、API 和 keepalive（第 9 步）。API 读取的
+就是 TUI 显示的快照；TUI 里添加、修改、排序、删除、启用/停用账号会立即反映到
+`/api/v1/dashboard`，网页里的账号修改也会立即出现在 TUI 中（除非加 `--read-only`）。顶部横幅显示 `API 0.0.0.0:<端口> 令牌认证` 和
 `keepalive …`；API 出错时 TUI 弹出通知而不会崩溃，uvicorn 不向终端输出任何日志。
 端口被占用、没有令牌、没有登录文件或已有 keepalive 实例时，命令在进入 TUI 之前就
 以普通错误退出。按 `Ctrl-b d` 脱离 tmux 后进程继续运行；按 `q` 或 `Ctrl-C` 退出会同时
 停止 API、keepalive 和调度器。
 
-**Claude Platform：** 在这个 TUI 里按 `a` → 添加 Claude Platform 账号 → 选择
-Console session，阅读高敏感度警告后只粘贴 `sessionKey` 的值，存储方式选
-**Session only — lost on exit**，再显式发现并选择组织。这样 API 就能返回 Claude
-Platform 余额。代价（请确认可以接受）：
+**Claude Platform 的代价**（网页添加到无头 `serve`，或在一进程模式的 TUI 里按 `a` 添加，
+二者相同；请确认可以接受）：
 
 - **每次重启、重新部署或进程退出后都要重新输入**。账号元数据留在卷上的
   `accounts.json` 中，但密钥丢失，重启后该账号的凭据不可用、无法读取余额，需在账号管理里重新输入。
 - 这是**高敏感度的 Console 账号会话**，等同于登录态，而不是受限的 API key。它保存在一台
   有公开域名的服务器的进程内存里；任何能 `railway ssh` 进入容器（或读取进程内存）的人
-  都可能拿到它。API 本身只返回余额，不返回会话、引用或组织 ID。
+  都可能拿到它（服务进程已尽力禁用 core dump）。API 本身只返回余额，不返回会话、引用或
+  组织 ID。从网页提交时，它只在 HTTPS 请求体中传输，不会出现在 URL 或浏览器存储里。
 - Console 会话会过期或被撤销；**keepalive 只续期 Claude Code / Codex / Grok 的官方 CLI
   登录文件，不覆盖 Console 会话**。过期后 TUI/API 显示认证错误，需要重新输入。
 - 本项目移除账号或进程退出都不会撤销远端会话；不再使用时在 Console 网页登出。
 
-替代方案（只需要文件型登录时）：仍可使用无头的
-`usage api serve --host 0.0.0.0 --port "$PORT" --allow-origin https://<你的前端域名> --trust-proxy`，
-再在另一个 tmux 窗口运行独立的 `usage-keepalive`，或直接给 `serve` 加 `--keepalive`
-（日志会同时打印到标准输出）。无头 `serve` 不支持 Claude Platform。
+也可以在 tmux 里手动运行无头的
+`usage api serve --host 0.0.0.0 --port "$PORT" --allow-origin https://<你的前端域名> --trust-proxy --keepalive`
+（交互 shell 会展开 `$PORT`），但重新部署后需要再次手动启动。
 
-参数说明（两种方式相同；一进程模式中名称为 `--api-host` / `--api-port`）：
+参数说明（各方式相同；一进程模式中名称为 `--api-host` / `--api-port`）：
 
 - `--host 0.0.0.0`：Railway 要求监听所有地址，绑定 `127.0.0.1` 时外部无法访问。
 - `--allow-origin`：前端的精确 origin（`https://` + 域名，不带路径/末尾斜杠），可重复。
@@ -352,8 +403,9 @@ curl -sS -i https://<你的后端域名>/api/v1/dashboard | head -1   # 无令�
 
 ### 9. 保持登录（推荐）
 
-第 8 步的 `--keepalive` 已在同一进程里运行 keepalive（日志只写入
-`~/.local/state/usage-keepalive/keepalive.log`；`ALERT` 行在 TUI 中显示为警告通知）。
+第 8 步的 `--keepalive` 已在同一进程里运行 keepalive（日志写入
+`~/.local/state/usage-keepalive/keepalive.log`；无头 `serve` 同时打印到标准输出，一进程
+模式下 `ALERT` 行在 TUI 中显示为警告通知）。
 可用 `--keepalive-cli codex`（可重复）限定范围、`--keepalive-claude-mode status|model`
 选择 Claude 方式。也可以不加 `--keepalive`，另开一个 tmux 窗口（`Ctrl-b c`）运行独立的：
 
@@ -380,7 +432,8 @@ usage-keepalive
   `~/.grok/auth.json`（或 `$GROK_HOME/auth.json`）并显式指定 selector 的 Grok 账号的那个
   scope。未指定 selector 的账号不额外保护任何 scope（例如只有一个 modern scope 时，
   过期的 legacy 会被标为 stale，不会反复失败告警）。一进程模式下在 TUI 里修改账号会
-  立即更新这组 scope；独立的 `usage-keepalive` 启动时只读一次账号配置（无法读取时记录
+  立即更新这组 scope，`serve` 中通过 API 修改账号也会立即更新；独立的
+  `usage-keepalive` 启动时只读一次账号配置（无法读取时记录
   `accounts unavailable; no protected Grok scopes` 并继续，不保护任何显式 selector）。
   该 scope 的到期时间之后若发生变化，会重新参与排期。
 - 停止（退出 TUI、Ctrl-C 停止 `serve` 或独立进程）时不再开始新的目标或命令，并杀掉
@@ -412,9 +465,11 @@ usage-keepalive
 
 ## 运维注意
 
-- **重新部署或重启服务会结束 `usage --api` / `serve` 和所有 tmux 会话**（`CMD` 只是
-  `sleep infinity`）。卷上的登录、账号和令牌会保留，但需要再次 `railway ssh` 进去手动
-  启动第 8 步（一进程模式还要重新输入 session-only 的 Claude Platform `sessionKey`）。
+- **重新部署或重启服务会结束正在运行的 API 进程和所有 tmux 会话。** 使用第 8 步的
+  自定义启动命令时，API 会随部署自动重新启动；使用 tmux 方式（`CMD` 仍是
+  `sleep infinity`）时需要再次 `railway ssh` 进去手动启动。卷上的登录、账号和令牌会保留，
+  但 session-only 的 Claude Platform `sessionKey` 会丢失：在网页（或一进程模式的 TUI）里重新输入。
+- 公开域名上的任何 API 令牌默认都能修改账号；令牌需要广泛分享时用 `--read-only`。
 - 公开域名上只有 `/healthz` 无需认证；其余接口都需要 `Authorization: Bearer` 令牌。
   令牌泄露时用 `usage api token revoke` 撤销并新建。
 - 卷里保存的是各官方 CLI 的登录凭据（相当于密码）。不要把卷内容复制到不可信位置，
@@ -466,5 +521,11 @@ docker run --rm -it -v usage-data:/data usage-api-railway bash
   <https://docs.railway.com/networking/troubleshooting/application-failed-to-respond>
 - Railway 域名与目标端口：<https://docs.railway.com/networking/domains/working-with-domains>
 - `railway ssh`：<https://docs.railway.com/cli/ssh>
+- Railway 自定义启动命令（Dockerfile／镜像服务以 exec 形式覆盖 `ENTRYPOINT`，exec 形式
+  不展开变量）：<https://docs.railway.com/deployments/start-command>
+- 启动命令同时覆盖 `ENTRYPOINT` 与 `CMD`（Railway 员工论坛回答，非正式文档）：
+  <https://station.railway.com/questions/weird-start-command-behaviour-4f4cc23a>
+- Railway healthcheck（服务设置中配置路径、使用 `PORT`、默认超时 300 秒、仅在部署上线前
+  检查）：<https://docs.railway.com/deployments/healthchecks>
 - Railway 边缘代理头（论坛版主回答，非正式文档）：
   <https://station.railway.com/questions/which-client-address-headers-does-the-ra-fb9e36d7>

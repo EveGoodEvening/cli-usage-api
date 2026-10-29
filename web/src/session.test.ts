@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { API_ERROR_MESSAGES, ApiError } from "./api";
+import { API_ERROR_MESSAGES, ApiError, isSession } from "./api";
 import { DEFAULT_RETRY_AFTER, endsSession, signOutNotice } from "./hooks";
 import { Login } from "./components/Login";
 
@@ -62,9 +62,38 @@ describe("Login after a rate-limited session end", () => {
     expect(button).toContain("连接");
   });
 
+  it("states the token's possible write access next to remember", () => {
+    const html = renderLogin(null);
+    expect(html).toContain("查看各账号的额度与余额；服务器允许时也可在网页管理账号。");
+    expect(html).toContain("此令牌可能可以修改服务器上的账号；共享设备上不要记住它。");
+    expect(html).not.toContain("只读查看");
+  });
+
   it("does not disable Connect after a 401 sign-out", () => {
     const html = renderLogin(signOutNotice(new ApiError("unauthorized", 401)));
     expect(html).toContain("令牌已失效或被撤销");
     expect(submitButton(html)).not.toContain("disabled");
+  });
+});
+
+describe("session capabilities", () => {
+  const base = { mode: "live", version: "1.0", server_time: "2026-10-29T12:00:00Z", auth: "token" };
+
+  it("treats a missing or malformed capabilities object as read-only", () => {
+    const missing: Record<string, unknown> = { ...base };
+    expect(isSession(missing)).toBe(true);
+    expect(missing.capabilities).toEqual({ writable: false, secure_store_available: false });
+    const malformed: Record<string, unknown> = { ...base, capabilities: { writable: "yes" } };
+    expect(isSession(malformed)).toBe(true);
+    expect(malformed.capabilities).toEqual({ writable: false, secure_store_available: false });
+  });
+
+  it("keeps the server's capabilities when present", () => {
+    const session: Record<string, unknown> = {
+      ...base,
+      capabilities: { writable: true, secure_store_available: true },
+    };
+    expect(isSession(session)).toBe(true);
+    expect(session.capabilities).toEqual({ writable: true, secure_store_available: true });
   });
 });

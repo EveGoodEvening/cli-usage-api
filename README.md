@@ -1,8 +1,8 @@
 # CLIUsageAPI
 
-A local, read-only terminal dashboard for subscription usage and Claude Platform
-credit balances, with an optional token-protected read-only HTTP API and a separate
-web frontend. No statusline.
+A local terminal dashboard for subscription usage and Claude Platform credit
+balances, with an optional token-protected HTTP API (usage data plus account
+management) and a separate web frontend. Provider reads are read-only. No statusline.
 
 **Status:** Offline demo and local account workflows are verified. Authenticated
 provider reads and real OS-keyring persistence remain unverified. Provider
@@ -80,7 +80,8 @@ retry deadlines. Restart a running dashboard to use the new policy.
 ## Connect accounts
 
 Sign in through the first-party tools outside this app, then press `a` in the live
-dashboard:
+dashboard, use the `usage accounts` commands below, or add accounts in the
+[web UI](#account-management-over-http) when the API runs with writes enabled:
 
 - **Claude:** run `claude`, then `/login`. Choose **External Claude Code file**.
 - **Claude Platform:** choose **Console session (not an API key)**. A `sessionKey`
@@ -94,13 +95,19 @@ dashboard:
 - **Grok:** run `grok login`. Choose **External Grok auth file** and explicitly
   select the intended identity/scope.
 
-For file sources, use `default` or an absolute path to a private, user-owned `0600`
-file. The app never modifies or deletes first-party login files, runs login, or
+For file sources, use `default` or a normalized absolute path to a private,
+user-owned `0600` regular file named `.credentials.json` (Claude Code) or
+`auth.json` (Codex, Grok), outside `/proc`, `/sys` and `/dev`; previously saved
+references that do not match keep working but cannot be re-entered. The app never modifies or deletes first-party login files, runs login, or
 refreshes tokens. Renew expired credentials through the first-party tool; on an
 unattended host, the separate opt-in `usage-keepalive` loop invokes each official CLI
 shortly before its stored expiry so that CLI renews its own file (see
 [docs/deploy-railway.md](docs/deploy-railway.md)).
 API keys do not enable subscription metrics or Console balances.
+
+In the account manager (`a`), Shift+↑/↓ (or Ctrl+↑/↓) moves the selected account and
+mouse drag reorders; the order is saved to `accounts.json` and the dashboard, the API
+and the web UI follow it. Read-only and demo managers ignore moves.
 
 ### CLI account management
 
@@ -157,18 +164,21 @@ files are refused.
 - Never put secrets in arguments, environment variables, labels, chat, or issues.
 - Persistent manual-secret storage requires an unlocked, supported Linux Secret
   Service keyring. Plaintext and alternative backends are rejected.
-- If secure storage is unavailable, choose **session only** in the TUI. Secrets
-  disappear when the process exits; there is no silent storage fallback.
+- If secure storage is unavailable, choose **session only** in the TUI or web UI.
+  Secrets disappear when that process (TUI or API server) exits; there is no silent
+  storage fallback.
 - Removing an account or stored key does not revoke its remote session.
 
 Account metadata lives at `$XDG_CONFIG_HOME/cli-usage-api/accounts.json`, falling back
 to `~/.config/cli-usage-api/accounts.json`; credential values are stored separately.
 See [SECURITY.md](SECURITY.md) for boundaries and limitations.
 
-## Read-only HTTP API
+## HTTP API
 
-`usage api serve` runs headless (no TUI) and serves the same usage data as JSON. It
-only reads: there are no endpoints for adding, editing or removing accounts.
+`usage api serve` runs headless (no TUI) and serves the same usage data as JSON.
+Unless started with `--read-only`, any API token can also add, edit, reorder and
+remove accounts (see [account management](#account-management-over-http)); demo is
+always read-only.
 
 ```sh
 uv run usage api token create --label web    # TTY only; the token is printed once
@@ -182,17 +192,22 @@ uv run usage api serve --demo                # fictional data, no live files/net
 - Only the SHA-256 hash of each token is stored, in `api_tokens.json` beside
   `accounts.json`. `usage api token list` shows IDs/labels/creation times;
   `usage api token revoke ID` takes effect in a running server within about a second.
-- Endpoints: `/healthz`, `/api/v1/session`, `/api/v1/dashboard`,
-  `/api/v1/accounts/{id}`. Only `GET`/`HEAD`/`OPTIONS` are accepted.
+- Read endpoints (`GET`/`HEAD`): `/healthz`, `/api/v1/session`, `/api/v1/dashboard`,
+  `/api/v1/accounts` (nonsecret account configuration) and `/api/v1/accounts/{id}`.
+  Session and account-list responses carry `capabilities` (`writable`,
+  `secure_store_available`). Dashboard order is the saved account order.
 - Browsers on another origin need `--allow-origin https://frontend.example`
   (exact origin, repeatable; no wildcard). `--trust-proxy` makes failed-auth limiting
   use the right-most `X-Forwarded-For` entry; use it only behind a trusted reverse
   proxy such as Railway.
-- Account configuration is read once at startup: restart `serve` after changing
-  accounts. Credential sources are resolved per poll, as in the dashboard.
-- Headless `serve` cannot use TUI session-only secrets. Without an OS keyring
-  (for example in a container) it reads only file-backed Claude Code / Codex / Grok
-  logins; use one-process mode below for Claude Platform there.
+- Account changes made over the API apply immediately. Changes made with
+  `usage accounts` in another process apply on the next API write, a conflict
+  reload or a restart (the server does not watch `accounts.json`). Credential
+  sources are resolved per poll, as in the dashboard.
+- Headless `serve` cannot use TUI session-only secrets, but a secret submitted over
+  the API with session-only storage lives in the `serve` process. Without an OS
+  keyring (for example in a container), add Claude Platform through the web UI as
+  session-only and re-enter it after each restart, or use one-process mode below.
 - `usage api serve --keepalive [--keepalive-cli NAME ...] [--keepalive-claude-mode
   hybrid|status|model]` (live only) also runs `usage-keepalive` in the server process
   and prints its log lines.
@@ -206,10 +221,11 @@ uv run usage --api --api-host 0.0.0.0 --api-port 9000 \
 uv run usage --demo --api                            # fictional data; loopback, no token
 ```
 
-`usage --api` runs the read-only API inside the dashboard process: one scheduler, and
-the API serves exactly the snapshots the TUI shows. Accounts added, edited, removed,
+`usage --api` runs the API inside the dashboard process: one scheduler, and the API
+serves exactly the snapshots the TUI shows. Accounts added, edited, reordered, removed,
 enabled or disabled in the TUI's account manager appear in `/api/v1/dashboard`
-immediately, and a **session-only** credential entered in that TUI (for example a
+immediately, and account changes made over HTTP (unless `--read-only`) appear in the
+TUI immediately, and a **session-only** credential entered in that TUI (for example a
 Claude Platform Console `sessionKey` on a host without a keyring) feeds the API too.
 It lasts only as long as the process: re-enter it after every restart. The token,
 CORS and `--trust-proxy` rules are the same as `usage api serve`; live mode needs at
@@ -228,10 +244,42 @@ account selects explicitly in the default login file are never marked stale; the
 updates that set when accounts change. A no-selector account adds nothing, because the
 reader's default scope is already never marked stale.
 
+### Account management over HTTP
+
+Writes need a token and a live server without `--read-only`; startup prints whether
+they are ENABLED. Every token is a full-write token, so tokens created before this
+feature gain write access on upgrade: use `--read-only` when tokens are shared widely.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/accounts` | Create an account (`201`) |
+| `POST` | `/api/v1/accounts/prepare` | Read Grok scopes or discover Console organizations for an explicit choice |
+| `PUT` | `/api/v1/accounts/order` | Save a full permutation of account IDs |
+| `PATCH` | `/api/v1/accounts/{id}` | Edit label, interval, enabled or credential source (`If-Match` revision required) |
+| `DELETE` | `/api/v1/accounts/{id}` | Remove an account and secrets this tool stored (`If-Match` required) |
+| `POST` | `/api/v1/accounts/{id}/reconnect` | Request an earlier read; retry limits still apply |
+
+- Bodies are JSON (≤ 64 KiB, 10 s), strict and whitelisted; errors are fixed codes
+  such as `{"error":"conflict"}`. A stale revision or reorder list returns `409`.
+- Secrets go only in the request body and are never returned. Choose `persist: true`
+  (OS keyring only; `503 secure_store_unavailable` when none is available, never a
+  silent fallback) or `persist: false` (kept in the server process until it exits).
+- Responses never include custom paths (only `custom`), Grok selectors, Console
+  organization IDs or credential references. File references follow the basename
+  rule above. Grok scopes and Console organizations must be chosen explicitly.
+- Removing an account never deletes first-party login files or revokes remote
+  sessions. Keepalive covers only default login files that existed when the server
+  started, never custom paths.
+
+In one-process mode, web edits update the TUI immediately (dashboard and an open
+account manager). See [SECURITY.md](SECURITY.md) for the threat model and
+[web/README.md](web/README.md) for the web screens.
+
 ## Web frontend
 
 [`web/`](web/) is a separate static Vite/React app that signs in with the API base
-URL and a token and polls `/api/v1/dashboard`. It deploys to Vercel, Cloudflare or
+URL and a token, polls `/api/v1/dashboard`, and, when the server allows writes,
+manages and reorders accounts in its accounts view. It deploys to Vercel, Cloudflare or
 Railway; see [web/README.md](web/README.md). For local development, run
 `uv run usage api serve --demo --allow-origin http://localhost:5173` and
 `npm run dev` in `web/`.
@@ -241,11 +289,12 @@ Railway; see [web/README.md](web/README.md). For local development, run
 The root [`Dockerfile`](Dockerfile) builds an image with Python 3.12, this project,
 Node.js 22 and pinned Claude Code, Codex and Grok Build CLIs, then runs
 `sleep infinity`. Attach a volume at `/data` (`HOME=/data/home`), then
-`railway ssh` in to log in to each CLI, add accounts, create a token, and start
-`usage --api --api-host 0.0.0.0 --api-port "$PORT" --allow-origin https://<frontend> --trust-proxy --keepalive`
-in tmux (one process; a session-only Claude Platform `sessionKey` entered in that TUI
-feeds the API until the process exits). Headless `usage api serve` plus a separate
-`usage-keepalive` remain available for file-backed logins only.
+`railway ssh` in to log in to each CLI and create a token. The recommended flow then
+sets the service's custom start command to
+`/usr/bin/tini -- /usr/local/bin/usage-entrypoint usage api serve --host 0.0.0.0 --port 8787 --allow-origin https://<frontend> --trust-proxy --keepalive`,
+redeploys, and adds accounts in the web UI (Claude Platform only as session-only,
+re-entered after each redeploy). One-process `usage --api` in tmux remains an
+alternative.
 Step-by-step instructions (Chinese) and sources are in
 [docs/deploy-railway.md](docs/deploy-railway.md). The image has been built and
 smoke-tested locally only; no Railway deployment or in-container login is verified.

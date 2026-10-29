@@ -1,5 +1,6 @@
 """Pilot drives production screens with isolated stores, never live services."""
 
+import asyncio
 import json
 import os
 import stat
@@ -7,6 +8,7 @@ from dataclasses import replace
 from uuid import uuid4
 
 import pytest
+from textual import events
 from textual.app import App
 from textual.widgets import Input, Select, Static
 
@@ -14,6 +16,7 @@ from cli_usage_api.accounts import AccountForm, AccountManagerScreen, ConfirmDia
 from cli_usage_api.credentials import CredentialResolver
 from cli_usage_api.domain import Account, CredentialKind, ProviderId
 from cli_usage_api.providers.console import OrganizationChoice
+from cli_usage_api.reorder import ReorderableOptionList
 from cli_usage_api.storage import AccountStore, CredentialError, CredentialStore
 
 
@@ -192,7 +195,8 @@ async def test_console_discovery_failure_redacted_and_cancel_no_orphan(manager):
 
 
 async def test_grok_scope_selection_external_file_untouched(manager, tmp_path):
-    external = tmp_path / "grok-auth.json"
+    (tmp_path / "grok").mkdir(mode=0o700)
+    external = tmp_path / "grok" / "auth.json"
     external.write_text(
         json.dumps(
             {
@@ -294,11 +298,19 @@ async def test_readonly_demo_never_touches_services():
     manager = AccountManagerScreen(
         Forbidden(), Forbidden(), Forbidden(), readonly=True, accounts=(original,)
     )
+    second = Account(str(uuid4()), ProviderId.CLAUDE_SUBSCRIPTION, "DEMO 2")
+    manager.accounts = (original, second)
     async with Host(manager).run_test(size=(40, 12)) as pilot:
         await pilot.press("a", "e", "space", "d", "k", "r")
+        await pilot.press("shift+down", "ctrl+down", "shift+up", "ctrl+up")
+        listing = listing_of(manager)
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        assert not listing.dragging
+        await pilot.hover(listing, offset=line(listing, 1))
+        await pilot.mouse_up(listing, offset=line(listing, 1))
         await pilot.pause()
         assert pilot.app.screen is manager
-        assert manager.accounts == (original,)
+        assert manager.accounts == (original, second)
 
 
 async def test_async_callbacks_and_sanitized_label(manager):
@@ -477,12 +489,13 @@ async def test_committed_directory_sync_failure_notifies_host_once(manager, monk
             await pilot.pause()
             await pilot.click("#confirm")
         elif operation == "remove":
-            await manager._change(lambda: manager.service.remove(original))
+            await manager._change(lambda: manager.service.remove(original), {original.id})
         else:
             await manager._change(
                 lambda: manager.service.save(
                     replace(original, credential_kind=None, credential_ref=None), original=original
-                )
+                ),
+                {original.id},
             )
         await pilot.pause()
         committed = AccountStore(manager.account_store.path).load()
@@ -507,7 +520,7 @@ async def test_rejected_mutation_does_not_notify_host(manager, monkeypatch):
         form = await open_form(pilot.app, pilot)
         monkeypatch.setattr(manager.account_store, "mutate", fail)
         await form.save()
-        await manager._change(lambda: manager.service.save(form._draft()))
+        await manager._change(lambda: manager.service.save(form._draft()), frozenset())
         assert changes == []
         assert manager.account_store.load() == ()
 
@@ -529,7 +542,7 @@ async def test_committed_cleanup_failure_notifies_host_once(manager, monkeypatch
 
     async with Host(manager).run_test() as pilot:
         monkeypatch.setattr(manager.credential_store, "delete", fail_delete)
-        await manager._change(lambda: manager.service.remove(saved))
+        await manager._change(lambda: manager.service.remove(saved), {saved.id})
         assert changes == [()]
         assert manager.accounts == ()
         assert pilot.app.screen is manager
@@ -589,3 +602,288 @@ async def test_codex_file_reconnect_after_external_login(manager, tmp_path, monk
         assert calls == [account.id]
         assert manager.account_store.load() == (account,)
         assert source.exists()
+
+
+class LockedHost(Host):
+    """A host that owns ``account_lock`` like UsageApp and the API hub."""
+
+    def __init__(self, manager):
+        super().__init__(manager)
+        self.account_lock = asyncio.Lock()
+
+
+def seed(manager, count=3):
+    accounts = tuple(
+        Account(str(uuid4()), ProviderId.CLAUDE_SUBSCRIPTION, f"Account {index}")
+        for index in range(count)
+    )
+    manager.account_store.save(accounts)
+    return accounts
+
+
+def recorder(changes):
+    def changed(accounts, *, invalidate=None):
+        changes.append((accounts, invalidate))
+
+    return changed
+
+
+def ids(accounts):
+    return [account.id for account in accounts]
+
+
+def line(listing, index):
+    """Offset of an option's first line, relative to the list widget."""
+    return (3, listing.gutter.top + index)
+
+
+def listing_of(manager):
+    return manager.query_one("#accounts", ReorderableOptionList)
+
+
+@pytest.mark.parametrize(("down", "up"), [("shift+down", "shift+up"), ("ctrl+down", "ctrl+up")])
+async def test_keyboard_move_persists_order_and_follows_account(manager, down, up):
+    first, second, third = seed(manager)
+    changes = []
+    manager.on_changed = recorder(changes)
+    async with LockedHost(manager).run_test() as pilot:
+        assert "Shift+↑/↓ or drag Move" in str(manager.query_one("#account-hint").render())
+        await pilot.press(down)
+        await pilot.pause()
+        assert ids(manager.account_store.load()) == ids((second, first, third))
+        assert manager.selected() == first
+        await pilot.press(down)
+        await pilot.pause()
+        assert ids(manager.account_store.load()) == ids((second, third, first))
+        assert manager.selected() == first
+        await pilot.press(up)
+        await pilot.pause()
+        assert ids(manager.account_store.load()) == ids((second, first, third))
+        assert manager.selected() == first
+        assert [invalidate for _, invalidate in changes] == [frozenset()] * 3
+        assert changes[-1][0] == manager.account_store.load() == manager.accounts
+
+
+async def test_boundary_moves_never_write(manager, monkeypatch):
+    seed(manager, 2)
+    async with Host(manager).run_test() as pilot:
+
+        def forbidden(_ids):
+            pytest.fail("A boundary move must not write")
+
+        monkeypatch.setattr(manager.service, "reorder", forbidden)
+        await pilot.press("shift+up", "ctrl+up")
+        await pilot.press("end", "shift+down", "ctrl+down")
+        await pilot.pause()
+
+
+async def test_stale_move_resyncs_without_writing(manager):
+    first, second, _ = seed(manager)
+    changes = []
+    manager.on_changed = recorder(changes)
+    async with Host(manager).run_test() as pilot:
+        # Another process removes an account after the manager loaded the list.
+        manager.account_store.save((first, second))
+        before = manager.account_store.path.read_bytes()
+        await pilot.press("shift+down")
+        await pilot.pause()
+        assert manager.account_store.path.read_bytes() == before
+        assert "Accounts changed elsewhere; reloaded. Move again." in str(
+            manager.query_one("#account-status", Static).render()
+        )
+        assert manager.accounts == (first, second)
+        assert listing_of(manager).option_count == 2
+        assert changes == [((first, second), frozenset())]
+
+
+async def test_drag_reorders_and_swallows_the_release_click(manager):
+    first, second, third = seed(manager)
+    changes = []
+    manager.on_changed = recorder(changes)
+    async with Host(manager).run_test() as pilot:
+        listing = listing_of(manager)
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        assert listing.dragging
+        await pilot.hover(listing, offset=line(listing, 2))
+        assert "position 3/3 (Esc cancels)" in str(
+            manager.query_one("#account-status", Static).render()
+        )
+        await pilot.mouse_up(listing, offset=line(listing, 2))
+        await pilot.pause()
+        assert ids(manager.account_store.load()) == ids((second, third, first))
+        assert manager.selected() == first
+        assert changes == [(manager.accounts, frozenset())]
+        # The drag is over: its Esc hint is replaced by the saved position.
+        status = str(manager.query_one("#account-status", Static).render())
+        assert "Esc cancels" not in status and "position 3/3" in status
+        assert listing._suppress_click
+        # Textual synthesizes a Click for a release over the pressed widget.
+        listing.post_message(events.Click(listing, *line(listing, 1), 0, 0, 1, False, False, False))
+        await pilot.pause()
+        assert not listing._suppress_click
+        # The base click handler would have highlighted (and selected) row 1.
+        assert manager.selected() == first
+        assert not isinstance(pilot.app.screen, AccountForm)
+
+
+async def test_drop_below_list_clamps_and_next_click_selects(manager):
+    first, second, third = seed(manager)
+    async with Host(manager).run_test() as pilot:
+        listing = listing_of(manager)
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        status = manager.query_one("#account-status", Static)
+        await pilot.mouse_up(status, offset=(3, 0))
+        await pilot.pause()
+        assert ids(manager.account_store.load()) == ids((second, third, first))
+        assert not listing._suppress_click
+        await pilot.click(listing, offset=line(listing, 0))
+        await pilot.pause()
+        assert manager.selected() == second
+
+
+async def test_escape_cancels_drag_without_leaving_manager(manager):
+    accounts = seed(manager)
+    async with Host(manager).run_test() as pilot:
+        listing = listing_of(manager)
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        await pilot.hover(listing, offset=line(listing, 2))
+        await pilot.press("escape")
+        await pilot.pause()
+        assert pilot.app.screen is manager
+        assert not listing.dragging
+        assert manager.selected() == accounts[0]
+        assert "cancelled" in str(manager.query_one("#account-status", Static).render())
+        await pilot.mouse_up(listing, offset=line(listing, 2))
+        await pilot.pause()
+        assert manager.account_store.load() == accounts
+
+
+async def test_drop_on_origin_and_reload_end_drag_feedback(manager):
+    accounts = seed(manager)
+    async with Host(manager).run_test() as pilot:
+        listing = listing_of(manager)
+        status = manager.query_one("#account-status", Static)
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        await pilot.hover(listing, offset=line(listing, 2))
+        await pilot.hover(listing, offset=line(listing, 0))
+        assert "Esc cancels" in str(status.render())
+        await pilot.mouse_up(listing, offset=line(listing, 0))
+        await pilot.pause()
+        assert "Esc cancels" not in str(status.render())
+        assert manager.account_store.load() == accounts
+        # Another writer's change rebuilds the list and ends a live drag.
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        await pilot.hover(listing, offset=line(listing, 2))
+        await manager.reload(tuple(reversed(accounts)))
+        await pilot.pause()
+        assert not listing.dragging
+        rendered = str(status.render())
+        assert "Esc cancels" not in rendered and "accounts changed" in rendered
+        await pilot.mouse_up(listing, offset=line(listing, 2))
+        await pilot.pause()
+        assert pilot.app.screen is manager
+        await pilot.press("escape")
+        await pilot.pause()
+        assert pilot.app.screen is not manager
+
+
+async def test_mutating_shortcuts_are_ignored_mid_drag(manager):
+    accounts = seed(manager)
+    async with Host(manager).run_test() as pilot:
+        listing = listing_of(manager)
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        await pilot.hover(listing, offset=line(listing, 2))
+        await pilot.press("space", "d", "k", "e", "a", "shift+down")
+        await pilot.pause()
+        # Nothing acted on the hovered row and the drag is still live.
+        assert pilot.app.screen is manager
+        assert manager.account_store.load() == accounts
+        assert listing.dragging
+        assert "Finish the move first" in str(manager.query_one("#account-status", Static).render())
+        await pilot.mouse_up(listing, offset=line(listing, 2))
+        await pilot.pause()
+        assert ids(manager.account_store.load()) == ids(accounts[1:] + accounts[:1])
+
+
+async def test_tui_writers_hold_the_host_account_lock(manager, monkeypatch):
+    seed(manager, 2)
+    host = LockedHost(manager)
+    held = []
+
+    def watch(method):
+        def locked(*args, **kwargs):
+            held.append(host.account_lock.locked())
+            return method(*args, **kwargs)
+
+        return locked
+
+    async with host.run_test() as pilot:
+        monkeypatch.setattr(manager.service, "save", watch(manager.service.save))
+        monkeypatch.setattr(manager.service, "reorder", watch(manager.service.reorder))
+        monkeypatch.setattr(manager.service, "remove", watch(manager.service.remove))
+        await pilot.press("shift+down", "space")
+        await pilot.pause()
+        listing = listing_of(manager)
+        await pilot.mouse_down(listing, offset=line(listing, 0))
+        await pilot.mouse_up(listing, offset=line(listing, 1))
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        form.query_one("#label", Input).value = "Renamed"
+        await form.save()
+        await pilot.pause()
+        await pilot.press("d")
+        await pilot.pause()
+        await pilot.click("#confirm")
+        await pilot.pause()
+        assert held == [True] * 5
+        assert not host.account_lock.locked()
+
+
+async def test_form_rename_keeps_observations_and_source_edit_invalidates(manager, tmp_path):
+    root = tmp_path / "codex"
+    root.mkdir(mode=0o700)
+    account = Account(
+        str(uuid4()),
+        ProviderId.CODEX_SUBSCRIPTION,
+        "Codex",
+        credential_kind=CredentialKind.CODEX_AUTH_FILE,
+        credential_ref="default",
+    )
+    manager.account_store.save((account,))
+    changes = []
+    manager.on_changed = recorder(changes)
+    async with Host(manager).run_test() as pilot:
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        assert not form.source_dirty
+        form.query_one("#label", Input).value = "Renamed"
+        await form.save()
+        await pilot.pause()
+        assert changes[-1][1] == frozenset()
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        reference = form.query_one("#reference", Input)
+        # Retyping the same reference is still an explicit source submission.
+        reference.value = "defaul"
+        await pilot.pause()
+        reference.value = "default"
+        await pilot.pause()
+        await form.save()
+        await pilot.pause()
+        assert changes[-1][1] == frozenset({account.id})
+        assert manager.accounts[0].credential_ref == "default"
+
+
+async def test_form_rejects_new_reference_with_wrong_basename(manager, tmp_path):
+    async with Host(manager).run_test() as pilot:
+        form = await open_form(pilot.app, pilot)
+        await set_source(form, pilot, ProviderId.CODEX_SUBSCRIPTION, CredentialKind.CODEX_AUTH_FILE)
+        form.query_one("#reference", Input).value = str(tmp_path / "codex.json")
+        await form.save()
+        await pilot.pause()
+        assert "absolute path to auth.json" in str(form.query_one("#form-status", Static).render())
+        assert manager.account_store.load() == ()

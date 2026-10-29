@@ -24,22 +24,75 @@ reports should describe the affected component and reproduction with synthetic d
 remove authentication and identity information before sharing. If a credential is
 exposed, revoke or replace it through the relevant first-party service.
 
-## Read-only HTTP API, web frontend and container deployment (PLAN.md §15)
+## HTTP API, web frontend and container deployment (PLAN.md §15, §18)
 
 Scope and threat model for `usage api serve`, the embedded `usage --api` mode,
 `web/` and the root `Dockerfile`.
-Implementation follows the PLAN.md §15 frozen contract; verification status is
-recorded there, and no Railway deployment or authenticated live read is claimed.
+Implementation follows the PLAN.md §15 frozen contract as amended by §18 (account
+management over HTTP); verification status is recorded there, and no Railway
+deployment, authenticated live read, live Console discovery or real OS-keyring
+persistence through the API is claimed.
 
 **Assets.** Usage/balance snapshots and account labels (personal data), API bearer
-tokens, and, on a container host, the first-party CLI login files on the volume.
+tokens, account configuration, secrets submitted for accounts (manual bearers, API
+keys, Console `sessionKey`s), and, on a host, the first-party CLI login files.
 
 **Boundaries and controls.**
 
-- Read-only surface: only `GET`/`HEAD`/`OPTIONS`; no account, credential, token or
-  configuration mutation over HTTP. Request bodies are not read. Unknown methods
-  return `405`; unauthenticated unknown `/api/` paths return `401`, not `404`, so
+- Write surface: account mutation is **on by default** for token-authenticated live
+  serving (`usage api serve` and `usage --api`). Every API token is a full-write
+  token: it can add, edit, reorder and remove accounts and submit secrets. There are
+  no token scopes, and **upgrading grants existing tokens write power**. Run with
+  `--read-only` when tokens are shared widely; demo is always read-only. Token and
+  general configuration management are not exposed over HTTP. The write gate is
+  evaluated per request (operations present, live mode, not anonymous); otherwise
+  writes get `403 read_only` and their body is never read. Unknown methods return
+  `405`; unauthenticated requests to any non-public path return `401`, not `404`, so
   paths cannot be enumerated. `/healthz` is the only public path.
+- Request bodies are read only on authenticated, writable routes: `application/json`
+  only, a 64 KiB cap (declared or streamed), one 10 s read deadline, strict UTF-8
+  JSON with duplicate-key, `NaN`/`Infinity`, deep-nesting, oversized-integer and
+  lone-surrogate rejection, exact key whitelists and strict types. Error bodies are
+  fixed codes and never echo input. PATCH/DELETE require an `If-Match` revision (a
+  per-process HMAC over the saved account), so stale clients get `409` after a
+  resync rather than overwriting newer edits.
+- Secrets travel only in the (TLS-terminated) JSON body, never in URLs, and are
+  never echoed, logged, placed in exception messages or returned. The web client
+  keeps them out of URLs, history and browser storage and clears them after submit;
+  secret inputs use `autocomplete="new-password"` with password-manager opt-outs and
+  the form never fires a native submit, so browsers are not prompted to save them
+  (best effort: a browser or extension may still ignore these hints).
+  Serving processes disable core dumps best-effort (`RLIMIT_CORE` 0, Linux
+  `PR_SET_DUMPABLE` 0) to keep session-only secrets out of dump files; Python cannot
+  zero memory, so anyone with process-memory access can still obtain them.
+- File references: `default`, or a normalized absolute path whose basename is the
+  kind's login file (`.credentials.json` for Claude Code, `auth.json` for Codex and
+  Grok), never under `/proc`, `/sys` or `/dev`. The file must be a regular file
+  (checked with `lstat` before any open; FIFOs, sockets, devices and directories are
+  never opened), owned by the server user and `0600`. A token holder can still learn
+  whether such a file at a chosen path is a readable credential, through a single
+  collapsed `credential_unavailable` result (or a committed `credential_expired`
+  warning); file contents, custom paths and Grok selectors are never returned (the
+  account list shows only `default`/`custom`). File reads are limited to 2 concurrent
+  so a hung mount cannot exhaust the shared thread pool.
+- Root container note: the Railway image runs as root, so "owned by the server user"
+  means root. The basename and pseudo-filesystem rules are what bound which files a
+  token holder can probe; a non-root `USER` is deferred (PLAN.md §18).
+- Secret storage: `persist=true` requires the exact supported Secret Service backend
+  and never downgrades (`503 secure_store_unavailable`, nothing committed).
+  `persist=false` keeps the secret session-only in the serving process, which in
+  standalone `serve` is now a network-reachable process; a restart or redeploy loses
+  it and the account list reports `session_available: false`.
+- Prepare records (Grok scope / Console organization choice): 300 s lifetime, at most
+  4, bound to the account, provider, kind and revision; Console temp secrets are
+  session refs no account references and are deleted on consume, failure, expiry
+  (by a timer at the 300 s lifetime), eviction or shutdown. Grok choices are opaque (`label: null`); Console choices
+  never carry the organization ID, including when the name falls back to it. Nothing
+  is ever auto-selected.
+- Write-triggered traffic: Console discovery runs one at a time with a 10 s cooldown
+  and at most 6 per 10 minutes (`409 discovery_busy` with `Retry-After`); reconnect is
+  coalesced per account (at least 30 s or the effective poll interval) and never
+  bypasses scheduler embargoes; at most 100 accounts.
 - Authentication: `Authorization: Bearer` only, never query strings or cookies.
   Tokens are `usk_` + 32 random bytes (URL-safe), shown once at creation in a TTY,
   and stored only as SHA-256 hashes in a private (`0700` directory / `0600` file),
@@ -62,19 +115,23 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   reported (forum moderator answer, not formal documentation) to overwrite
   forwarding headers; this is unverified for this deployment.
 - Browser access: CORS is granted only to exactly configured origins, never `*`
-  and never with credentials. Every response carries `Cache-Control: no-store`,
+  and never with credentials. Preflight advertises `GET, HEAD, OPTIONS, POST, PUT,
+  PATCH, DELETE` and `Authorization, Content-Type, If-Match`. Header bearer auth means
+  there is no cookie-based CSRF surface, but an XSS on an allowed origin can now
+  mutate accounts and submit secrets, not just read data. Every response carries `Cache-Control: no-store`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
   `X-Frame-Options: DENY` and a `default-src 'none'; frame-ancestors 'none'` CSP.
   CORS is not authentication: a non-browser client with a valid token can read data.
-- Data minimization: responses omit credential references/selectors and
-  organization IDs (snapshot `organization_id` is nulled). Errors are fixed codes
+- Data minimization: responses omit credential references, custom paths,
+  selectors and organization IDs (snapshot `organization_id` is nulled). Errors are fixed codes
   such as `{"error":"unauthorized"}` and never echo input. The server does not log
   `Authorization` headers.
 - Transport security: the server speaks plain HTTP. Bind to loopback locally; on a
   network host terminate TLS in front of it (Railway's public domain does this).
   A token sent over plain HTTP on an untrusted network can be captured.
 - Frontend: tokens live in `sessionStorage` by default, or `localStorage` only when
-  "remember" is chosen; any script running on the frontend origin could read them,
+  "remember" is chosen (the login form warns that a token may be able to change
+  accounts; do not remember it on shared devices); any script running on the frontend origin could read them,
   so the static app avoids `dangerouslySetInnerHTML` and ships a strict CSP. Logout
   clears both stores but does not revoke the token server-side; use
   `usage api token revoke`.
@@ -82,7 +139,8 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   configuration and token hashes live under `HOME=/data/home` (`0700`) on the
   volume; interactive bash shells use `umask 077`. There is no OS keyring, so
   manual/Console secrets cannot persist; Claude Platform works there only as a
-  session-only credential in one-process mode (below).
+  session-only credential, entered through the web UI (standalone `serve`) or the
+  TUI (one-process mode, below), and lost on every restart or redeploy.
   Anyone with `railway ssh` or volume access can read the first-party CLI logins,
   which are password-equivalent. CLI packages have a committed integrity lock and
   install without dependency lifecycle scripts; base images use digest pins.
@@ -92,8 +150,10 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   non-secret environment flags; manual updater commands remain a user-controlled risk.
 - One-process mode (`usage --api`, PLAN.md §15.7): the API runs as a task in the
   dashboard's event loop and serves an observer mirror (`AppHub`) of the snapshots
-  and account list the TUI shows; it never starts, stops or reconfigures the
-  scheduler. The token, CORS, header and limiter controls above are the same code;
+  and account list the TUI shows. Writes drive the dashboard through
+  `UsageApp.accounts_changed` and `reconnect` (which may reconfigure the scheduler);
+  the API never starts or stops it. API and TUI writers hold one `account_lock`
+  across commit and notification, so publication order matches commit order. The token, CORS, header and limiter controls above are the same code;
   live mode still requires a token. Consequence: a **session-only** credential
   entered in that TUI, including a Claude Platform Console `sessionKey`, now feeds a
   network-reachable API. The API returns only the same minimized views (no session,
@@ -101,8 +161,9 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   memory of a process on a public host; anyone with shell or process-memory access
   there (for example `railway ssh`) may obtain it. It is lost on restart, redeploy or
   exit, expires upstream on its own schedule, is not renewed by keepalive, and local
-  removal does not revoke it. On account changes the mirror drops all held snapshots
-  (as the TUI does), so removed accounts' observations are not retained or served.
+  removal does not revoke it. On account changes the mirror keeps only the snapshots
+  the TUI kept (unchanged credential identity, not resubmitted), so removed or
+  re-credentialed accounts' observations are not retained or served.
   uvicorn installs no signal handlers and its loggers are silenced (no handlers reach
   the terminal); the socket is bound before the TUI starts. The process still serves
   plain HTTP: terminate TLS in front of it.

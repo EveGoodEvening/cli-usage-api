@@ -56,7 +56,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -234,30 +234,75 @@ def observe_grok(path: Path) -> Observation:
     )
 
 
-def _same_file(first: Path, second: Path) -> bool:
-    return os.path.realpath(first) == os.path.realpath(second)
+def grok_default_forms() -> frozenset[str]:
+    """The default Grok login path as written and as resolved; computed once by callers.
+
+    Custom references are compared lexically against these forms, so an account
+    reference (possibly token-supplied over HTTP) never triggers filesystem lookups.
+    """
+    default = grok_path()
+    return frozenset({str(default), os.path.normpath(default), os.path.realpath(default)})
 
 
-def grok_protected_scopes(accounts: Collection[Account]) -> frozenset[str]:
+def _selected_grok_file(account: Account) -> bool:
+    return bool(
+        account.enabled
+        and account.provider == ProviderId.GROK_SUBSCRIPTION
+        and account.credential_kind == CredentialKind.GROK_AUTH_FILE
+        and account.credential_ref is not None
+        and account.credential_selector
+    )
+
+
+def resolve_grok_references(accounts: Collection[Account]) -> dict[str, str]:
+    """Resolve saved custom Grok references once, off the event loop, at startup.
+
+    Saved references may predate normalization or reach the default login file
+    through a symlinked directory, which a lexical comparison cannot see. Only
+    references already saved when a process starts are resolved here; references
+    supplied later (over HTTP) stay lexical so they never cause filesystem lookups.
+    """
+    resolved = {}
+    for account in accounts:
+        ref = account.credential_ref
+        if not _selected_grok_file(account) or ref == "default" or ref in resolved:
+            continue
+        try:
+            resolved[ref] = os.path.realpath(ref)
+        except (OSError, ValueError):
+            continue
+    return resolved
+
+
+def grok_protected_scopes(
+    accounts: Collection[Account],
+    *,
+    default_forms: Collection[str] | None = None,
+    resolved: Mapping[str, str] | None = None,
+) -> frozenset[str]:
     """Explicit selectors that enabled saved Grok accounts read from ``grok_path()``.
 
     A no-selector account adds nothing: the reader then uses the only modern scope,
     else legacy, which ``Observation.preferred`` already mirrors and never marks
-    stale. Accounts reading another file cannot be affected by this loop.
+    stale. Accounts reading another file cannot be affected by this loop. A custom
+    reference matches lexically (as written or ``normpath``-normalized, never a
+    filesystem lookup) or through ``resolved``, the startup realpaths from
+    :func:`resolve_grok_references`; ``default_forms`` defaults to
+    :func:`grok_default_forms`.
     """
-    default = grok_path()
+    forms = grok_default_forms() if default_forms is None else frozenset(default_forms)
+    known = resolved or {}
     scopes = set()
     for account in accounts:
-        if not (
-            account.enabled
-            and account.provider == ProviderId.GROK_SUBSCRIPTION
-            and account.credential_kind == CredentialKind.GROK_AUTH_FILE
-            and account.credential_ref is not None
-            and account.credential_selector
-        ):
+        if not _selected_grok_file(account):
             continue
         ref = account.credential_ref
-        if ref == "default" or _same_file(Path(ref), default):
+        if (
+            ref == "default"
+            or ref in forms
+            or os.path.normpath(ref) in forms
+            or known.get(ref) in forms
+        ):
             scopes.add(account.credential_selector)
     return frozenset(scopes)
 
@@ -909,7 +954,8 @@ def _saved_grok_scopes(log: Callable[[str], None]) -> frozenset[str]:
     from cli_usage_api.storage import AccountStore, ConfigError
 
     try:
-        return grok_protected_scopes(AccountStore().load())
+        accounts = AccountStore().load()
+        return grok_protected_scopes(accounts, resolved=resolve_grok_references(accounts))
     except ConfigError:
         log("accounts unavailable; no protected Grok scopes")
         return frozenset()
