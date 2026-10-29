@@ -33,6 +33,7 @@ from cli_usage_api.domain import (
     Snapshot,
     sanitize_text,
 )
+from cli_usage_api.providers.grok import MISSING_DETAIL as GROK_MISSING
 from cli_usage_api.scheduler import freshness
 from cli_usage_api.storage import ConfigError, SettingsStore
 
@@ -1040,6 +1041,9 @@ class UsageApp(App[None]):
             )
             else None
         )
+        if detail and account.provider == ProviderId.GROK_SUBSCRIPTION:
+            # The `未知 / no data` placeholder already says this; Enter details keeps it.
+            detail = detail.replace(GROK_MISSING, "").strip() or None
         indent = "  " + ("│   " if nest and not last else "    ")
         prompt = Text()
         if tier == "narrow":

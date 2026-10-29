@@ -24,6 +24,7 @@ from cli_usage_api.domain import (
 )
 from cli_usage_api.providers.claude import ClaudeProvider
 from cli_usage_api.providers.codex import CodexProvider
+from cli_usage_api.providers.grok import MISSING_DETAIL as GROK_MISSING
 from cli_usage_api.transport import Transport
 
 
@@ -291,7 +292,7 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
             id="grok.product.other.unknown",
             label="Unknown other product",
             state=MetricState.UNKNOWN,
-            detail="Usage is unavailable; missing does not mean zero.",
+            detail=GROK_MISSING,
             shared_pool_id=None,
             reset_at=None,
             share_percent=None,
@@ -310,6 +311,13 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
         assert "剩余 90%" not in details
         unknown_text = app._row_text(account, unknown.id)
         assert "未知 / no data" in unknown_text and "missing does not mean zero" in unknown_text
+        # The dashboard placeholder already says unknown; only details keep the caveat.
+        shown_unknown = str(
+            app.listing.get_option_at_index(app.option_index((account, unknown.id))).prompt
+        )
+        assert (
+            "未知 / no data" in shown_unknown and "missing does not mean zero" not in shown_unknown
+        )
         assert "已用 0" not in unknown_text and "剩余 100" not in unknown_text
         # A new extra before the highlighted one must not change the selection.
         earlier = replace(first, id="grok.product.other.earlier", label="Earlier product")

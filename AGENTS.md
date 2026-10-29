@@ -292,6 +292,8 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   `Grok 汇总`, not `共享池`: no remaining/reset, no nesting; label + absent remaining
   carry the caveat, so no per-row explanation there either.
   Demo Grok rows use the uniform synthetic detail so it hoists like other cards.
+  Grok unknown rows also drop the generic "missing does not mean zero" sentence:
+  the `未知 / no data` placeholder says it; Enter details keeps it.
 - The dashboard can focus its metric list for keyboard navigation without selecting
   a row. Preserve `highlighted=None` through startup snapshots and filter rebuilds;
   treat `全部账号` as the filter value, not a metric selection. Recover the nearest

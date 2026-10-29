@@ -30,7 +30,7 @@ from cli_usage_api.transport import Transport
 _PROVIDER = ProviderId.GROK_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "grok.cli.billing.credits", version_sensitive=True)
 _LABELS = ("Grok 共享池", "GrokBuild", "GrokChat")
-_MISSING = "Usage is unavailable in this response; missing does not mean zero."
+MISSING_DETAIL = "Usage is unavailable in this response; missing does not mean zero."
 
 
 def _percent(value: object) -> Decimal:
@@ -144,7 +144,9 @@ class GrokProvider:
         # The informational breakdown has no documented sum-to-total invariant.
         products = _products(config, aggregate, omitted_zero=omitted_zero)
         detail = [
-            f"Reported aggregate consumption: {aggregate}%." if aggregate is not None else _MISSING
+            f"Reported aggregate consumption: {aggregate}%."
+            if aggregate is not None
+            else MISSING_DETAIL
         ]
         detail.append(f"Server period: {period}.")
         if not unified:
@@ -183,7 +185,7 @@ class GrokProvider:
         for name, metric_id in names:
             used = None if products is None else products.get(name)
             linked = unified and aggregate is not None and used is not None
-            product_detail = _MISSING
+            product_detail = MISSING_DETAIL
             if used is not None:
                 product_detail = f"Reported consumption share: {used}%. Not an independent quota. "
                 product_detail += (
@@ -236,7 +238,7 @@ class GrokProvider:
         return Snapshot(
             account_id=account.id,
             metrics=tuple(
-                Metric(metric_id, label, MetricState.UNKNOWN, _SOURCE, detail=_MISSING)
+                Metric(metric_id, label, MetricState.UNKNOWN, _SOURCE, detail=MISSING_DETAIL)
                 for metric_id, label in zip(self.metric_ids, _LABELS, strict=True)
             ),
             grants=(),
