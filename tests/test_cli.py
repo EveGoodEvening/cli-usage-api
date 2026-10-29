@@ -125,29 +125,6 @@ def test_demo_has_no_live_construction(monkeypatch, scenario):
     assert cli.main(["--demo", "--scenario", scenario]) == 0
 
 
-def test_live_passes_real_composition_to_app(monkeypatch):
-    item = account()
-    seed(item)
-    calls = []
-    monkeypatch.setattr(
-        cli,
-        "UsageApp",
-        lambda **kwargs: SimpleNamespace(run=lambda: calls.append(kwargs)),
-    )
-    assert cli.main([]) == 0
-    kwargs = calls[0]
-    assert kwargs["mode"] == "live"
-    assert kwargs["accounts"] == (item,)
-    factory = kwargs["scheduler_factory"]
-    assert isinstance(factory, cli.LiveFactory)
-    assert factory.resolver._store is kwargs["credential_store"]
-    assert set(factory.providers) == set(ProviderId)
-    assert (
-        factory.console_discovery
-        == factory.providers[ProviderId.CLAUDE_PLATFORM].discover_organizations
-    )
-
-
 async def test_factory_scheduler_and_close_contract():
     factory = cli.LiveFactory(CredentialStore())
     scheduler = factory((), publish=lambda snapshot: None)

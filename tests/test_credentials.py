@@ -210,6 +210,59 @@ def test_grok_expiry_formats(tmp_path, value):
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2030-01-01T00:00:00.1234567Z", FUTURE.replace(microsecond=123456)),
+        ("2030-01-01T02:00:00.12345678+02:00", FUTURE.replace(microsecond=123456)),
+        ("2030-01-01t00:00:00.123456789z", FUTURE.replace(microsecond=123456)),
+        ("2030-01-01T00:00:00.999999999Z", FUTURE.replace(microsecond=999999)),
+        ("2030-01-01T00:00:00.000000000Z", FUTURE),
+        ("9999-12-31T23:59:59.999999999Z", datetime.max.replace(tzinfo=UTC)),
+    ],
+)
+def test_grok_nanosecond_expiry_floors_without_rewriting_file(tmp_path, value, expected):
+    account = imported(
+        tmp_path,
+        {SCOPE: {"key": "synthetic-key", "expires_at": value, "refresh_token": "synthetic-unused"}},
+        grok=True,
+    )
+    path = Path(account.credential_ref)
+    before = path.read_bytes()
+    result = resolver().resolve(account)
+    assert result.expires_at == expected
+    assert result.secret == "synthetic-key"
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2030-01-01T00:00:00.1234567890Z",
+        "2030-01-01T00:00:00.123456789",
+        "2030-01-01T00:00:00.123456789+24:00",
+        "2030-02-30T00:00:00.123456789Z",
+        "2030-01-01T00:00:00.123456789Z trailing",
+        "2030-01-01T00:00:60.123456789Z",
+    ],
+)
+def test_grok_nanosecond_support_does_not_accept_invalid_dates(tmp_path, value):
+    account = imported(tmp_path, {SCOPE: {"key": "synthetic-key", "expires_at": value}}, grok=True)
+    assert_error(account, "schema_error")
+
+
+def test_grok_submicrosecond_expiry_cannot_extend_lifetime(tmp_path):
+    account = imported(
+        tmp_path,
+        {SCOPE: {"key": "synthetic-key", "expires_at": "2030-01-01T00:00:00.123456789Z"}},
+        grok=True,
+    )
+    instance = CredentialResolver(clock=lambda: FUTURE.replace(microsecond=123456))
+    with pytest.raises(CredentialResolutionError) as caught:
+        instance.resolve(account)
+    assert caught.value.code == "credential_expired"
+
+
+@pytest.mark.parametrize(
     "value",
     [True, -1, 0, "2030-01-01", "2030-01-01T00:00:00", [], float("inf"), 10**1000],
 )

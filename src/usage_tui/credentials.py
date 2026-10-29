@@ -14,6 +14,7 @@ import hmac
 import json
 import math
 import os
+import re
 import secrets
 import stat
 from collections.abc import Callable
@@ -36,6 +37,10 @@ from usage_tui.storage import CredentialError, CredentialStore
 MAX_FILE_BYTES = 1_048_576
 _MODERN_SCOPE = "https://auth.x.ai::"
 _LEGACY_SCOPE = "https://accounts.x.ai/sign-in"
+_GROK_FRACTION = re.compile(
+    r"([0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}\.)"
+    r"([0-9]{1,9})([Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+)
 
 
 class CredentialResolutionError(Exception):
@@ -79,6 +84,14 @@ def _expiry(value: object, *, milliseconds: bool = False) -> datetime | None:
         return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=value / divisor)
     except (DomainError, OverflowError, ValueError, TypeError):
         raise _schema() from None
+
+
+def _grok_expiry(value: object) -> datetime | None:
+    # GrokAuth persists chrono DateTime<Utc>, including nanosecond fractions.
+    # Floor to Python's microseconds: never extend a credential's lifetime.
+    if isinstance(value, str) and (match := _GROK_FRACTION.fullmatch(value)):
+        value = match[1] + match[2][:6] + match[3]
+    return _expiry(value)
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict:
@@ -292,7 +305,7 @@ class CredentialResolver:
                 if not isinstance(entry, dict):
                     raise _schema()
                 secret = _text(entry.get("key"))
-                expires_at = _expiry(entry.get("expires_at"))
+                expires_at = _grok_expiry(entry.get("expires_at"))
                 if entry.get("user_id") is not None:
                     user_id = _text(entry["user_id"])
         else:
