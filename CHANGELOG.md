@@ -6,11 +6,12 @@
 
 - Removed Codex `plan_type`, `allowed`, and `limit_reached` from dashboard and
   details without changing quota/reset semantics.
-- Claude subscription automatic polling now has a 300-second effective floor,
+- Claude subscription automatic polling has a 180-second effective floor,
   including previously saved 60-second accounts, without rewriting configuration.
   Freshness uses the same effective cadence. Rate-limit cooldown starts at
-  300 seconds, grows to 600/900 seconds plus jitter, and preserves longer settings
+  180 seconds, grows to 360/720/900 seconds plus jitter, and preserves longer settings
   and server embargoes. Explicit refresh still cannot bypass a retry deadline.
+  The user-requested three-minute policy supersedes the initial five-minute policy.
 - Compared Grok with BYOS: recognize omitted percentage defaults only in a valid
   explicit weekly period, keep malformed/null values and missing products unknown,
   and remove the unsupported product-sum equality requirement. Whole-array

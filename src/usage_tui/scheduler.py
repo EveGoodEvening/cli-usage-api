@@ -112,7 +112,7 @@ class Scheduler:
     """Two global fetches, one per account, and five-second provider start spacing.
 
     refresh() is an explicit reconnect attempt for suspended accounts and may
-    bypass the normal polling interval, including Claude's five-minute floor.
+    bypass the normal polling interval, including Claude's three-minute floor.
     Requests during a fetch coalesce into one follow-up, still subject to retry
     embargoes and provider start spacing.
     update_accounts() invalidates every supplied generation, even when a secret
@@ -379,7 +379,7 @@ class Scheduler:
                 base = min(60 * 2 ** min(state.failures, 4), 900)
                 if account.provider == ProviderId.CLAUDE_SUBSCRIPTION:
                     if result.fetch_state == FetchState.RATE_LIMITED:
-                        base = min(300 * 2 ** min(state.failures, 2), 900)
+                        base = min(180 * 2 ** min(state.failures, 3), 900)
                     base = max(base, account.effective_poll_interval_seconds)
                 state.failures += 1
                 delay = base + self._rng.uniform(0.0, base * 0.1)

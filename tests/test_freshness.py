@@ -157,7 +157,7 @@ def test_maximum_retry_timestamp_does_not_change_observation_freshness(last_good
 @pytest.mark.parametrize(
     "provider,interval,threshold",
     [
-        (ProviderId.CLAUDE_SUBSCRIPTION, 60, 600),
+        (ProviderId.CLAUDE_SUBSCRIPTION, 60, 360),
         (ProviderId.CLAUDE_SUBSCRIPTION, 900, 1800),
         (ProviderId.GROK_SUBSCRIPTION, 60, 120),
         (ProviderId.CODEX_SUBSCRIPTION, 60, 120),

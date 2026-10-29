@@ -433,9 +433,9 @@ exposed, revoke or replace it through the relevant first-party service.
   not truncated by the local exponential-backoff cap, and same-provider account
   updates do not erase an embargo. Retries remain read-only provider fetches,
   never token refreshes, login subprocesses, purchases, or reset actions.
-- Claude subscription automatic polling and error retries honor a 300-second
+- Claude subscription automatic polling and error retries honor a 180-second
   effective minimum and longer configured intervals without rewriting saved
-  configuration. Its 429 backoff starts at 300 seconds, grows to 600/900 plus
+  configuration. Its 429 backoff starts at 180 seconds, grows to 360/720/900 plus
   jitter, and cannot shorten a server deadline. Freshness uses the same effective
   cadence. Explicit manual refresh may bypass the periodic interval, never an
   embargo. This is a conservative local policy, not a proven upstream rate limit.

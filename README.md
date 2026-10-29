@@ -52,10 +52,10 @@ shares need not sum to the aggregate. Codex hides `plan_type`, `allowed`, and
 
 Failed reads retain last-known values with freshness/error indicators; passing a
 reset does not invent new allowance. Claude subscription automatically polls no
-more often than every **5 minutes**, including existing 60-second configurations;
+more often than every **3 minutes**, including existing 60-second configurations;
 longer configured intervals are honored. Other providers retain the 60-second
 default and configurable 30–3600-second interval. Claude 429 retries start at
-5 minutes, then 10 and 15 minutes (plus jitter); longer configured intervals or
+3 minutes, then 6, 12, and 15 minutes (plus jitter); longer configured intervals or
 server `Retry-After` win. `r` requests an earlier observation, but never bypasses
 retry deadlines. Restart a running dashboard to use the new policy.
 
@@ -97,7 +97,7 @@ Use the ID from `accounts list`. Other provider choices are `claude-subscription
 TTY; credentials are entered through masked prompts, never command arguments.
 Run `uv run usage --help` for command help.
 `accounts list` shows the effective polling interval; saved values below Claude's
-5-minute floor are preserved in configuration but do not shorten automatic polls.
+3-minute floor are preserved in configuration but do not shorten automatic polls.
 
 Legacy ChatGPT profiles require `uv run usage accounts migrate-chatgpt-to-codex`.
 After explicit confirmation, replacements are disabled and credentials detached;

@@ -240,9 +240,9 @@ HTTP credentials are limited to their exact origins (§4). Disable redirects, ne
 
 ## 6. Polling, freshness, and terminal behavior
 
-“Near real time” means bounded periodic observation, not a provider push/SLA. Saved intervals remain integer 30…3600 seconds with default 60. Under §12, Claude subscription's effective cadence is `max(300, saved_interval)`; automatic polling clamps jitter at that floor and can add up to 10%, including for existing saved 60-second accounts without rewriting config. Freshness uses that same effective cadence. Other providers retain ±10% jitter and the 30-second minimum. One fetch per account, max two concurrent accounts, and five-second same-origin request-start spacing remain. Console discovery is connection-only; no duplicate request per metric. HTTP connect timeout 5s, overall deadline 10s, streamed decoded JSON limit 1 MiB; shutdown cancels work and closes owned clients.
+“Near real time” means bounded periodic observation, not a provider push/SLA. Saved intervals remain integer 30…3600 seconds with default 60. Under §12.1, Claude subscription's effective cadence is `max(180, saved_interval)`; automatic polling clamps jitter at that floor and can add up to 10%, including for existing saved 60-second accounts without rewriting config. Freshness uses that same effective cadence. Other providers retain ±10% jitter and the 30-second minimum. One fetch per account, max two concurrent accounts, and five-second same-origin request-start spacing remain. Console discovery is connection-only; no duplicate request per metric. HTTP connect timeout 5s, overall deadline 10s, streamed decoded JSON limit 1 MiB; shutdown cancels work and closes owned clients.
 
-Fetch immediately after connection/start. Explicit `r` may bypass periodic cadence but coalesces refreshes and respects in-flight work, origin spacing, and retry embargoes. One-second presentation ticks do not fetch. Auth/permission failures suspend until explicit reconnect/config replacement. Other providers keep exponential error backoff 60, 120, 240…900 seconds plus bounded jitter. Claude 429 backoff starts 300, then 600, then 900 seconds plus bounded jitter, never earlier than its effective configured cadence; other Claude errors also respect that cadence. All valid longer server `Retry-After` deadlines win, never shortened by the local cap. Same-provider account replacement preserves embargoes. Compatible success resets failure backoff; missing/malformed retry headers use the local policy. This is a conservative local policy, not a discovered upstream rate threshold.
+Fetch immediately after connection/start. Explicit `r` may bypass periodic cadence but coalesces refreshes and respects in-flight work, origin spacing, and retry embargoes. One-second presentation ticks do not fetch. Auth/permission failures suspend until explicit reconnect/config replacement. Other providers keep exponential error backoff 60, 120, 240…900 seconds plus bounded jitter. Claude 429 backoff starts 180, then 360, 720, and 900 seconds plus bounded jitter, never earlier than its effective configured cadence; other Claude errors also respect that cadence. All valid longer server `Retry-After` deadlines win, never shortened by the local cap. Same-provider account replacement preserves embargoes. Compatible success resets failure backoff; missing/malformed retry headers use the local policy. This is a conservative local policy, not a discovered upstream rate threshold.
 
 Select eligible work by oldest due deadline so overdue accounts, including initial polls, cannot be perpetually overtaken by accounts already serviced. Measure the five-second origin gate after credential resolution, immediately before entering the provider request; queue-time reservations do not establish actual request-start spacing. Keep retry embargoes monotonic and preserve long server deadlines; if reconstructing a UTC presentation timestamp would overflow, saturate it at UTC `datetime.max` without shortening the embargo or dropping the failure snapshot. These C08 review corrections landed in separately verified fix `8929ac4`, with clean independent rereviews recorded in the ledger.
 
@@ -910,12 +910,14 @@ upstream-contract repair. No authenticated or real-keyring success is claimed.
   covering all three windows, not a duplicate request per metric or internal
   transport retry loop. Previous default/saved 60s accounts polled every 54–66s;
   a no-header 429 started retrying after about 60s. Effective automatic cadence is
-  now at least 300s (300–330s at the floor), retaining longer saved preferences,
-  with aligned freshness. Claude 429 cooldown starts at 300s and grows to 600/900s
+  now at least 180s (180–198s at the floor), retaining longer saved preferences,
+  with aligned freshness. Claude 429 cooldown starts at 180s and grows to 360/720/900s
   plus jitter; longer settings/server embargoes win. Manual refresh remains an
   explicit earlier read, never an embargo bypass. Config files are not rewritten.
   Multiple connections/processes or first-party clients may also contribute traffic;
   no upstream threshold or exact live root cause was established.
+  This reflects the subsequent three-minute request (§12.1); the initial five-minute
+  implementation's exercised evidence below remains historical and unchanged.
 - **Grok:** the old parser rejected an omitted aggregate even with a valid weekly
   period/reset and rejected product breakdowns that did not sum within one point
   of aggregate. BYOS supplies concrete counterexamples. Recognize omitted scalar
@@ -987,3 +989,38 @@ The earlier §11 live acceptance items remain unfulfilled by these synthetic che
 The user's reported Claude/Grok failures are accepted observations, not rerun against
 their credentials. Restart the dashboard to load the repair; actual account success
 and its upstream limit still require an authorized same-account observation.
+
+### 12.1 Subsequent user request — three-minute Claude cadence
+
+The user explicitly lowered both normal automatic querying and initial rate-limit
+retry waiting from five to three minutes. Claude subscription now uses
+`max(180, saved_interval)` without rewriting configuration, with automatic jitter
+clamped to the floor (180–198s for default accounts). No-header 429 retries grow
+180 → 360 → 720 → 900 seconds, then remain capped before jitter; longer configured
+intervals and server deadlines still win. The bounded exponent was adjusted so
+the lower base still reaches the 900s cap. Manual refresh, immediate startup,
+other providers, origin spacing and generation/embargo protection are unchanged.
+
+Exercised with synthetic credentials/responses, never real account requests:
+- Actual Scheduler → ClaudeProvider → Transport request starts:
+  `[0, 180, 360, 365, 545, 905, 2705, 2885]`. Normal 180s cadence, first/second
+  180/360s 429 waits, longer 1800s server embargo across manual refresh/account
+  replacement, last-known values and recovery passed; 365s was manual refresh.
+- Actual installed `usage accounts list` under isolated HOME/XDG showed
+  180s / 900s / 60s for default Claude, longer-configured Claude and unchanged Grok;
+  saved account metadata reloaded unchanged.
+- Actual mounted UsageApp/Pilot retained 23.5% used / 76.5% remaining, showed fresh
+  at observation ages 121s and 360s, then STALE at 361s in the header and details.
+  This follows the effective interval's doubled freshness threshold; presentation
+  ticks made no additional request.
+- The initial integrated run had 1 failure / 1170 passes: the initial-poll
+  monotonic-clock test still waited for the old 299s boundary. Its assertion now
+  exercises 179s-before / 180s-due; no production workaround was introduced.
+- Domain and scheduler Ruff LSP diagnostics were clean. README, CHANGELOG,
+  SECURITY, active PLAN contracts and repo-root Lessons were synchronized. Prior
+  five-minute proof above is preserved, not relabeled as three-minute evidence.
+- Final integrated gate: `uv run --locked pytest -q` passed **1171 tests in
+  50.17s**; `uv run --locked ruff check .` passed and
+  `uv run --locked ruff format --check .` passed for **45 files**.
+  These checks cover the updated initial retry, exponential cap, negative jitter,
+  longer settings/server embargoes and actual dashboard freshness boundaries.

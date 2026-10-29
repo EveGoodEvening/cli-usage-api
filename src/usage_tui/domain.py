@@ -343,7 +343,7 @@ class Account:
     def effective_poll_interval_seconds(self) -> int:
         """Runtime cadence; preserve saved preferences without rewriting config."""
         if self.provider == ProviderId.CLAUDE_SUBSCRIPTION:
-            return max(300, self.poll_interval_seconds)
+            return max(180, self.poll_interval_seconds)
         return self.poll_interval_seconds
 
     def to_dict(self) -> dict[str, Any]:

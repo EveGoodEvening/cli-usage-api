@@ -272,3 +272,7 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   the app's identifying User-Agent. A reference project's version-gate report or
   schema fixture establishes a compatibility lead, not the user's exact live
   failure. Preserve the distinction between sourced repair and authenticated proof.
+- When changing an exponential retry base, adjust its bounded exponent so the
+  sequence can still reach the intended cap. Cover both first-retry timing and
+  repeated capped failures; lowering the base alone can accidentally plateau
+  below the documented maximum.
