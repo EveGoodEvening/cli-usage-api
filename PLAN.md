@@ -1,4 +1,4 @@
-# Usage TUI — durable implementation and research plan
+# CLIUsageAPI — durable implementation and research plan
 
 ## 0. Status, purpose, and scheduling authority
 
