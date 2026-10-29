@@ -26,6 +26,7 @@ from usage_tui.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     Metric,
+    MetricId,
     MetricState,
     ProviderId,
     Snapshot,
@@ -47,6 +48,17 @@ METRIC_LABELS = {
     "grok.product.build": "GrokBuild",
     "grok.product.chat": "GrokChat",
 }
+
+
+def metric_label(metric_id: str, metric: Metric | None) -> str:
+    # An aggregate without proven pool semantics is not labelled a shared pool.
+    if metric_id == MetricId.GROK_SHARED_POOL and metric and metric.share_percent is not None:
+        return "Grok 汇总"
+    return METRIC_LABELS.get(metric_id) or sanitize_text(
+        metric.label if metric else metric_id, max_length=120
+    )
+
+
 STATE_LABELS = {
     "ok": "正常",
     "partial": "部分数据",
@@ -580,7 +592,7 @@ class UsageApp(App[None]):
     def _row_text(self, account: Account, metric_id: str) -> str:
         snapshot = self.snapshots.get(account.id)
         metric = self._metric(account, metric_id)
-        label = METRIC_LABELS.get(metric_id, metric.label if metric else metric_id)
+        label = metric_label(metric_id, metric)
         heading = f"{sanitize_text(account.label, max_length=80)} · {label}"
         if not account.enabled:
             return heading + "\n  — 已禁用 / disabled"
@@ -654,10 +666,7 @@ class UsageApp(App[None]):
         return self._palette[1][name]
 
     def _label(self, account: Account, metric_id: str) -> str:
-        metric = self._metric(account, metric_id)
-        return METRIC_LABELS.get(metric_id) or sanitize_text(
-            metric.label if metric else metric_id, max_length=120
-        )
+        return metric_label(metric_id, self._metric(account, metric_id))
 
     def _wrapped(self, text: str, width: int, indent: str, style: str) -> Text:
         result = Text()
@@ -1013,12 +1022,7 @@ class UsageApp(App[None]):
             if metric is not None
             and metric.detail
             and not self._hoisted(account)
-            and not (
-                numeric
-                and account.provider == ProviderId.GROK_SUBSCRIPTION
-                # An unlinked product share keeps its pool-relationship caveat.
-                and (metric.share_percent is None or metric.shared_pool_id is not None)
-            )
+            and not (numeric and account.provider == ProviderId.GROK_SUBSCRIPTION)
             else None
         )
         indent = "  " + ("│   " if nest and not last else "    ")

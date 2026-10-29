@@ -167,6 +167,8 @@ class GrokProvider:
                 quota=QuotaValue(used_percent=aggregate)
                 if unified and aggregate is not None
                 else None,
+                # Without proven pool semantics the aggregate is consumption only.
+                share_percent=aggregate if not unified else None,
                 reset_at=reset if unified and aggregate is not None else None,
                 detail=" ".join(detail),
             )

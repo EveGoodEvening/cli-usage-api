@@ -188,6 +188,9 @@ async def test_only_boolean_true_proves_unified_semantics(payload, value):
     assert all(row.shared_pool_id is None and row.reset_at is None for row in snapshot.metrics)
     assert "42.5%" in snapshot.metrics[0].detail
     assert "Pool relationship unknown" in snapshot.metrics[0].detail
+    # The aggregate is reported consumption only, never a derived remaining.
+    assert snapshot.metrics[0].share_percent == Decimal("42.5")
+    assert all(row.share_percent is not None for row in snapshot.metrics[1:])
     assert "32.5%" in snapshot.metrics[1].detail
 
 

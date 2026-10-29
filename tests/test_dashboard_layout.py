@@ -171,26 +171,40 @@ async def test_grok_demo_card_hoists_synthetic_notice_like_other_cards():
         await pilot.press("q")
 
 
-async def test_unlinked_product_share_keeps_pool_relationship_caveat():
+async def test_unproven_pool_is_a_flat_aggregate_without_remaining_or_lectures():
     app = UsageApp(mode="demo")
     async with app.run_test(size=(120, 60)) as pilot:
         await pilot.pause()
-        build = row(app, "grok.product.build")
-        snapshot = app.snapshots[build[0].id]
+        pool_row = row(app, "grok.subscription.shared_pool")
+        snapshot = app.snapshots[pool_row[0].id]
         caveat = "Pool relationship unknown; remaining/reset unavailable."
         metrics = tuple(
-            replace(metric, shared_pool_id=None, detail=caveat)
-            if metric.id == "grok.product.build"
-            else metric
+            replace(
+                metric,
+                quota=None,
+                share_percent=metric.share_percent or Decimal(50),
+                shared_pool_id=None,
+                reset_at=None,
+                detail=caveat,
+            )
             for metric in snapshot.metrics
         )
         app.publish_snapshot(replace(snapshot, metrics=metrics))
-        text = prompt(app, build)
-        assert "已用 30%" in text and "剩余" not in text
-        # Without proven pool linkage the share is not presented as a bare meter.
-        assert "Pool relationship unknown" in text
-        linked = prompt(app, row(app, "grok.product.chat"))
-        assert "已用 15%" in linked and "Fictional" not in linked
+        aggregate = prompt(app, pool_row)
+        assert aggregate.startswith("  Grok 汇总 ") and "共享池" not in aggregate
+        assert "已用 50%" in aggregate and "剩余" not in aggregate
+        for metric_id, label, share in (
+            ("grok.product.build", "  GrokBuild", "30"),
+            ("grok.product.chat", "  GrokChat", "15"),
+        ):
+            text = prompt(app, row(app, metric_id))
+            # Not nested under a pool that was never proven; still one line.
+            assert text.startswith(label) and "├" not in text and "└" not in text
+            assert f"已用 {share}%" in text and "剩余" not in text
+            assert "Pool relationship" not in text and "\n" not in text.rstrip()
+        # The caveat remains available on request.
+        assert caveat in app.details(*pool_row)
+        assert "Grok 汇总" in app.details(*pool_row)
         await pilot.press("q")
 
 

@@ -288,5 +288,7 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   derived remaining or reset. Numeric Grok dashboard rows carry no per-row
   explanation; the user knows it is a shared pool. Keep details in Enter details
   and on unknown rows. Nest products under a pool named by metric id or pool id.
-  Exception: an unlinked share (no `shared_pool_id`) keeps its pool-unknown caveat.
+  Without `isUnifiedBillingUser == true` the aggregate is a share labelled
+  `Grok 汇总`, not `共享池`: no remaining/reset, no nesting; label + absent remaining
+  carry the caveat, so no per-row explanation there either.
   Demo Grok rows use the uniform synthetic detail so it hoists like other cards.

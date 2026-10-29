@@ -455,8 +455,8 @@ class Metric:
     expires_at: datetime | None = None
     shared_pool_id: str | None = None
     detail: str | None = None
-    # A product's reported consumption share of a pool; never an allowance and
-    # never a source for a derived remaining percentage.
+    # Reported consumption (a product's pool share, or an aggregate without proven
+    # pool semantics); never an allowance or a source for a derived remaining.
     share_percent: Decimal | None = None
 
     def __post_init__(self) -> None:
