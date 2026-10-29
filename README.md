@@ -1,4 +1,4 @@
-# Usage TUI
+# CLIUsageAPI
 
 A local, read-only terminal dashboard for subscription usage and Claude Platform
 credit balances, with an optional token-protected read-only HTTP API and a separate
