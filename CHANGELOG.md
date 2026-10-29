@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed — Railway web console shell environment
+
+- Railway's web console starts a login shell that does not inherit the image
+  `ENV`, leaving `HOME=/root` and `usage` off `PATH`. `/etc/bash.bashrc` now
+  sources `docker/shell-env.sh`, restoring `HOME=/data/home`, the venv/Grok
+  `PATH` entries and `umask 077`, so CLI logins land on the volume. The Railway
+  guide documents the check and manual recovery for older images.
+
 ### Security — eMudhra verifier and deployment baselines
 
 - Pin backend CPython 3.12.16 and uv 0.13.6 to multi-platform digests; enforce the

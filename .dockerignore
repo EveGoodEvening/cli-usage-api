@@ -1,4 +1,4 @@
-# Only source, Python locks, the entrypoint and the container CLI integrity lock
+# Only source, Python locks, the entrypoint/shell env and the container CLI integrity lock
 # enter the build context; local state and secrets stay excluded.
 **
 !.python-version
@@ -6,6 +6,7 @@
 !uv.lock
 !src/
 !docker/entrypoint.sh
+!docker/shell-env.sh
 !docker/cli/package.json
 !docker/cli/package-lock.json
 !docker/cli/.npmrc

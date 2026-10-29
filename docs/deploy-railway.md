@@ -42,6 +42,11 @@
   创建 `HOME` 并设为 `0700`，然后执行 `CMD`（默认 `sleep infinity`）。`tini` 作为
   PID 1 负责转发信号和回收子进程。若 `/data` 不是挂载卷，入口脚本会打印警告。
 - 容器以 root 运行。Railway 卷以 root 身份挂载，`railway ssh` 进入的也是 root。
+- Railway 网页 console 打开的登录 shell 不继承镜像 `ENV`：`HOME` 来自 `/etc/passwd`
+  （`/root`），`PATH` 被 `/etc/profile` 重置，导致 `usage: command not found`。镜像把
+  `docker/shell-env.sh` 装为 `/etc/usage-api-shell-env.sh` 并从 `/etc/bash.bashrc` 加载，
+  交互式 bash 会恢复 `HOME=/data/home`、把 `/app/.venv/bin`、`/opt/grok/bin` 加回
+  `PATH`，并设置 `umask 077`。
 
 ## CA 事件、版本锁定与更新
 
@@ -167,6 +172,8 @@ CLI 登录文件、`~/.config/cli-usage-api/accounts.json` 和 `api_tokens.json`
 railway ssh            # 需要先在 Railway 注册 SSH 公钥，首次运行会提示
 ```
 
+也可以用 Railway 网页里服务的 console（不需要 SSH 公钥）。
+
 进入后确认环境：
 
 ```sh
@@ -174,6 +181,18 @@ echo "$HOME"           # /data/home
 usage --help
 claude --version; codex --version; grok --version
 ```
+
+**登录任何 CLI 之前，`echo "$HOME"` 必须输出 `/data/home`。** 如果输出 `/root` 或
+`usage` 找不到（旧镜像的网页 console 会这样），先手动恢复，或重新部署当前镜像：
+
+```sh
+export HOME=/data/home PATH=/app/.venv/bin:/opt/grok/bin:$PATH
+cd "$HOME"
+```
+
+在 `HOME=/root` 时登录的 CLI 会把凭据写到 `/root/.claude`、`/root/.codex`、`/root/.grok`：
+它们不在卷上，重新部署就会丢失，本项目也读不到。修正 `HOME` 后重新登录，并删除
+`/root` 下的这些目录（里面是登录凭据）。
 
 建议在 `tmux` 里操作（`tmux new -s usage`），断线后用 `tmux attach -t usage` 回来。
 

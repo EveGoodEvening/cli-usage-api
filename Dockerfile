@@ -105,10 +105,12 @@ RUN uv sync --locked --no-dev --no-editable \
  && /app/.venv/bin/usage --help >/dev/null
 
 COPY docker/entrypoint.sh /usr/local/bin/usage-entrypoint
-# Interactive `railway ssh` shells create private files by default (login state,
-# config edits); the official CLIs still set their own credential-file modes.
+COPY docker/shell-env.sh /etc/usage-api-shell-env.sh
+# Interactive shells (`railway ssh`, Railway's web console) get umask 077 and the
+# image HOME/PATH even when the shell did not inherit the image ENV.
 RUN chmod 0755 /usr/local/bin/usage-entrypoint \
- && printf '\n# usage-api image: private files by default\numask 077\n' >> /etc/bash.bashrc
+ && chmod 0644 /etc/usage-api-shell-env.sh \
+ && printf '\n# usage-api image: private files, volume HOME and PATH\n. /etc/usage-api-shell-env.sh\n' >> /etc/bash.bashrc
 
 # Per-user state (CLI logins, cli-usage-api accounts.json/api_tokens.json) lives on
 # the Railway volume. The self-updaters are disabled so the pinned versions stay

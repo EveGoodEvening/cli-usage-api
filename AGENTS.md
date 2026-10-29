@@ -374,3 +374,7 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   build Node selectors and Workers compatibility dates are distinct. A Caddy image
   with updated OS CAs may still contain pre-fix Go; current HTTP-only static serving
   is a bounded disposition, not proof it is safe for later TLS/ACME/proxy use.
+- Railway's web console runs a login shell that drops image `ENV` (HOME from
+  `/etc/passwd`, PATH reset by `/etc/profile`) while keeping `WORKDIR`; `railway ssh`
+  is not the only entry path. Restore HOME/PATH from `/etc/bash.bashrc` (Debian's
+  login profile sources it) and whitelist new `docker/` files in `.dockerignore`.
