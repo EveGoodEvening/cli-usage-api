@@ -720,33 +720,6 @@ class UsageApp(App[None]):
                         style=self._color("error" if code not in STATE_CHIPS else "warning"),
                     )
                 )
-            if snapshot.organization_id or snapshot.grants:
-                organization = sanitize_text(snapshot.organization_id or "—", max_length=64)
-                # An incomplete fetch (any category unknown) cannot prove a grant
-                # count: empty is unknown, never zero, and a non-empty list is a floor.
-                complete = code == "ok" and all(
-                    metric.state == MetricState.READY and metric.balance is not None
-                    for metric in snapshot.metrics
-                )
-                count = len(snapshot.grants)
-                grants = (
-                    f"{count} 项"
-                    if complete
-                    else f"≥{count} 项（部分未知）"
-                    if count
-                    else "— 项（未知）"
-                )
-                lines.append(
-                    Text(
-                        f"组织 {organization} · 赠款 {grants}"
-                        + (
-                            "（到期≠周期重置，Enter 详情）"
-                            if tier == "wide"
-                            else "（到期≠周期重置）"
-                        ),
-                        style="dim",
-                    )
-                )
             if self._hoisted(account):
                 hoisted = sanitize_text(snapshot.metrics[0].detail, max_length=1024)
         name = Text(label, style="bold")
@@ -1010,7 +983,7 @@ class UsageApp(App[None]):
             if metric.expires_at is not None:
                 expiry = f"到期 {short_local_time(metric.expires_at, now)}（非周期重置）"
                 resets = [Text(expiry, style=f"italic {self._color('secondary')}")]
-        # Numeric Grok rows speak for themselves; failure details stay visible.
+        # Numeric Grok/Console rows need no explanation; failure details stay visible.
         numeric = (
             account.enabled
             and snapshot is not None
@@ -1023,7 +996,10 @@ class UsageApp(App[None]):
             if metric is not None
             and metric.detail
             and not self._hoisted(account)
-            and not (numeric and account.provider == ProviderId.GROK_SUBSCRIPTION)
+            and not (
+                numeric
+                and account.provider in (ProviderId.GROK_SUBSCRIPTION, ProviderId.CLAUDE_PLATFORM)
+            )
             else None
         )
         indent = "  " + ("│   " if nest and not last else "    ")
@@ -1079,6 +1055,12 @@ class UsageApp(App[None]):
     def _hoisted(self, account: Account) -> bool:
         snapshot = self.snapshots.get(account.id)
         if snapshot is None or not snapshot.metrics:
+            return False
+        if account.provider == ProviderId.CLAUDE_PLATFORM and any(
+            metric.state == MetricState.READY and metric.balance is not None
+            for metric in snapshot.metrics
+        ):
+            # Do not move hidden balance explanations back into the account header.
             return False
         details = {metric.detail for metric in snapshot.metrics}
         return len(details) == 1 and bool(details.pop())

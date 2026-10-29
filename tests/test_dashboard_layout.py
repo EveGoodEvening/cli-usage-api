@@ -243,6 +243,56 @@ async def test_balance_amount_whole_without_percent_and_expiry_is_not_reset(size
         await pilot.press("q")
 
 
+async def test_console_explanations_stay_in_details_but_unknown_reasons_remain_visible():
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=(120, 50)) as pilot:
+        await pilot.pause()
+        account = row(app, "claude.platform.purchased_balance")[0]
+        snapshot = app.snapshots[account.id]
+        overview = flat(header(app, account))
+        assert "组织" not in overview and "赠款" not in overview
+        for metric in snapshot.metrics:
+            target = (account, metric.id)
+            text = flat(prompt(app, target))
+            assert metric.balance.format() in text
+            # Shared explanations must not reappear via header hoisting.
+            assert flat(metric.detail) not in overview + text
+            app.listing.highlighted = app.option_index(target)
+            await pilot.press("enter")
+            assert isinstance(app.screen, InformationScreen)
+            assert metric.detail in app.screen.content
+            assert snapshot.organization_id in app.screen.content
+            for grant in snapshot.grants:
+                assert grant.name in app.screen.content
+                assert grant.remaining.format() in app.screen.content
+            await pilot.press("escape")
+
+        unknown = replace(
+            snapshot.metrics[0],
+            state=MetricState.UNKNOWN,
+            balance=None,
+            detail="Purchased grants unavailable; balance unknown, never zero.",
+        )
+        app.publish_snapshot(
+            replace(
+                snapshot,
+                metrics=(unknown, *snapshot.metrics[1:]),
+                fetch_state=FetchState.PARTIAL,
+                diagnostic=Diagnostic("partial_data"),
+            )
+        )
+        text = flat(prompt(app, (account, unknown.id)))
+        assert "未知 / no data" in text and unknown.detail in text
+        assert snapshot.metrics[0].balance.format() not in text
+        for metric in snapshot.metrics[1:]:
+            text = flat(prompt(app, (account, metric.id)))
+            assert metric.balance.format() in text and flat(metric.detail) not in text
+        overview = flat(header(app, account))
+        assert "组织" not in overview and "赠款" not in overview
+        assert Diagnostic("partial_data").message in overview
+        await pilot.press("q")
+
+
 async def test_passed_reset_marks_only_that_row_without_changing_quota():
     app = UsageApp(mode="demo")
     async with app.run_test(size=(110, 40)) as pilot:
@@ -405,30 +455,6 @@ def flat(text: str) -> str:
 def lines_fit(app, text: str) -> bool:
     _, width, _ = app._layout()
     return all(cell_len(line) <= width for line in text.split("\n"))
-
-
-@pytest.mark.parametrize("size", [(120, 50), (80, 24), (56, 40)])
-async def test_incomplete_console_fetch_never_shows_a_zero_grant_count(size):
-    app = UsageApp(mode="demo")
-    async with app.run_test(size=size) as pilot:
-        await pilot.pause()
-        account = row(app, "claude.platform.purchased_balance")[0]
-        snapshot = app.snapshots[account.id]
-        assert snapshot.grants and "赠款 2 项" in flat(header(app, account))
-        unknown = replace(snapshot.metrics[0], state=MetricState.UNKNOWN, balance=None)
-        partial = replace(
-            snapshot,
-            metrics=(unknown, *snapshot.metrics[1:]),
-            fetch_state=FetchState.PARTIAL,
-            diagnostic=Diagnostic("partial_data"),
-        )
-        app.publish_snapshot(replace(partial, grants=()))
-        text = flat(header(app, account))
-        assert "赠款 0" not in text and "赠款 — 项（未知）" in text
-        app.publish_snapshot(partial)
-        text = flat(header(app, account))
-        assert "赠款 ≥2 项（部分未知）" in text and "赠款 2 项" not in text
-        await pilot.press("q")
 
 
 @pytest.mark.parametrize("size", [(120, 30), (80, 24), (78, 24), (56, 40)])
