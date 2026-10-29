@@ -2,17 +2,33 @@
 
 ## Unreleased
 
+### Security — eMudhra verifier and deployment baselines
+
+- Pin backend CPython 3.12.16 and uv 0.13.6 to multi-platform digests; enforce the
+  same local versions through `.python-version` and `tool.uv.required-version`.
+  CPython blocks the compromised intermediate keys; uv retains its verifier fix
+  and adds the matching Python download catalog. Existing dependency/build hashes
+  remain unchanged. Require Debian's CA security package 20250419~deb12u2 or newer.
+- Select frontend Node 22.23.4 through `.node-version`, constrain engines to
+  `>=22.23.4 <23`, and enforce the range during npm installation. Keep managed
+  Vercel patch rollouts; document Cloudflare's selectors and explicit locked install.
+- Document independent trust stores, cross-signed chains, cache-free rebuilds,
+  and actual certificate-rejection checks in both deployment guides. Caddy's
+  Go 1.26.8 binary is retained only for HTTP-only static serving, not certified
+  fixed for TLS/proxy use. Native CLI path coverage remains qualified. PLAN.md §17
+  records the exercised evidence separately from previous supply-chain checks.
+
 ### Security — locked build, deployment and container inputs
 
 - Update frontend Node to 22.23.4 and Caddy to 2.11.7; pin both images, backend
-  Python 3.12.15 and uv 0.13.5 to multi-platform index digests. Remove the floating
+  Python 3.12.16 and uv 0.13.6 to multi-platform index digests. Remove the floating
   external Dockerfile syntax frontend.
 - Pin Hatchling 1.33.0 and its complete isolated wheel/editable build graph to
   exact versions and universal-wheel SHA-256 values; require build hashes through
   uv 0.13.5+. Runtime dependency versions are unchanged.
 - Lock Wrangler 4.155.0 and use `npm run deploy` instead of an unversioned `npx`
   fetch. Disable frontend dependency install hooks while retaining native optional
-  packages; frontend development now requires Node 22.12+.
+  packages; frontend development now uses the Node 22.x security floor above.
 - Replace global unlocked CLI installation with `docker/cli/package-lock.json`
   and script-disabled `npm ci` under `/opt/usage-clis`; link Claude's locked native
   binary directly and fail the build if Claude/Codex native packages are absent.

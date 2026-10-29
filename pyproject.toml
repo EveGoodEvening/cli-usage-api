@@ -17,6 +17,8 @@ usage-keepalive = "cli_usage_api.keepalive:main"
 dev = ["pytest", "pytest-asyncio", "respx", "ruff"]
 
 [tool.uv]
+# Match the reviewed Docker uv and enforce the isolated build-hash policy locally.
+required-version = "==0.13.6"
 require-build-hashes = true
 # Only the pinned universal wheels are allowed, not sdists with additional build backends.
 # Hatchling's tomli dependency applies only to Python <3.11, outside this project.

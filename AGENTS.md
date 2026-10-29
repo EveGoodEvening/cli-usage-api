@@ -364,3 +364,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   directly and reject missing platform packages. esbuild/workerd can resolve their
   native optional packages without their postinstall optimization. Keep those
   optional packages and never treat a trust-on-first-use checksum as vendor signing.
+- A root-list update alone may miss a compromised intermediate's cross-sign.
+  Verify each real TLS path (HTTPX/certifi/CPython, system curl, Node, uv) and require
+  certificate rejection, not timeout/DNS failure. Pin patched verifiers as well as
+  artifacts; keep signed OS CA updates moving above an evidenced security floor.
+  uv 0.13.5 already rejects these keys but cannot select the later CPython 3.12.16
+  from its catalog; uv 0.13.6 adds it. Exact tool/runtime pins must work together.
+- Managed Vercel Node selection controls a major, not an immutable patch. Cloudflare
+  build Node selectors and Workers compatibility dates are distinct. A Caddy image
+  with updated OS CAs may still contain pre-fix Go; current HTTP-only static serving
+  is a bounded disposition, not proof it is safe for later TLS/ACME/proxy use.

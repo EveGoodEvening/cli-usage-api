@@ -1,6 +1,7 @@
 # Optional: deploy as Cloudflare Workers static assets (`npm run deploy`).
 # Cloudflare Pages does not need this file; it reads public/_headers from dist.
 name = "usage-web"
+# Workers behavior compatibility only; not a Node.js version or CA-trust pin.
 compatibility_date = "2025-09-01"
 
 [assets]

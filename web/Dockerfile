@@ -9,6 +9,9 @@ ARG VITE_API_BASE_URL=""
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
+# Retained for HTTP-only static serving (auto_https off; no HTTPS upstreams).
+# Upstream 2.11.7 amd64 SBOM reports Go 1.26.8, not the eMudhra-fixed Go build.
+# Audit/replace the image before adding TLS/ACME/proxying; see README.md.
 FROM caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
 COPY Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /web/dist /srv

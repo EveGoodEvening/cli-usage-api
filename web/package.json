@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Read-only web dashboard for the usage API (front end only).",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.23.4 <23"
   },
   "scripts": {
     "dev": "vite",

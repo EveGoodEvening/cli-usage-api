@@ -8,6 +8,11 @@
 1–3 and their fresh-install/container verification. It supersedes the mutable build
 inputs in §15 without changing application, authentication or provider behavior.**
 
+**CA/runtime amendment (2026-10-29): §17 records the eMudhra incident review,
+matched Python/uv pins, managed frontend runtime policy and newly exercised TLS
+rejection/build evidence. Its current runtime pins supersede §16's earlier values;
+§16's earlier checks remain historical, not fresh CA or cloud-deployment proof.**
+
 Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex single atomic cutover under §11 is closed for implementation, verification, documentation and independent review at green draft `2d7ea6b`; final tracker-snapshot commit follows and its hash is not yet known. Authorized live acceptance remains unexercised.
 
 Original goal: **终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。**
@@ -1548,3 +1553,99 @@ exercised directly. The following are new observations, not inherited old gates.
 The orchestrator-owned verification builder, containers, image tags and temporary
 inspection/smoke scripts and caches were removed after these checks. No verification
 service was left running, and no user credential or account state was modified.
+
+## 17. User-requested eMudhra CA and deployment runtime review — 2026-10-29
+
+The user requested checking/pinning Python, uv, Node, dependencies, Docker images
+and certificate-related components for Railway/Vercel/Cloudflare, with additions
+to `docs/deploy-railway.md` and `web/README.md`. This is installation and verifier
+maintenance, not an application/provider/authentication contract change.
+
+### Findings, decisions and implemented scope
+
+- [x] Identify the incident from the [Mozilla record](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449),
+  [researcher advisory](https://emudhra.we-have-a-problem.com/) and
+  [Cloudflare response](https://blog.cloudflare.com/emudhra-certificate-compromise).
+  Eight intermediate keys, including TLS and code-signing, were compromised;
+  Sectigo cross-signs make removing only one root an incomplete general mitigation.
+  No project credential compromise or successful attack was established.
+- [x] Replace the manifest's CPython 3.12.15 pin with **3.12.16** and its registry
+  index digest; add the same `.python-version` to local selection and Docker's
+  allowlisted build context. The [CPython security release](https://blog.python.org/2026/10/python-3152-31410-31318-31216-31118/)
+  adds intermediate-key rejection in `ssl`. This was a missing defense-in-depth
+  version, not proof that the old application's already-updated certifi accepted
+  a malicious chain. An existing user-owned image reported 3.12.16 and was not
+  represented as a 3.12.15 reproduction or modified.
+- [x] Pin **uv 0.13.6** by index digest and exact `tool.uv.required-version`.
+  [0.13.5](https://github.com/astral-sh/uv/releases/tag/0.13.5) already supplied
+  rustls-webpki key rejection, but the exercised `uv python list --all-versions
+  3.12.16` returned no matching catalog entry. [0.13.6](https://github.com/astral-sh/uv/releases/tag/0.13.6)
+  adds the selected interpreter; a fresh isolated managed download/install was
+  subsequently exercised. This corrects the initial 0.13.5 implementation before
+  completion. Both Python/uv indexes include amd64 and arm64 metadata; execution
+  here was amd64 only.
+- [x] Keep signed Debian repository updates, adding a build-time
+  `ca-certificates >=20250419~deb12u2` floor ([vendor package](https://packages.debian.org/bookworm/ca-certificates),
+  [incident fix](https://bugs.debian.org/1151413)). Do not freeze all apt inputs or
+  introduce an application-specific root blacklist. Retain locked certifi
+  **2026.10.23**, the 41-package Python lock and the approved isolated build hashes.
+- [x] Retain **Node 22.23.4**: its [vendor release](https://nodejs.org/en/blog/release/v22.23.4/)
+  includes blocked-public-key rejection. Add `web/.node-version`, constrain engines
+  to `>=22.23.4 <23` in manifest/lock metadata and enable npm `engine-strict`.
+  Preserve all dependency versions, integrity values and disabled install hooks.
+  Vercel selects a major with managed patch rollout; Cloudflare build selectors
+  and explicit `npm ci` are documented separately from Workers compatibility dates.
+- [x] Inspect Caddy rather than equating a recent tag with a fixed verifier.
+  The pinned **2.11.7** binary actually reports **Go 1.26.8**, before fixed
+  [Go 1.26.10/1.27.3](https://groups.google.com/g/golang-announce/c/66pojueaQek).
+  Alpine CA packages are **20261020-r0**. Retain this image only for the existing
+  HTTP-only static configuration (`auto_https off`, no upstream proxy); require
+  a reviewed fixed build before TLS-client/ACME/proxy use. This is not a claim that
+  Caddy's bundled verification paths are patched.
+- [x] Update both requested deployment guides, root quickstart, SECURITY,
+  CHANGELOG and repo Lessons. Preserve distinctions among platform edge TLS,
+  browsers, system CA, HTTPX/certifi/CPython, uv and native CLI verification.
+  No application source or permanent tests changed.
+
+### Newly exercised orchestrator evidence
+
+All installations used temporary environments/caches; no credentials were supplied.
+Public TLS probes sent no authentication, cookies or provider data. Image builds
+ran through the shared heavy gate with a separate BuildKit container whose memory
+and memory+swap limits were both asserted at 2 GiB. No browser was launched.
+
+| Check | Observed result |
+|---|---|
+| Both Dockerfiles: amd64 builds; final backend rebuilt with `--pull --no-cache` after uv correction | Successful digest resolution, fresh locked installs and production output. Final backend uses Python 3.12.16 / uv 0.13.6; frontend Node 22.23.4 / Caddy 2.11.7. |
+| Final backend runtime inventory | CPython 3.12.16; linked OpenSSL 3.0.22; Debian libssl3/openssl 3.0.22-1~deb12u2; CA 20250419~deb12u2; curl 7.88.1-10+deb12u15; certifi 2026.10.23; npm 10.9.9; Claude 2.1.308, Codex 0.165.0 and Grok 1.0.70 version commands succeeded. |
+| Offline OpenSSL verification of the researcher's 14 public TLS chains, separately against system and certifi bundles | Both bundles rejected all 14, including AAA cross-signs and two no-CT chains, with issuer/trust errors rather than expiry/hostname failures. Downloaded certificate-only archive SHA-256: `7b949956955fc501a30f4d98d2f513d34c0bbbe92e29a968194c96e097ce2345`. No downloaded code executed. |
+| Final image HTTPX using `verify=True, trust_env=False`, matching the application's verifier configuration | Positive PyPI HTTPS returned 200; all 14 test hosts failed with underlying `SSLCertVerificationError`, code 20. The fixed provider allowlist was not weakened or redirected for testing. |
+| curl and final uv downloader, emSign and AAA sample hosts | Both clients rejected both samples with certificate errors; curl returned 60. curl's positive PyPI HTTPS succeeded. uv used no-build/no-deps index resolution with zero retries and no package installation. |
+| Node 22.23.4 HTTPS path, same two samples | Positive npm registry HTTPS returned 200; both test hosts failed with `CERT_REVOKED`. |
+| Base image pip outside app venv | Still pip 25.0.1, not the project installer. Its isolated no-install index probes rejected both sample chains with `CERTIFICATE_VERIFY_FAILED: certificate rejected` under patched CPython. This is not an independently updated pip-vendored bundle; separate pip adoption still follows vendor 26.2.2+ guidance. |
+| uv 0.13.6 managed bootstrap into an empty temporary install directory | Downloaded and ran CPython 3.12.16; fresh-cache `uv sync --locked --group dev --no-editable`, installed `usage --help` and targeted transport/security tests succeeded. **141 passed in 0.22 s**. |
+| Separate fresh-cache default `uv sync --locked` | Editable install and installed `usage --help` succeeded, including hash-constrained editable-build requirements. |
+| Negative build-hash fixtures under uv 0.13.6 | An initial incomplete fixture was refused for missing `packaging` hash; after supplying the complete graph, a zeroed Hatchling hash was refused with `Hash mismatch` and the expected/computed SHA-256. The initial fixture assertion expected the wrong refusal and was corrected; no production fix was needed. |
+| Actual repository invoked with host uv 0.13.5 | Refused with required-version mismatch (exit 2), without changing host uv or the project lock. |
+| Copied frontend manifests under host Node 24.22.1 | `npm ci --offline` failed with `EBADENGINE` before creating node_modules. The selected Node 22.23.4 succeeded during the actual frontend image build. |
+| Final installed backend demo API in network-isolated container | Health/session/dashboard 200, four synthetic accounts, no-store, POST 405 and SIGTERM exit 0. |
+| Final frontend static server | `caddy build-info` confirmed Go 1.26.8; installed Alpine CA/bundle 20261020-r0 and libssl3 3.5.9-r0. Config validation passed. Actual HTTP root and SPA fallback served identical HTML with CSP/nosniff; JS asset returned 200 with immutable caching. |
+| Locked Wrangler in network-isolated frontend build image | Version 4.155.0; `npm run deploy -- --dry-run` read 19 built assets and exited successfully. No cloud deployment occurred. |
+
+### Limits and disposition
+
+This verifies selected TLS/build/serving paths, not every application on a host,
+all code-signing chains, a full OS/CVE/SBOM audit or unknown-malware absence.
+Claude's fixed-version lead is from the researcher list; Codex's tagged source
+graph contains fixed rustls-webpki but also other TLS implementations. Grok's native
+verifier coverage remains unknown, and its artifact hashes remain TOFU. No
+authenticated CLI login/renewal, provider read, OS-keyring operation, arm64 run,
+browser visual run, full application suite or actual Railway/Vercel/Cloudflare
+deployment is claimed. Existing application/private-provider acceptance remains
+unchanged. No new independent implementation review or commit is claimed.
+
+The owned builders, smoke containers, image tags and temporary fixtures/scripts/
+caches were removed. No user-owned service, credential file, account state, host
+runtime installation or cloud setting was changed. Operators must deploy the new
+images (not restart old ones), update local uv, and apply the documented managed
+platform settings; Railway's manually started API/tmux sessions need restarting.

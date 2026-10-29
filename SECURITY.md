@@ -117,7 +117,7 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
 
 ## Build and dependency trust
 
-- Use uv 0.13.5+ with the committed `uv.lock` and build isolation. `pyproject.toml`
+- Use the enforced uv 0.13.6 with the committed `uv.lock` and build isolation. `pyproject.toml`
   separately pins Hatchling and every wheel/editable build requirement, permits
   only the recorded universal-wheel SHA-256 values, and enables
   `require-build-hashes`. Missing or mismatched build hashes fail closed. A platform
@@ -147,7 +147,37 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   managed cloud build environments are not a fully immutable OS/toolchain snapshot.
   Update tags/digests, CLI locks and build-wheel hashes deliberately, then repeat
   clean installation, negative-integrity and container smoke checks. Verification
-  evidence and unauthenticated/live limits are recorded in PLAN.md §16.
+  evidence and unauthenticated/live limits are recorded in PLAN.md §§16–17.
+
+### CA compromise and independent TLS stacks
+
+- The October 2026 eMudhra incident affects intermediate keys and Sectigo
+  cross-signs, not merely one root certificate. Pins/hashes establish selected
+  bytes, not revocation or upstream authenticity. Never disable verification or
+  add a compromised trust anchor to make an update succeed.
+- Deploy CPython 3.12.16 (`.python-version` and digest-pinned image); its `ssl`
+  module rejects affected keys. uv 0.13.6 retains the 0.13.5 rustls-webpki fix and
+  adds the matching Python download catalog. Node 22.23.4 contains its own
+  blocked-public-key check. The existing certifi 2026.10.23 lock is retained.
+  Debian's signed CA updates must be at least 20250419~deb12u2 at build time.
+- HTTPX uses certifi with `verify=True, trust_env=False`; updating the OS CA alone
+  does not replace its bundle, uv's verifier, or native CLI TLS implementations.
+  The Python base still supplies pip 25.0.1 outside the app venv: CPython's fixed
+  verifier protects it against these keys, but it is not the project's installer
+  or an independently updated vendored trust store. Users separately adopting pip
+  should follow the Python advisory's 26.2.2+ upgrade guidance.
+- Caddy 2.11.7 actually reports Go 1.26.8, not the fixed Go 1.26.10/1.27.3.
+  Its pin is retained only for the current HTTP-only static configuration behind
+  Railway TLS; adding ACME, TLS client authentication or HTTPS upstreams requires
+  a separately reviewed fixed build. Its updated Alpine CA bundle does not prove
+  all bundled Go verification paths are fixed.
+- Native Claude/Codex/Grok versions and source dependency graphs do not establish
+  that every packaged network path rejects the compromised keys. In particular,
+  Grok's bundled verifier remains unverified; no authenticated CLI test is claimed.
+  Likewise, managed cloud edge certificates and users' browsers are not controlled
+  by these repository pins. See the sourced operational guidance in
+  [Railway deployment](docs/deploy-railway.md#ca-事件版本锁定与更新) and
+  [web deployment](web/README.md#emudhra-事件版本证书信任与安全重建).
 
 
 ## Implemented C12 entry and CLI secret boundary

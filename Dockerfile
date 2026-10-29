@@ -7,7 +7,7 @@
 # lives under HOME=/data/home on the Railway volume mounted at /data at runtime.
 #
 # Pinned versions (update deliberately; record the source when changing them):
-#   uv           0.13.5    ghcr.io/astral-sh/uv (matches the uv that wrote uv.lock)
+#   uv           0.13.6    ghcr.io/astral-sh/uv (includes the CPython 3.12.16 catalog)
 #   Node.js      22.23.4   LTS "Jod", https://nodejs.org/dist/v22.23.4/SHASUMS256.txt
 #   Claude Code  2.1.308   npm @anthropic-ai/claude-code (npm "stable" dist-tag)
 #   Codex CLI    0.165.0   npm @openai/codex ("latest" dist-tag)
@@ -17,9 +17,11 @@
 #                          computed from the downloaded artifacts on 2026-10-29
 #                          (trust on first use), so a changed artifact fails the build.
 
-FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 
-FROM python:3.12.15-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
+# CPython 3.12.16 blocks compromised eMudhra intermediate keys in ssl, including
+# cross-signed chains: https://blog.python.org/2026/10/python-3152-31410-31318-31216-31118/
+FROM python:3.12.16-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
 
 ARG TARGETARCH
 ARG NODE_VERSION=22.23.4
@@ -31,9 +33,12 @@ ARG GROK_SHA256_ARM64=0d9e47fc2cb14db2f52f99e9289c41b3723b64de05c284a9f18c2e8df5
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Use Debian's vendor-maintained CA fix, not an application root blacklist.
+# https://packages.debian.org/bookworm/ca-certificates (security update)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl git tmux procps less tini xz-utils \
+ && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' \
  && rm -rf /var/lib/apt/lists/*
 
 # Node.js (official tarball, checksum-verified) for the npm-distributed CLIs.
@@ -93,7 +98,7 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
+COPY .python-version pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable \

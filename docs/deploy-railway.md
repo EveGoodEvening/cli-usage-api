@@ -4,7 +4,7 @@
 环境；登录各 CLI、配置账号、创建 API 令牌和启动 API 都由你通过 `railway ssh`
 手动完成。镜像里不包含任何凭据、令牌或登录状态。
 
-> **状态：** 仓库内的 `Dockerfile` 已在本地构建并做过容器冒烟（见 PLAN.md §15），
+> **状态：** 仓库内的 `Dockerfile` 已在本地构建并做过容器冒烟（见 PLAN.md §15、§17），
 > 但**尚未在真实 Railway 服务上部署验证**，也没有在容器里完成过任何真实登录或
 > 已认证的 provider 读取。下面的 Railway 操作步骤来自官方文档（见文末来源），
 > 不是已执行的验收记录。
@@ -13,8 +13,8 @@
 
 | 组件 | 固定版本 | 安装方式 |
 |---|---|---|
-| Python | 3.12.15 | `python:3.12.15-slim-bookworm`，锁定多架构 OCI index digest |
-| uv | 0.13.5 | 从 digest 固定的 `ghcr.io/astral-sh/uv:0.13.5` 复制 |
+| Python | 3.12.16 | `python:3.12.16-slim-bookworm`，锁定多架构 OCI index digest；`.python-version` 使用同一版本 |
+| uv | 0.13.6 | 从 digest 固定的 `ghcr.io/astral-sh/uv:0.13.6` 复制；`pyproject.toml` 拒绝其他 uv 版本 |
 | 本项目 | 当前源码 | `uv sync --locked --no-dev`；构建依赖另有精确版本与 wheel SHA-256；安装到 `/app/.venv` |
 | Node.js | 22.23.4 LTS | 官方 tarball，校验 SHA-256 |
 | Claude Code | 2.1.308 | `docker/cli/package-lock.json` + `npm ci --ignore-scripts`；直接链接锁定的 Linux 原生二进制 |
@@ -42,6 +42,71 @@
   创建 `HOME` 并设为 `0700`，然后执行 `CMD`（默认 `sleep infinity`）。`tini` 作为
   PID 1 负责转发信号和回收子进程。若 `/data` 不是挂载卷，入口脚本会打印警告。
 - 容器以 root 运行。Railway 卷以 root 身份挂载，`railway ssh` 进入的也是 root。
+
+## CA 事件、版本锁定与更新
+
+2026-10 的 [eMudhra 事件](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449)
+涉及 8 个弱私钥中间 CA，包括 TLS 与代码签名证书；还有 Sectigo 的交叉签名链。
+**固定依赖版本不能替代证书验证修复，只移除一个 emSign 根也不能证明所有链都被拒绝。**
+浏览器的撤销列表不会自动保护容器里的 Python、curl 或原生 CLI。
+
+本仓库采用“审查后固定构建输入 + 安全更新下限”，不是永久冻结证书库：
+
+| 验证层 | 当前基线与依据 |
+|---|---|
+| CPython `ssl` | **3.12.16**；[官方紧急发布](https://blog.python.org/2026/10/python-3152-31410-31318-31216-31118/)直接拒绝受影响中间 CA 密钥。旧的 3.12.15 pin 已替换；不能只看 OpenSSL 版本判断这一补丁。 |
+| Python HTTPX / certifi | `uv.lock` 已固定 **certifi 2026.10.23**，高于[官方建议的 2026.10.19](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)。本项目 `verify=True, trust_env=False`，默认走 certifi + CPython `ssl`，不是单纯系统 CA。 |
+| uv 自己的下载器 | 固定 **0.13.6**，包含 0.13.5 的 [rustls-webpki 修复](https://github.com/astral-sh/uv/releases/tag/0.13.5)，并[新增 Python 3.12.16 下载目录](https://github.com/astral-sh/uv/releases/tag/0.13.6)。它的 TLS 栈独立于 Python；更新 uv 不会自动修复已有解释器或虚拟环境。 |
+| Debian 系统 CA / curl / git | 安装签名 Debian 仓库中的 `ca-certificates`，构建时要求 **`>=20250419~deb12u2`**（[Bookworm 安全更新](https://packages.debian.org/bookworm/ca-certificates)）。不把 apt 永久锁在旧证书包；此处不声称整个 OS 可逐字节复现。 |
+| Node / npm | 保留 **22.23.4**，其[安全发布](https://nodejs.org/en/blog/release/v22.23.4/)包含受影响公钥拒绝逻辑；官方 tarball 的两架构 SHA-256 与前端镜像 digest 继续固定。 |
+
+Python 包、隔离构建工具和 npm 完整依赖图继续由各自锁文件／hash 约束；不要改成
+`pip install -U`、`npm install latest` 或未固定版本的 `npx` 部署。`pip` 还有自己内置的
+certifi：若另行使用 pip，按 Python 官方公告升级到 **26.2.2+**，不能把更新项目的
+certifi 当作更新 pip。当前项目安装使用 uv，不需要额外安装 pip。
+实际检查发现 Python 基础镜像仍附带 pip **25.0.1**（不在应用 venv 内）；CPython
+3.12.16 的 `ssl` 拒绝逻辑会保护它免受本次弱密钥攻击，但不等于其 vendored CA 已更新。
+本项目不使用它安装依赖；若自行改用 pip，应先按上述公告升级。
+
+三个第一方 CLI 是另一条边界：Claude Code 2.1.308 高于[研究者修复清单所列的 2.1.303](https://emudhra.we-have-a-problem.com/#developers)；
+Codex 0.165.0 的源码依赖图包含已修复的 rustls-webpki，但原生程序还可能使用其他 TLS
+路径；Grok 的版本和 TOFU hash 也不能证明它内置的验证器已修复。
+**不把这些源码／版本线索当作三个打包 CLI 所有网络路径的已验证安全结论。**
+不要把登录文件、令牌或认证头交给第三方证书测试站点。
+
+### 重建与核验
+
+1. 版本升级同时审查版本号、来源、镜像 index digest、下载 hash、锁文件和运行时选择文件；
+   本地与 Docker 的 Python／uv 要同步更新。Node 在各云平台上的选择方式见
+   [前端部署说明](../web/README.md#部署)，Railway Docker 构建不受平台自动检测的 Python／Node 版本控制。
+2. CA／基础镜像更新必须重新构建并部署，不能只重启旧容器，也不能只执行 `update-ca-certificates`
+   就声称修好了 certifi 或内置验证器。本地使用 `docker build --pull --no-cache -t usage-api-railway .`；
+   Railway 重建时也应避免复用旧 apt 安装层，并检查实际构建日志。`--pull` 不会替你更新已固定的 digest。
+3. 在**新容器**中核验版本，输出仅含版本和证书包路径：
+
+   ```sh
+   python --version
+   uv --version
+   node --version
+   npm --version
+   python -c 'import ssl, certifi; print(ssl.OPENSSL_VERSION); print(certifi.__version__); print(certifi.where())'
+   dpkg-query -W ca-certificates openssl libssl3 curl
+   claude --version
+   codex --version
+   grok --version
+   ```
+
+4. 用[研究者的无认证测试链](https://emudhra.we-have-a-problem.com/#check)分别检查实际使用的
+   curl、Python HTTPX、Node／uv 路径，至少覆盖 emSign 和 AAA 交叉签名两种链，并先用正常
+   HTTPS 站点确认网络可用。**必须观察到证书验证拒绝**；DNS 错误、超时或普通 HTTP 错误都不是修复证据。
+   浏览器、curl 或某个 CLI 单项通过，不代表其他路径通过。仓库实际执行的证据与限制记录在 PLAN.md §17。
+5. 更新后重新启动第 8 步的服务。卷不会因此丢失，但 tmux 进程和 session-only 凭据会消失。
+
+不要用 `curl -k`、`verify=False`、`NODE_TLS_REJECT_UNAUTHORIZED=0`、关闭 npm `strict-ssl`
+或 uv 的不安全主机选项消除错误；也不要 pin 上游站点的叶证书，正常换证会使它失效。
+本项目不签发公网证书：Railway 入口 HTTPS 由平台维护，与容器**出站** TLS 是两件事。
+自定义域名／自管源站／上传 CA 要另行检查；若确实使用受影响链，应更换并撤销旧证书。
+没有发现泄露证据时不把所有项目密钥视为已泄露；有可疑拦截或凭据暴露证据时，再撤销相应会话与令牌。
 
 ## 只能使用文件型凭据
 
@@ -342,6 +407,11 @@ usage-keepalive
 ## 本地运行后端
 
 不需要 Docker：
+
+本仓库选择 Python **3.12.16**（`.python-version`）和 uv **0.13.6**；项目 API 的
+`requires-python >=3.11` 是兼容性声明，不是旧补丁版本的安全承诺。0.13.6 才收录所选
+Python 补丁的下载目录；已有 `.venv` 也需要确认实际解释器已切换，不能只更新锁文件。
+不要退回旧版本或关闭 TLS 验证。
 
 ```sh
 uv sync --locked

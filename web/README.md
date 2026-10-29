@@ -4,11 +4,14 @@
 
 技术栈：Vite 7 + React 18 + TypeScript，无 UI 框架，纯 CSS（浅色/深色）。依赖版本全部精确锁定，提交了 `package-lock.json`。
 
-需要 Node.js **22.12+**；Docker 构建固定为 **22.23.4**，静态服务器固定为
-**Caddy 2.11.7**，两个镜像都锁定多架构 OCI index digest。
+Node.js 统一使用 **22.x，最低 22.23.4**；`package.json` 的 `>=22.23.4 <23`
+限定主版本并允许托管平台继续发布安全补丁，`.npmrc` 的 `engine-strict` 会拒绝不匹配版本。
+`web/.node-version` 为支持该文件的本地版本管理器及 Cloudflare 构建选择 **22.23.4**；
+Docker 构建也固定为 **22.23.4**，静态服务器固定为 **Caddy 2.11.7**，
+两个镜像都锁定多架构 OCI index digest。精确版本需要持续审查升级，不会自动获得安全修复。
 `.npmrc` 禁止依赖的安装生命周期脚本，并保留平台可选包：esbuild / workerd 直接使用
-锁定的本机二进制包，不运行 postinstall 下载器。不要省略 optional dependencies，
-也不要跨操作系统或 CPU 架构复制 `node_modules`。
+锁定的本机二进制包，不运行 postinstall 下载器。使用 `npm ci`，不要用 `npm install`
+替代部署安装；不要省略 optional dependencies，也不要跨操作系统或 CPU 架构复制 `node_modules`。
 
 ## 鉴权
 
@@ -22,6 +25,8 @@
 
 ```bash
 cd web
+# 先用支持 .node-version 的版本管理器安装/选择 Node 22.23.4
+node --version          # 本地基线 v22.23.4；托管构建允许后续 22.x 补丁
 npm ci
 
 # 终端 1：后端演示模式（合成数据，本机回环地址可以不配置令牌）
@@ -77,15 +82,15 @@ usage api serve --host 0.0.0.0 --port "$PORT" --trust-proxy \
 ### Vercel
 
 1. 在 Vercel 导入这个仓库，**Root Directory** 选 `web`。
-2. Framework 会识别为 Vite；`vercel.json` 已经设置构建命令、输出目录 `dist`、SPA 回退和安全响应头。
+2. Framework 会识别为 Vite；`vercel.json` 已经设置 `npm ci`、构建命令、输出目录 `dist`、SPA 回退和安全响应头。`engines.node` 选择 22.x；Project Settings → Build and Deployment 中也选 22.x。Vercel **只选择主版本**，自动滚动次版本/补丁，不能冻结为 22.23.4；部署时确认实际构建 Node 版本不低于基线（可在 Build Command 临时加 `node --version &&`）。
 3. 可选：在 Project Settings → Environment Variables 里设置 `VITE_API_BASE_URL`。
 4. 部署后把 `https://<项目>.vercel.app` 加到 API 的 `--allow-origin`。
 
 ### Cloudflare Pages
 
 1. Workers & Pages → Create → Pages → 连接仓库。
-2. **Root directory** 填 `web`，Build command 填 `npm run build`，Build output directory 填 `dist`。
-3. 可选：设置环境变量 `VITE_API_BASE_URL`；构建环境使用 `NODE_VERSION=22.23.4`。
+2. **Root directory** 填 `web`，Build command 填 `npm ci && npm run build`，Build output directory 填 `dist`。
+3. 使用当前 v3 构建镜像，设置 `SKIP_DEPENDENCY_INSTALL=1`，避免平台先自动运行另一套依赖安装；Node 从提交的 `.node-version` 选择 22.23.4。删除旧 `NODE_VERSION` 覆盖值，或显式设为相同版本；v3 不读取 `package.json` 的 `engines` 来选择 Node。可选：设置公开环境变量 `VITE_API_BASE_URL`。
 4. `public/_headers` 会随构建复制到 `dist/`，提供安全响应头。Pages 在没有 `404.html` 时自动把未知路径交给 `index.html`，所以 `_redirects` 里没有规则。
 5. 把 `https://<项目>.pages.dev` 加到 API 的 `--allow-origin`。
 
@@ -105,6 +110,13 @@ Wrangler **4.155.0** 是精确版本的开发依赖，完整依赖图及 SHA-512
 这不代表已部署到 Cloudflare。升级时显式修改依赖版本并重新生成、审查锁文件；
 Docker 镜像升级也必须同时更新标签与对应的多架构 digest，而不是移除 digest。
 
+如果改用 Workers Builds 连接 Git 仓库，Root directory 同样设为 `web`，设置
+`SKIP_DEPENDENCY_INSTALL=1`，Build command 用 `npm ci && npm run build`，
+Deploy command 用 `npm run deploy`，避免默认 `npx wrangler deploy` 另行选择 CLI。
+Workers Builds 也读取 `.node-version`；不要用 dashboard 的旧 `NODE_VERSION` 覆盖它。
+`wrangler.toml` 的 `compatibility_date` 只选择 Workers API 行为，不是 Node 版本、
+CA bundle 或安全补丁锁定；本项目只发布静态资源，没有 Node/Workers 服务端 API 代理。
+
 ### Railway
 
 前端和 API 是两个独立的 Railway 服务。
@@ -121,6 +133,49 @@ Docker 镜像升级也必须同时更新标签与对应的多架构 digest，而
 docker build -t usage-web web
 docker run --rm -p 127.0.0.1:8080:8080 usage-web
 ```
+
+### eMudhra 事件：版本、证书信任与安全重建
+
+2026-10 的事件涉及八个弱密钥中间 CA（另有 Sectigo 交叉签名链），不是应用依赖
+版本冲突。只删除 eMudhra 根不能覆盖交叉签名；精确 npm 版本、锁文件完整性和 OCI
+digest 只能固定拿到的字节，不能自动修复这些字节中的信任策略。
+
+- **Node 构建/部署工具**：[Node 2026-10 安全公告](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+  明确包含 eMudhra 修复；[22.23.4 发布记录](https://nodejs.org/en/blog/release/v22.23.4)
+  包含 NSS 3.131.1 根更新和拒绝包含被封锁公钥的证书链。因此保留现有 Node 镜像版本与 digest，
+  不为此次事件无依据升级。不要通过 `NODE_TLS_REJECT_UNAUTHORIZED=0`、关闭 npm `strict-ssl`
+  或换成过期的 `NODE_EXTRA_CA_CERTS` / `NODE_OPTIONS` 信任覆盖来绕过证书错误。
+- **Caddy 的实际边界**：本仓库 `Caddyfile` 关闭 `auto_https`，只在 `$PORT` 提供 HTTP 静态文件，
+  不代理 API、不访问 HTTPS 上游；Railway 边缘终止浏览器 HTTPS。
+  [Caddy 2.11.7 的官方 Linux amd64 SBOM](https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.sbom)
+  显示其 Go 标准库为 **1.26.8**，本地镜像的 `caddy build-info` 也核实了这一点，不能声称已带此次 Go 修复。
+  镜像内 `ca-certificates` / `ca-certificates-bundle` 已是 **20261020-r0**；这与二进制的 Go 版本是独立证据。
+  [官方镜像配方](https://github.com/caddyserver/caddy-docker/blob/master/2.11/alpine/Dockerfile)
+  下载发行版二进制；单更新镜像 OS CA 不会重编译 Go。当前只因 HTTP 静态服务边界保留原 pin；
+  如启用 Caddy TLS、ACME 或 HTTPS 反代，必须先选择并核实使用
+  [Go 1.26.10 / 1.27.3 或后续修复版本](https://groups.google.com/g/golang-announce/c/66pojueaQek)
+  构建的 Caddy，连同 OS CA 一起审查，更新镜像标签/digest 后再使用，不能沿用本结论。
+- **浏览器和云边缘**：页面执行和 API `fetch` 在用户浏览器中，使用浏览器/系统的证书验证，
+  不是构建时 Node 或 Caddy 的信任库。更新并重启浏览器及系统，确保撤销信息生效；
+  Vercel、Cloudflare、Railway 的边缘证书和边缘运行时由平台维护，仓库无法为它们锁定 CA。
+  [Cloudflare 事件说明](https://blog.cloudflare.com/emudhra-certificate-compromise)
+  记录 10-20 CDN/服务端 Zero Trust 缓解，但客户镜像、自带证书库和自定义信任配置仍需分别更新。
+  Pages/Workers Builds 默认通过 `NODE_OPTIONS=--use-openssl-ca` 等变量使用构建镜像 OS CA，
+  因此也要检查平台构建镜像及已有信任覆盖，不能只看 Node 版本。
+
+重建前先更新本机 OS CA、浏览器、Docker Engine/CLI 及实际下载工具；不要在未经修复的
+验证路径上下载替代证书或二进制。升级镜像时同时审查标签、所有目标架构和多架构 digest，
+随后在仓库根目录运行 `docker build --pull --no-cache -t usage-web web`，重新部署并确认
+新镜像已生效。`--pull --no-cache` **不会更新固定 digest 内的旧软件**，也不能代替修改过期 pin。
+本地重新运行 `npm ci` 后构建；托管平台更新设置后清除旧构建缓存并重新部署，确认实际构建版本。
+证书检查必须使用实际应用的验证路径，并区分证书拒绝与网络失败；浏览器或 curl 单个失败
+都不是所有工具安全的证明。
+
+一手参考：[Mozilla 事件记录](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449)、
+[研究者修复版本/交叉签名说明](https://emudhra.we-have-a-problem.com/)、
+[Vercel Node 版本合同](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions)、
+[Pages 构建镜像/选择器/信任库](https://developers.cloudflare.com/pages/configuration/build-image/)、
+[Workers Builds 镜像/选择器/信任库](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)。
 
 ## 页面结构
 

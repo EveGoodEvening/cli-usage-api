@@ -1,6 +1,7 @@
 # Only source, Python locks, the entrypoint and the container CLI integrity lock
 # enter the build context; local state and secrets stay excluded.
 **
+!.python-version
 !pyproject.toml
 !uv.lock
 !src/

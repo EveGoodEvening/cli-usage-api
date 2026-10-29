@@ -10,8 +10,13 @@ integrations use private, version-sensitive APIs.
 
 ## Quick start
 
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) 0.13.5+, and an interactive terminal.
-Linux/POSIX is the supported credential-import and persistence target.
+Use Python **3.12.16** (selected by `.python-version`), [uv](https://docs.astral.sh/uv/)
+**0.13.6** (enforced by `pyproject.toml`), and an interactive terminal.
+Linux/POSIX is the supported credential-import and persistence target. Package API
+compatibility remains Python 3.11+, not a security endorsement of older patch releases.
+uv 0.13.6 includes the selected interpreter in its download catalog; an existing
+`.venv` must also use that patched interpreter. See the
+[CA and deployment policy](docs/deploy-railway.md#ca-事件版本锁定与更新).
 
 ```sh
 uv sync --locked
