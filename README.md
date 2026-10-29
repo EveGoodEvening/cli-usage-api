@@ -1,980 +1,120 @@
 # Usage TUI
 
-A local terminal dashboard for subscription usage and Claude Platform credit
-balances. The installed `usage` CLI opens a live dashboard, deterministic offline
-demo, or interactive account/key management. **The user-corrected GPT requirement
-means Codex weekly quota, not ordinary ChatGPT chat usage. The atomic cutover is
-implemented; final integrated offline checks, synthetic/terminal proofs, four
-independent implementation reviews and two final split reviews passed cleanly.
-Authorized live Codex comparison and real OS-keyring persistence remain unexercised.** This is a terminal TUI.
+A local, read-only terminal dashboard for subscription usage and Claude Platform
+credit balances. No web server or statusline.
 
-To try it, run `uv sync --locked` then `uv run usage --demo`. To configure your
-own accounts, run `uv run usage` and press `a`; enter credentials only in the
-application's masked prompts, never in chat. See the provider connection guidance
-below. Exercised evidence and remaining live-acceptance boundaries are recorded in
-[PLAN.md](PLAN.md).
+**Status:** Offline demo and local account workflows are verified. Authenticated
+provider reads and real OS-keyring persistence remain unverified. Provider
+integrations use private, version-sensitive APIs.
 
-## Current goal and scope
+## Quick start
 
-终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform
-普通购买余额和赠送余额；Codex 每周（7 天窗口）用量；GrokBuild / GrokChat
-用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。
-
-The application is read-only and local: one terminal dashboard, not a web
-server, statusline, inference client, or spending dashboard. Near-real-time means
-bounded periodic observations, not provider push or an availability guarantee.
-
-## Implemented capabilities and live limitations
-
-C01 provides `src/` package metadata, declared runtime/development dependencies, and
-frozen domain contracts: provider/account identities, credential kinds and resolved
-credential values, exact money and quota values, metrics/grants/snapshots, provenance,
-safe error types, validation helpers, and schema serialization. Domain tests are
-source artifacts, not proof that checks have passed. Verification and chunk closure
-are recorded only from exercised evidence in [PLAN.md](PLAN.md).
-
-The C01 review correction bounds percentage representations before exact arithmetic:
-at most 4,096 input string characters, 1,024 Decimal coefficient digits, and a stored
-Decimal exponent from −1,000 through +1,000. Unsupported representations raise
-`DomainError`, including through serialized snapshots. These bounds prevent a tiny
-scientific-notation value from requesting enormous decimal expansion; a JSON byte
-limit alone is insufficient. Supported percentages remain exact, including values
-above 100%; remaining is exactly `max(0, 100 - used)`, not a rounded or capped used
-value. C01 verification and closure are recorded in PLAN.md.
-
-C02 adds library-level account/config persistence and credential storage. C03 adds
-read-only Linux credential-file resolution and guarded HTTP transport. C04 adds the
-Claude subscription adapter; C05 adds Console balances and organization discovery;
-C06 adds the Grok billing adapter described below. Historically, C07 added the
-explicit provider registry and blocked ordinary-ChatGPT capability. The current
-Codex cutover replaces that capability, not its historical evidence. C08 adds the
-library-level scheduler and freshness state described below.
-C09 adds the deterministic offline source; C10 adds the reusable Textual account
-manager. C11 connects terminal rendering, help, account-management callbacks, and
-source lifecycle through `UsageApp`. C12 composes those components behind the
-installed `usage` entry point and matching account/key prompts:
-
-| Requested metric | Intended meaning and source | Current live status |
-|---|---|---|
-| Claude 5h / weekly | Subscription used/remaining percentages and server reset from private OAuth usage | Library adapter implemented; no authenticated acceptance |
-| Claude Fable weekly | Model-scoped weekly subset; not extra capacity and not an Opus/Sonnet alias | Library parser implemented; availability is plan/response dependent, no authenticated acceptance |
-| Platform purchased / promotional | Separate totals across relevant credit grants, with per-grant expiry; authoritative overall total kept separately | Console library adapter implemented; private version-sensitive contract, no authenticated acceptance |
-| Codex weekly (7d), plus reported optional 5h | Main Codex quota selected by 604800-second duration, server reset; private WHAM read using file-backed Codex login | Implemented and independently reviewed clean; final integrated offline proof passed, authenticated acceptance unexercised |
-| Grok shared pool / Build / Chat | Aggregate included allowance and validated same-payload product consumption shares | Library adapter implemented; private version-sensitive contract, no authenticated acceptance |
-
-Grok product shares must not become independent `100 - share` allowances. Remaining
-and reset refer to the shared pool only when unified billing is established. Credit
-grants expire rather than reset weekly. Missing fields are unknown, not zero. API
-spend is not credit balance; API usage is not subscription allowance. Codex quota
-is not ordinary ChatGPT chat-model usage. No requested live metric is currently
-claimed as working or accepted.
-
-## Current exercised Codex offline acceptance
-
-The orchestrator's final integrated gate recorded `uv sync --locked --group dev`
-succeeded, **1,098 tests passed in 30.20 seconds**, Ruff lint passed and the
-**44-file** formatting check passed. Earlier clean language-server diagnostics for
-all **17 source files** apply to unchanged source. Installed `usage --help` passed.
-This is the current cutover result, not the historical 851-test gate below.
-
-- A synthetic private auth file passed through the real resolver, Codex provider
-  and transport with an injected HTTP transport; no live request was made.
-- Actual Scheduler proof passed initial/manual refresh, two scheduled intervals,
-  retry embargo, last-known/reset-stale state, replacement/removal and stop behavior.
-- Offline demo component smoke passed **4 healthy / 8 errors snapshots**. Four
-  installed-entry healthy/errors real-PTY runs rendered successfully and restored
-  the terminal on normal quit and Ctrl-C.
-- Actual installed-CLI real-PTY migration proof passed decline/cancel and non-TTY
-  unchanged paths, affirmative mixed-config migration, file-backed edit/reconnect,
-  enable/disable and isolated empty-live/account flows.
-- Isolated installed `usage accounts list` exited 0 with no accounts.
-- Four independent implementation reviews and both final split reviews were clean;
-  no fixes were required. The reviewed draft is `2d7ea6b`; planning is `e3190b9`.
-
-No real Codex auth files, user secrets, network or real keyring were used. These
-results verify the implemented offline cutover, not authenticated quota accuracy,
-supported-public-API availability or live compatibility. The implementation and
-offline review closeout are complete. Same-account authorized weekly/reset
-comparison remains unexercised and requires a locally authorized file-backed login.
-
-## Historical exercised offline acceptance — before Codex cutover
-
-The orchestrator's post-fix offline acceptance for correction `d653397` recorded:
-
-- `uv sync --locked --group dev` succeeded; **851 tests passed in 28.90 seconds**.
-- Ruff lint passed, the formatting check passed for **43 files**, and all **17
-  source files** had clean language-server diagnostics.
-- The installed `usage --help` succeeded. The installed executable rendered
-  healthy and error demo scenarios in four real-PTY runs (normal quit and Ctrl-C
-  per scenario), with terminal restoration confirmed in all four runs.
-- Separate installed-CLI real-PTY acceptance passed local account CRUD,
-  cancellation, non-TTY mutation refusal without writes, and the empty live
-  dashboard/account-manager flow, including Back, `q`, and Ctrl-C.
-- An additional installed-CLI real-PTY check displayed the extra Grok product
-  `Other10` with selectable provenance; refresh removed the extra while retaining
-  required rows, and the application exited cleanly.
-
-The earlier C14 run passed 849 tests in 27.81 seconds; that historical evidence
-predates `d653397` and is not the post-fix result above.
-
-These results establish usable offline rendering, terminal lifecycle, and local
-account workflows—not authenticated metric retrieval or real secret persistence.
-No authenticated provider requests or real OS-keyring persistence were exercised;
-no user secrets were supplied or imported. Claude and Grok private-provider
-compatibility still needs authenticated comparison with the user's eligible
-account. Codex's implemented official-source read/auth/window contract has current
-integrated offline proof above; authorized live comparison remains pending.
-
-### Final split review correction — verified offline
-
-The subsequent final split review completed four independent slices: three clean
-and one finding. The Grok adapter emitted an additional product metric that the
-dashboard's required-ID-only enumeration omitted. Supplied actual UsageApp/Pilot
-evidence with a synthetic extra snapshot emitted four Grok metrics while the
-overall visible row count stayed **10 → 10**; this is offline UI evidence, not an
-authenticated-provider observation.
-
-Correction `d653397` retains every required metric row first, then appends
-deduplicated snapshot extras in emission order. Additional Grok products are
-visible and selectable through the existing details/provenance surface, without
-inventing independent remaining allowances; refresh adds/removes extras while
-preserving selected metric identity and account filtering. The post-fix offline
-checks above passed, and both independent rereviews were clean.
-PLAN.md §11 supersedes the old ordinary-ChatGPT acceptance tasks with the completed,
-offline-verified and independently reviewed Codex cutover and a separate authorized
-live comparison. Ordinary-ChatGPT chat blockers are not active Codex blockers;
-providers' live prerequisites remain unexercised, so full live acceptance is not claimed.
-
-## Install and run
-
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and an interactive
-terminal for the dashboard and account prompts. Linux/POSIX is the supported
-credential-import and persistence target. Run from the repository root:
-
-### 中文快速开始（仅终端 TUI）
-
-先执行 `uv sync --locked`，再运行 `uv run usage --demo` 查看离线演示；
-这不是网页，也不会启动浏览器或 Web 服务。当前 GPT 需求已更正为 **Codex 配额**，
-不是普通 ChatGPT 聊天用量；原子切换、最终集成离线检查和独立审查均已完成，真实账号对照验收尚未执行。
-运行 `uv run usage` 打开实时模式，按 `a` 管理账号、按 `r` 请求刷新、按 `?`
-查看帮助、按 `q` 退出。无账号时先显示配置引导；连接步骤见下方说明。
-Claude/Grok 须先在官方工具登录；Console 只手动输入自己的 `sessionKey` 值并
-明确选择组织。不要把密钥、Cookie 或密码写进命令行。实时指标及真实系统密钥环
-尚未完成认证验收；离线演示和已通过的本地检查不代表服务端读取成功。
-
-### Repository commands
+Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and an interactive terminal.
+Linux/POSIX is the supported credential-import and persistence target.
 
 ```sh
 uv sync --locked
-uv run usage --help
-uv run usage --demo
-uv run usage --demo --scenario errors
-uv run usage
+uv run usage --demo   # Offline demo
+uv run usage          # Live dashboard
 ```
 
-`usage` is the installed console entry point; `uv run python -m usage_tui` is the
-module equivalent. The default command opens the **live** dashboard, loading local
-account metadata. With no accounts it shows setup guidance; press `a` to connect
-one. `--scenario` requires `--demo`; demo cannot be combined with account commands.
-It selects a deterministic scenario, not a live error fallback. Demo constructs
-no live stores, resolver, providers or HTTP clients and does not read account
-configuration or credentials. Its account screen is
-read-only. Synthetic Codex samples do not demonstrate authenticated Codex support.
+Demo uses fictional data without reading account configuration, credentials, or
+keyring, and makes no network requests. Use `--demo --scenario errors` to preview
+error states. In live mode, press `a` to connect accounts.
 
-For development dependencies use `uv sync --locked --group dev`. The final offline
-acceptance above identifies what was exercised; the other commands are usage
-instructions, not additional live-provider acceptance claims.
+| Key | Action |
+|---|---|
+| `a` | Manage accounts |
+| `r` | Request refresh; retry limits still apply |
+| Enter on a metric | View details and provenance |
+| `?` | Help |
+| Escape | Back / cancel |
+| `q` / Ctrl-C | Quit dashboard / exit from any screen |
 
-### Account and key commands
+## Metrics
+
+| Provider | Displayed metrics |
+|---|---|
+| Claude subscription | 5-hour, weekly, and model-scoped Fable weekly usage |
+| Claude Platform | Purchased, promotional, and authoritative total credit balances; grant expiry |
+| Codex | Weekly (7-day) quota, plus reported optional windows such as 5-hour usage |
+| Grok | Shared-pool usage and GrokBuild / GrokChat consumption shares |
+
+Codex quota is **not ordinary ChatGPT chat usage**. Fable is a weekly subset, not
+extra capacity. Grok product shares are not independent allowances; remaining and
+reset require confirmed shared-pool semantics. Credit expiry is not a quota reset.
+
+Missing values stay unknown, never zero. Failed reads retain last-known values
+with freshness/error indicators; passing a reset does not invent new allowance.
+Polling defaults to 60 seconds and is configurable from 30–3600 seconds.
+
+## Connect accounts
+
+Sign in through the first-party tools outside this app, then press `a` in the live
+dashboard:
+
+- **Claude:** run `claude`, then `/login`. Choose **External Claude Code file**.
+- **Claude Platform:** choose **Console session (not an API key)**. A `sessionKey`
+  is a **high-sensitivity account session**: enter only your own cookie value in
+  the masked prompt, never a password, full Cookie header, or HAR file. Discover
+  organizations and explicitly select one, even if only one is available.
+- **Codex:** set `cli_auth_credentials_store = "file"` in Codex's `config.toml`,
+  then run `codex login` with ChatGPT sign-in. Choose **External Codex auth file**.
+  Only file-backed login is supported—not manual tokens, API keys, or keyring-only
+  login. See the [Codex authentication guide](https://developers.openai.com/codex/auth).
+- **Grok:** run `grok login`. Choose **External Grok auth file** and explicitly
+  select the intended identity/scope.
+
+For file sources, use `default` or an absolute path to a private, user-owned `0600`
+file. The app never modifies or deletes first-party login files, runs login, or
+refreshes tokens. Renew expired credentials through the first-party tool.
+API keys do not enable subscription metrics or Console balances.
+
+### CLI account management
 
 ```sh
 uv run usage accounts list
-uv run usage accounts add --provider claude-subscription
-uv run usage accounts add --provider claude-platform
 uv run usage accounts add --provider codex-subscription
-uv run usage accounts add --provider grok-subscription
 uv run usage accounts edit ACCOUNT_ID
 uv run usage accounts remove ACCOUNT_ID
 uv run usage accounts key set ACCOUNT_ID
 uv run usage accounts key delete ACCOUNT_ID
-uv run usage accounts migrate-chatgpt-to-codex
 ```
 
-Use the opaque account ID from `accounts list`, not a secret, for `ACCOUNT_ID`.
-List is safe without a TTY and prints nonsecret metadata, not credential values.
-Every mutating command requires both stdin and stdout to be TTYs. Add/edit asks
-for a label, integer polling interval (30…3600 seconds), and enabled `yes`/`no`.
-Choose a numbered credential source or **No credential / local profile**; edit
-can retain the existing source or explicitly change its organization/scope.
-`key set` uses the same source selection, including external references; it is
-not limited to API keys. Provider-specific sources are described below. CLI file
-references must be `default` or an absolute path. Grok scope selection is explicit;
-Console requires consent to read-only organization discovery and a numbered
-choice even for one result. The final save confirms any changed reference/key;
-removal and key deletion have separate confirmations. External references are
-first-party credential files, not login commands; those files are never modified
-or deleted. Reconnect guidance directs renewal to
-the first-party tool; the TUI reconnect action requests a scheduler-controlled
-refresh, not a token refresh or rate-limit bypass.
+Use the ID from `accounts list`. Other provider choices are `claude-subscription`,
+`claude-platform`, and `grok-subscription`. Mutating commands require an interactive
+TTY; credentials are entered through masked prompts, never command arguments.
+Run `uv run usage --help` for command help.
 
-Never pass a token, cookie, API key or password in arguments, shell history,
-environment variables, or account labels. Manual secrets use masked `getpass`
-input in the CLI and masked inputs in the TUI. Noninteractive input is refused.
-In CLI line prompts, Escape **then Enter**, Ctrl-C, or EOF cancels with exit 0
-without committing pending changes; the TUI uses Escape directly. Local API-key
-storage does **not** enable subscription metrics or Console balances.
+Legacy ChatGPT profiles require `uv run usage accounts migrate-chatgpt-to-codex`.
+After explicit confirmation, replacements are disabled and credentials detached;
+old keyring secrets remain unmanaged. Configure a Codex file reference, then enable.
 
-CLI manual-secret storage requires the supported encrypted Linux Secret Service
-keyring, unlocked in the current desktop/session. Unsupported, unavailable or
-locked backends produce an error; do not install `keyrings.alt` or choose a
-plaintext backend as a workaround. If persistent storage is unavailable, launch
-`uv run usage`, press `a`, and explicitly choose **session only** for a new manual
-secret. That credential is shared with this dashboard's resolver but disappears
-when the process exits; a saved profile does not make it durable. Python cannot
-promise memory zeroization. See [SECURITY.md](SECURITY.md) for the threat boundary.
+## Credential safety
 
-Exit codes: **0** success or normal dashboard quit; **2** usage, configuration or
-secret-input error; **3** credential, secure-backend or provider-connection failure.
-Per-account polling errors remain visible in the dashboard rather than turning
-every failed observation into a process exit.
+- Never put secrets in arguments, environment variables, labels, chat, or issues.
+- Persistent manual-secret storage requires an unlocked, supported Linux Secret
+  Service keyring. Plaintext and alternative backends are rejected.
+- If secure storage is unavailable, choose **session only** in the TUI. Secrets
+  disappear when the process exits; there is no silent storage fallback.
+- Removing an account or stored key does not revoke its remote session.
 
-### Production-entry terminal harness
+Account metadata lives at `$XDG_CONFIG_HOME/usage-tui/accounts.json`, falling back
+to `~/.config/usage-tui/accounts.json`; credential values are stored separately.
+See [SECURITY.md](SECURITY.md) for boundaries and limitations.
 
-The maintained POSIX harness launches the installed `usage` executable beside
-the current Python interpreter, not a Python-only app host:
+## Development
 
 ```sh
-uv run python scripts/tui_smoke.py --scenario healthy
-uv run python scripts/tui_smoke.py --scenario errors
+uv sync --locked --group dev
+uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
+uv run python scripts/tui_smoke.py
 ```
 
-Omitting `--scenario` or using `--scenario all` selects both. Each scenario has
-separate normal-quit and Ctrl-C runs with isolated temporary HOME/XDG state.
-The harness waits for rendered metrics/details/help/read-only account screens,
-requests refresh, resizes 80×24 to 40×12, and checks terminal restoration with
-bounded waits and child kill/reap cleanup. Captures stay bounded in memory and
-are neither printed nor persisted. The orchestrator exercised all four installed-
-entry-point runs successfully, including terminal restoration, as summarized above.
-No live provider or real keyring was exercised.
-
-## Textual dashboard API (C11)
-
-`from usage_tui.app import UsageApp` exposes:
-
-```python
-UsageApp(
-    *, mode, accounts=(), scheduler_factory=None,
-    account_store=None, credential_store=None, scenario="healthy",
-)
-```
-
-`mode` is `"demo"` or `"live"`; scenarios are `"healthy"` and `"errors"`.
-Prefer `uv run usage --demo` for normal offline startup; the equivalent Python
-component API is `UsageApp(mode="demo", scenario="healthy").run()`.
-Demo constructs `DemoSource` directly and ignores injected live
-accounts/factories/stores. Its clock starts from the fixture time and advances
-one second per UI tick, not from the machine date. The DEMO banner and synthetic
-Codex explanation distinguish samples from authenticated support.
-
-Live startup is explicit. An empty `UsageApp(mode="live").run()` shows the
-no-account guidance without implicit configuration reads; it cannot edit accounts.
-Supplying live accounts or either live store requires `scheduler_factory` too;
-omitting it raises `ValueError`, including for an initially empty editable app.
-The synchronous callable `scheduler_factory(accounts, *, publish)` returns a
-source with async `start()`, `refresh(account_id=None)`, `update_accounts(accounts)`,
-and `stop()`. `publish` is the synchronous snapshot callback on the app event
-loop. A Python host can compose:
-
-```python
-from usage_tui.app import UsageApp
-from usage_tui.credentials import CredentialResolver
-from usage_tui.domain import ProviderId
-from usage_tui.providers.base import build_providers
-from usage_tui.scheduler import Scheduler
-from usage_tui.storage import AccountStore, CredentialStore
-from usage_tui.transport import Transport
-
-
-class LiveFactory:
-    def __init__(self, credentials):
-        self.resolver = CredentialResolver(credentials)
-        self.providers = build_providers(Transport(), self.resolver)
-        self.console_discovery = self.providers[ProviderId.CLAUDE_PLATFORM].discover_organizations
-
-    def __call__(self, accounts, *, publish):
-        return Scheduler(accounts, self.providers, self.resolver, publish=publish)
-
-
-store = AccountStore()
-credentials = CredentialStore()
-UsageApp(
-    mode="live",
-    accounts=store.load(),
-    scheduler_factory=LiveFactory(credentials),
-    account_store=store,
-    credential_store=credentials,
-).run()
-```
-
-This is composition guidance, not live acceptance. `AccountStore.load()` is an
-explicit host operation and can raise a safe config error; do not replace invalid
-config. Share one credential store so session-only references remain resolvable.
-The factory's optional `resolver` and `console_discovery` attributes supply the
-account screen; discovery is the bound async `discover_organizations` callable,
-not a provider object. Without `resolver`, the screen creates one from the
-injected credential store. Console connection requires injected discovery.
-
-The app starts its source on mount, forwards committed account changes to
-`update_accounts`, discards obsolete displayed observations, and routes reconnect
-to `refresh(account_id)`. Teardown stops the source, then invokes the live
-factory's optional `aclose()` (awaiting an awaitable result), even if stop fails.
-This hook closes factory-owned clients; borrowed resources remain their owner's
-responsibility. The example `Transport` closes its fresh HTTP client per request
-and needs no shared-client close hook. The production CLI supplies this composition.
-
-### Dashboard keys and truthful presentation
-
-| Key | Behavior |
-|---|---|
-| `q` | Dashboard quit shortcut; printable `q` remains available to focused text inputs |
-| Ctrl-C | Unconditional exit, including from help, details, or account screens |
-| `r` | Request selected-account or all-account refresh; scheduler deadlines and coalescing still apply |
-| `a` | Account manager; read-only fictional accounts in demo |
-| `?` | Help, including freshness, shared pools and provider-specific credential guidance |
-| Tab / Shift-Tab, arrows | Move focus, select accounts/metrics, and scroll |
-| Enter on a metric | Details: provenance/contract, version sensitivity, UTC timestamps, grants and shared pools |
-| Escape | Return from help/details or cancel/return within account management |
-
-Chinese labels retain provider/model names. Every requested metric has a
-scrollable row before the first observation and when disabled, unknown, blocked,
-or failing. Selection filters the view, not the provider contract. At 80×24 the
-list scrolls; smaller terminals show a resize/scroll hint. Errors and `STALE` /
-`LAST KNOWN` are words, not color-only signals. Numeric used/remaining accompany
-bars; only drawing clamps at 100%, not overage. Missing data is `—`, never zero.
-Balances include currency; grant expiry is not a period reset. Grok product
-shares do not acquire independent remaining quota.
-
-Success, attempt and retry timestamps are separate. Resets appear in local time
-with UTC in details. If local-time conversion would exceed datetime bounds (for
-example, a saturated retry deadline in a positive-offset timezone), display the
-UTC timestamp instead. One-second ticks update countdowns without provider requests:
-passed resets say `awaiting refresh`, never zero usage or invent a new window.
-Live refresh inherits scheduler backoff, origin spacing and retry embargoes.
-See freshness below for the stale threshold. Codex uses the normal credentialed
-scheduler path; no credential or a missing weekly window is not a zero quota.
-
-## Textual account management (C10)
-
-The account manager is a reusable terminal screen embedded in the live dashboard;
-press `a` after `uv run usage`, or use the `usage accounts …` commands above.
-A host Textual application can also embed it with:
-
-```python
-from usage_tui.accounts import AccountManagerScreen
-
-screen = AccountManagerScreen(
-    account_store,
-    credential_store,
-    resolver,
-    console_discovery=console_provider.discover_organizations,
-    on_changed=handle_accounts_changed,
-    on_reconnect=handle_reconnect,
-)
-app.push_screen(screen)
-```
-
-`on_changed(accounts)` receives the committed `tuple[Account, ...]`;
-`on_reconnect(account_id)` receives the local opaque account ID after local
-credential resolution succeeds. Either callback may return an awaitable. Codex
-reconnect requires its file-backed login; it does not run login or renew tokens.
-`console_discovery` is an async callable, not a provider object:
-`Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]]`.
-Pass the bound `console_provider.discover_organizations` method as above; the screen
-awaits the callable directly with the resolved Console credential.
-
-For local non-UI callers, `AccountService(account_store, credential_store)` exposes
-`save(account, *, original=None, secret=None, persist=False)` and `remove(account)`,
-both returning the resulting account tuple. Pass the previously loaded `original`
-when editing; updates check for conflicts inside `AccountStore.mutate`. A new manual
-secret gets a new opaque reference, and the old tool-owned secret is cleaned up
-after a successful config commit. `AccountFlowError.updated`, when present, carries
-the committed account tuple for a post-commit durability or cleanup warning;
-the screen forwards that tuple to `on_changed` even though it displays the warning.
-`ConfigCommittedError` distinguishes replacement already accepted by `AccountStore`
-from rejected writes: directory-sync failure leaves the new config visible but its
-crash durability uncertain. In this case the service preserves both the newly
-referenced credential and the previous credential (or the removed account's old
-credential), since crash recovery may restore the old config. It does not report
-rollback or attempt old-key cleanup. Rejected writes still roll back newly created
-credentials and do not notify `on_changed`. Cleanup errors after successful durability
-also distinguish already-saved config from failed credential cleanup. Neither method
-promises atomicity across both stores. Key deletion is a confirmed screen action,
-not a separate service method.
-
-Supply the same `CredentialStore` to the screen and resolver so session-only
-credentials remain resolvable within that process. The host owns scheduler
-integration and must deliver committed account changes to `Scheduler.update_accounts`
-to cancel obsolete in-flight generations. Embedding this screen alone does not start
-polling or render usage metrics. `readonly=True, accounts=demo_accounts` supplies a
-read-only account view without reading account files, credentials, or keyring;
-demo viewing must not mutate real connections.
-
-### Keyboard and account lifecycle
-
-Use arrow keys to choose an account, Tab/Shift-Tab to move through form controls,
-and Enter/Space to activate the focused control. On the account list, `a` adds,
-`e` edits, Space enables/disables, `d` removes, `k` deletes this tool's saved key,
-and `r` requests reconnect. Escape returns from the manager or cancels the current
-dialog. Secret entry is masked; no reveal/copy control or saved-secret prefill is
-provided. Every submit attempt clears the secret field, including validation/backend
-failures; cancellation and teardown clear it too. Replacement confirmation opens
-with the field already empty; canceling that confirmation leaves it empty and saves
-no partial edits. Replacement, key deletion, and account removal require confirmation.
-Do not paste
-secrets into a shell command or use screen sharing/session recording while entering
-them; masking does not protect the clipboard, terminal recorder, or process memory.
-
-Add/edit forms select a provider and credential kind, label, and the applicable
-credential reference or new secret; Space on the list changes enabled state.
-Editing does not reveal the old
-secret; leave replacement input empty to keep it. Choose explicitly between encrypted
-persistence and **session only** for new manual secrets. A locked or unsupported
-keyring produces guidance, not silent fallback. Session-only values belong to the
-current process and do not become durable credentials merely because account
-metadata exists; after exit/restart reconnect or supply a new secret. Python cannot
-guarantee memory zeroization. The persistence backend is the supported Linux Secret
-Service only; plaintext, alternative/chained, and null backends are rejected.
-
-- **Claude subscription:** run official `claude`, then `/login`, outside this app.
-  Add a `claude-subscription` account and choose **External Claude Code file**.
-  Enter `default` for `$CLAUDE_CONFIG_DIR/.credentials.json`, otherwise
-  `~/.claude/.credentials.json`, or select a private file (absolute path in CLI).
-  A supported manual bearer is also available. Imports remain references, not
-  copies of refresh tokens. Expiry or missing `user:profile` requires first-party
-  login again; inference-only setup tokens/API keys do not enable subscription reads.
-- **Claude Platform:** sign in to the first-party Console outside this app, add a
-  `claude-platform` account and choose **Console session (not an API key)**.
-  A high-sensitivity warning appears before masked entry. Supply only your own
-  `sessionKey` value, never a password, Cookie header, HAR, or browser-store import.
-  Use **Discover** in the TUI (or consent to the CLI read-only discovery prompt)
-  to list eligible API organizations, then explicitly select one before saving,
-  including when only one is available. Discovery is an explicit read, not automatic
-  polling or permission to silently switch organizations. Missing/inaccessible
-  selection requires reselection or billing-permission guidance. Replacing an existing
-  Console session requires newly discovered, explicitly selected organization scope;
-  the previous organization's selection is not an automatic fallback.
-- **Grok:** run official `grok login` outside this app, add a `grok-subscription`
-  account and choose **External Grok auth file**. Enter `default` for
-  `$GROK_HOME/auth.json`, otherwise `~/.grok/auth.json`, or choose a private file
-  (absolute path in CLI). Discover scopes and explicitly select the intended
-  identity; the saved nonsecret selector binds future reads. A supported manual
-  bearer is also available. The tool never runs login, refreshes credentials,
-  changes file permissions, or deletes the external login file.
-- **Codex:** use the official CLI outside this app. In Codex's `config.toml`, set
-  `cli_auth_credentials_store = "file"`, then run `codex login` and complete its
-  first-party ChatGPT sign-in. These are documented in the official
-  [authentication and credential-storage guide](https://developers.openai.com/codex/auth);
-  no force-file CLI flag is required or assumed. Treat the resulting auth file as
-  a password; do not paste it into chat. Add `codex-subscription` in this app and
-  choose **External Codex auth file**. `default` reads `$CODEX_HOME/auth.json` when
-  CODEX_HOME is nonempty, otherwise `~/.codex/auth.json`; an explicit private file
-  may select another login. Only `codex_auth_file` is supported: no manual bearer
-  or API key. Keyring-only, auto-without-file and ephemeral Codex login are
-  unavailable. The app never launches Codex, probes its keyring or refreshes or
-  rewrites the login file. Managed Codex policy may prevent changing storage;
-  without an eligible private file this integration cannot connect.
-
-For other providers, API keys are local storage only, not substitutes for provider
-OAuth/session credentials. Codex rejects API-key storage. Reconnect does not perform
-browser login or remote token renewal.
-Removing an account deletes its local metadata and this tool's stored secret only;
-deleting a key leaves the account profile available for reconnection. Neither
-action revokes a remote session or removes Claude/Grok/Codex credential files. Account
-metadata and keyring are separate stores, so failures are reported rather than
-promising a cross-store atomic transaction. The final offline acceptance above
-includes dashboard and local account workflows, but not real credentials,
-real-keyring persistence, or authenticated providers.
-
-### Explicit legacy profile migration
-
-Legacy `chatgpt_subscription` profiles require the sole repair command
-`usage accounts migrate-chatgpt-to-codex`; normal startup/list do not rewrite them.
-In a real TTY it lists sanitized local profiles and requires explicit affirmative
-confirmation for the complete set; there is no `--yes` or non-TTY consent. Migration
-preserves local IDs/labels/poll intervals and other providers, converts to Codex
-**disabled**, and detaches all credentials, selectors and organizations. Old keyring
-secrets are **retained but detached/unmanaged**, never read, reused, transmitted or
-deleted. Deliberate owner/backend deletion is separate. Decline/cancel leaves config
-and secrets untouched. Restart, edit/reconnect with a Codex file reference, then
-enable the replacement. Ordinary edit cannot change a provider or perform migration.
-
-### Codex quota contract — implemented and verified offline
-
-`CodexProvider` uses one GET to `https://chatgpt.com/backend-api/wham/usage` with
-Bearer access token and the selected `ChatGPT-Account-Id` from one stable file read.
-The only required row is `codex.subscription.weekly` (**Codex weekly (7d)**), selected
-by `limit_window_seconds == 604800`, never primary/secondary position or plan name.
-Reported 18000-second windows appear as optional **Codex 5h**; other durations and
-feature pools stay distinct and never fill the main weekly row or get summed.
-Missing usage remains unknown; >100% stays visible and remaining clamps at zero.
-Absolute `reset_at` Unix seconds is canonical; relative reset is not converted into
-a fabricated timestamp. Invalid reset does not erase valid usage. This seven-day
-window does not promise a calendar-week boundary. Source contract is private,
-version-sensitive `codex.wham.usage.v1`; DEMO data is synthetic, not a live fallback.
-
-Static primary sources: official Codex [usage routing and normalization](https://github.com/openai/codex/blob/f802f0a3/codex-rs/backend-client/src/client.rs#L284-L301),
-[auth-file schema](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs#L47-L75)
-and [window fields](https://github.com/openai/codex/blob/main/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs#L14-L23).
-These establish a version-sensitive private contract, not a successful authorized
-request; PLAN.md §11 records pinned references and the separate live prerequisite.
-
-## Claude subscription provider library (C04)
-
-`from usage_tui.providers.claude import ClaudeProvider` exposes
-`ClaudeProvider(transport)` with `requires_credential = True` and the three required
-`metric_ids`: `claude.subscription.five_hour`, `claude.subscription.weekly`, and
-`claude.subscription.fable_weekly`. Construction performs no request. The async
-`fetch(account, credential, now)` method returns a domain `Snapshot`; pass a Claude
-subscription `Account`, its provider-bound `ResolvedCredential`, and an aware
-observation time. Credential resolution is a separate library operation, not an
-implicit login or token refresh inside the adapter.
-
-Each eligible fetch makes one `Transport.get_json` call for
-`https://api.anthropic.com/api/oauth/usage`, using the transport's Bearer credential
-and `anthropic-beta: oauth-2025-04-20` header. This is a private, version-sensitive
-OAuth contract, not a supported public usage API or an inference API-key endpoint.
-It may change without notice. Eligible first-party account credentials and a real
-response comparison are still required for live acceptance; synthetic fixtures do
-not establish either.
-
-All results retain all three metric rows. `five_hour` and `seven_day` use
-`utilization`, falling back to `used_percentage`. These are **used** percentages;
-remaining is exactly `max(0, 100 - used)`, including overage. No absolute token or
-message quota is inferred. A missing/null/invalid window stays unknown, not zero;
-valid sibling windows survive in a partial snapshot. No usable percentage produces
-a schema-error snapshot rather than successful empty bars. Invalid reset data
-leaves a valid percentage intact but its reset unknown and the result partial.
-Aware RFC3339 reset strings normalize to UTC; positive numeric timestamps are Unix
-seconds, with values at least `10^11` interpreted as milliseconds only by this
-Claude adapter. This is not a global timestamp heuristic.
-
-Fable first uses valid `limits[]` entries with `kind == "weekly_scoped"` and
-`scope.model.display_name.strip().casefold() == "fable"`, reading `percent` and
-`resets_at` even when `is_active` is false. Conflicting valid duplicate scoped
-entries make that row unknown rather than selecting one arbitrarily. Equal-percent
-duplicates with an invalid reset must instead retain quota, leave reset unknown,
-and produce a partial snapshot; invalid reset metadata alone is not a quota conflict.
-The independently verified C04 review fix and closure evidence are recorded in
-PLAN.md; this documentation does not add a verification claim.
-If no valid scoped entry is available, legacy aliases are considered in order: `fable_weekly`,
-`fable_seven_day`, `seven_day_fable`. Opus/Sonnet fields and extra-usage balances are
-not substitutes. Fable is a model-scoped subset of weekly capacity, not an additive
-allowance; absence establishes neither eligibility nor a fixed half-week quota.
-
-The adapter itself does not poll, retry, preserve last-known values, render bars, or
-connect accounts. Polling and last-known state belong to the C08 scheduler;
-the C11 dashboard renders its snapshots and embeds the C10 account screen.
-The final offline acceptance above includes the installed CLI and terminal
-dashboard; no authenticated live request was exercised. Detailed evidence is in
-PLAN.md.
-
-## Claude Platform Console library (C05)
-
-`from usage_tui.providers.console import ConsoleProvider` exposes
-`ConsoleProvider(transport)`, with `requires_credential = True` and the required
-`metric_ids`: `claude.platform.purchased_balance`,
-`claude.platform.promotional_balance`, and `claude.platform.total_balance`.
-Its async `fetch(account, credential, now)` accepts a Claude Platform `Account`,
-provider-bound `ResolvedCredential`, and aware observation time. Separate async
-`discover_organizations(credential)` returns a tuple of frozen
-`OrganizationChoice(id, label)` candidates. Construction does not make a request.
-Each eligible balance fetch reads only the selected
-organization's `/api/organizations/{organization_id}/prepaid/credits` route through
-the guarded transport and retains all three required metric rows. Discovery uses
-`GET /api/organizations` separately, not on every balance fetch. Both routes use
-the fixed `https://platform.claude.com` origin and private, version-sensitive
-contracts; synthetic fixtures do not establish authenticated compatibility.
-
-Only a provider-bound `console_session` credential enables these reads. A
-`sessionKey` is a **high-sensitivity account session**, not a limited API key.
-Sign in to the first-party Console outside this application; supply only your own
-session's cookie value through `CredentialStore`, never a password, full Cookie
-header, HAR, or browser-store import. Persistent storage uses the supported secure
-backend; explicit session-only storage is nonpersistent and still subject to
-process-memory risk. The C10 account screen displays the sensitivity warning before
-accepting a session; the adapter itself does not provide an interactive prompt.
-The cookie is sent only to platform.claude.com, never api.anthropic.com or claude.ai.
-
-Discovery candidates require the exact `api` capability and a validated `uuid`
-matching `[A-Za-z0-9-]{1,64}`; names are sanitized for display. The caller must
-obtain explicit organization selection, even if only one candidate is offered,
-before saving the account. An absent or no-longer-accessible selection requires
-reselection or permission guidance, never automatic switching. Discovery does not
-persist an account or silently choose an organization. HTTP 401 and discovery
-403 require reconnection; credits 403 means selected-organization billing permission
-is denied. The C10 account screen supplies explicit selection and reconnect guidance.
-
-`tranches` are purchased grants; `promo_tranches` are promotional grants. Category
-balances sum **all** grants not known to be expired, not just the soonest-expiring
-grant. Explicit empty arrays mean zero; missing/null arrays mean unknown. Invalid
-grant numeric fields make only their category unavailable, preserving an
-independently valid sibling category and top-level `amount`. Integer minor units
-remain exact, including explicitly reported negative balances; zero-valued grants
-are retained. Currency defaults to the evidenced `USD` only when omitted; exponent
-defaults to `2` when omitted, with supplied values validated in `0…4`.
-
-The authoritative top-level total is independent of category sums: it is not
-reconstructed from them or used to invent a missing category. Disagreement is
-reported rather than forcing equality. Unknown or malformed grant expiry stays
-unknown and is included with an uncertainty note; known-expired grants are excluded
-from active category totals. Per-grant amounts, program/name, and expiry remain
-available as normalized `Grant` details, alongside nearest known active expiry.
-Credits **expire; they do not reset weekly**. `subscription_api_credit` identifies
-subscription-origin API credits but remains promotional when supplied in
-`promo_tranches`, not a subscription usage window. Neither `/current_spend`, Admin
-spend reports, API keys, nor inferred renewal dates fill balance gaps.
-
-This library does not connect accounts, poll, retry, render grant details, or revoke
-remote sessions. No CLI, live request, or authenticated balance acceptance is
-claimed; orchestrator verification is recorded separately in PLAN.md.
-
-## Grok billing provider library (C06)
-
-`from usage_tui.providers.grok import GrokProvider` exposes
-`GrokProvider(transport)` with `requires_credential = True` and the three required
-`metric_ids`: `grok.subscription.shared_pool`, `grok.product.build`, and
-`grok.product.chat`. Construction performs no request. Async
-`fetch(account, credential, now)` accepts a Grok subscription `Account`, its
-provider-bound `ResolvedCredential`, and an aware observation time, returning a
-normalized `Snapshot` with all required rows even when unavailable.
-
-Each eligible fetch reads exactly
-`GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` through guarded
-Transport. This is the official CLI's private proxy billing request, not a public
-xAI API-usage endpoint or a compatibility guarantee. Authentication is Bearer plus
-`x-xai-token-auth: xai-grok-cli`; optional `x-userid` comes only from the same
-resolved credential. No invented upstream version/client-mode headers are sent.
-A live rejection requiring other headers is a compatibility blocker, not grounds
-for guessing a first-party client identity.
-
-Run official `grok login` outside this application. The separate resolver reads
-`$GROK_HOME/auth.json` or `~/.grok/auth.json` (or a selected local file), with
-explicit nonsecret scope selection when identities are ambiguous. Use a
-provider-bound `grok_auth_file` or stored `manual_bearer`; manual identity remains
-unknown unless supplied. API/management keys beginning `xai-` do not enable
-subscription reads. Imports are read-only: no first-party file modification,
-permission changes, refresh-token copying, or token refresh. Team-principal
-incompatibility requires guidance, never fallback to another personal account.
-
-`config.creditUsagePercent` supplies reported aggregate used percent. Missing or
-invalid aggregate is unknown, not zero; on-demand spend, a prepaid wallet, or an
-estimated cap cannot replace it. Only `config.isUnifiedBillingUser == true`
-establishes the shared included-pool relationship. Otherwise reported consumption
-remains visible with the pool relationship unknown, without asserting a shared
-remaining allowance or attaching product resets.
-
-`config.productUsage` must be a complete valid array: unique products with finite,
-nonnegative `usagePercent`, reconciling to the aggregate from the **same payload**
-within one percentage point. Unknown products remain visible under sanitized IDs
-so other consumers are not lost. Malformed, duplicate, or inconsistent breakdowns
-leave product rows unknown without erasing a valid aggregate. An explicit
-`GrokBuild`/`GrokChat` zero is zero; an absent entry is unknown. Product percentages
-are consumed shares, never independent `100 - share` allowances. When unified
-billing is proven, Build/Chat reference the common pool for “剩余/重置：共享池”;
-otherwise product remaining/reset are unavailable. No cross-request or
-cross-account enrichment is used.
-
-Reconciliation requires exact decimal values from the HTTP JSON decoder: numeric
-tokens must be decoded directly as `Decimal`, never via a binary-float roundtrip.
-Converting a rounded float back to a decimal cannot recover the wire value. C06
-review reproduced aggregate `42.5` with raw numeric Build share
-`43.500000000000000000000000000001` and Chat `0` incorrectly accepted as READY,
-although the discrepancy exceeds one percentage point. The decoding correction
-and raw-numeric boundary regressions are included in the final integrated offline
-gate above; the earlier green component smoke alone did not verify this case.
-
-In the normalized API, product consumption is carried in `Metric.detail`, with
-`quota=None`: `QuotaValue` would imply an independent remaining allowance.
-Validated additional products use stable `grok.product.other.<SHA-256>` metric
-IDs (digest of the original product's UTF-8 bytes) and sanitized labels. Proven
-unified product rows link `shared_pool_id` and
-`reset_at` to the common pool. Without proven semantics, aggregate consumption is
-also detail-only, with no quota, reset, or shared-pool reference.
-
-The server's `currentPeriod.type` determines weekly/monthly labeling; unknown
-types remain a generic period, regardless of marketing tier. Aware RFC3339
-`currentPeriod.end` supplies reset; `billingPeriodEnd` is considered only when that
-end is absent, not as a rescue for a malformed end. Reversed period bounds are
-invalid. Bad reset metadata must not erase valid usage; reset stays unknown.
-There is no invented renewal or reset to zero when time passes.
-
-The adapter does not invoke Grok/ACP subprocesses, infer included usage from
-`onDemandUsed / onDemandCap`, look up reset coupons, poll, retry, or connect
-accounts. Typed ACP responses may omit product breakdown and are not a fallback.
-No CLI/TUI behavior, live request, or authenticated Grok acceptance is claimed;
-exercised verification remains separately recorded in PLAN.md.
-
-## Provider registry — implemented Codex clean cutover
-
-`build_providers(transport, resolver)` explicitly constructs `claude_subscription`,
-`claude_platform`, `codex_subscription` and `grok_subscription`. Imports/construction
-perform no credential reads, environment probing or requests. All live providers
-require credentials; Codex uses only `codex_auth_file`, the required main weekly row
-and the fixed WHAM contract described above. The ordinary-ChatGPT capability/module,
-enum/metric identity and CLI choice are removed, not retained as runtime aliases.
-Legacy provider spelling is recognized only by the explicit storage migration.
-Historical C07's blocked-capability proof remains in PLAN.md; it is not current
-Codex implementation or live evidence.
-
-## Deterministic offline-source library (C09)
-
-`from usage_tui.demo import DemoClock, DemoSource` exposes an offline alternative
-to the scheduler's published snapshot stream. Construct
-`DemoSource(*, scenario="healthy", publish, clock=None)` with a synchronous
-`publish(snapshot)` callback; `scenario` accepts `healthy` or `errors`. `.accounts`
-contains the fictional domain `Account` values, and `.clock` is the deterministic
-`DemoClock`. The source loads only its packaged `usage_tui/fixtures/demo.json`
-resource, not account configuration, keyring entries, or first-party login files.
-It does not construct a credential resolver, live provider registry, HTTP client,
-or live transport, and never sends a request. It is an explicitly selected source,
-**not a fallback when live retrieval fails**.
-
-The async lifecycle is `start()`, `refresh(account_id=None)`,
-`update_accounts(accounts)`, and `stop()`. Start and account updates publish the
-enabled fixture accounts immediately; refresh republishes all or one selected
-sample on the caller's event loop, with no background polling task. Account updates
-may select, edit, or disable only the current scenario's fictional profiles; new
-IDs, changed providers/organizations, or credential references/selectors are rejected.
-Repeated start is idempotent; stop permanently prevents further publication.
-`tick(seconds=1)` advances demo time without fetching or publishing. `DemoClock`
-supplies `now()`, `monotonic()`, `advance(seconds=1)`, and async `sleep(seconds)`;
-sleepers wake when the clock is advanced, not as machine time passes. The default
-observation time is `2026-10-28T12:00:00Z`; an injected `DemoClock(now=...)` rebases
-fixture reset, retry, grant-expiry, and last-known offsets to that initial time.
-Use `.clock.now()` with `scheduler.freshness` for deterministic age/reset displays;
-advancing time does not zero quota or fabricate a new allowance.
-
-| Scenario | Synthetic display inputs |
-|---|---|
-| `healthy` | Four fictional provider accounts, all required rows, credit grants, shared-pool consumption, and synthetic Codex weekly plus optional reported windows |
-| `errors` | Fictional accounts covering auth required, permission denied, retry, stale network failure, schema/partial/unknown fields and synthetic Codex data |
-
-**Every account, value, timestamp, and scenario is fictional.** All metric
-provenance is `offline_demo`; ready Codex samples are fictional, **not evidence of
-authenticated support**. Current integrated offline proof is recorded above;
-authorized live comparison remains pending.
-Error scenarios are not actual service failures. Domain test/source assertions
-and this library documentation do not establish exercised verification; the
-orchestrator records component smoke and checks separately in PLAN.md.
-
-The dashboard renders this source through `uv run usage --demo` or
-`uv run usage --demo --scenario errors`; the Python API is described above.
-
-## Polling and freshness library (C08)
-
-`usage_tui.scheduler.Scheduler(accounts, providers, resolver, *, clock, rng,
-publish)` coordinates the provider libraries; it is not a dashboard or background
-daemon. Its async lifecycle is `start()`, `refresh(account_id=None)`,
-`update_accounts(accounts)`, and `stop()`. `publish(snapshot)` is a synchronous
-callback on the application event loop. The injected clock supplies UTC `now()`,
-`monotonic()`, and async `sleep(seconds)`; `SystemClock` is the real-clock
-implementation, and the RNG supplies `uniform(a, b)`.
-
-- Enabled accounts fetch immediately on start. Normal polling uses each account's
-  validated integer interval (default 60 seconds, configurable 30–3600), with ±10%
-  jitter and no interval below 30 seconds. Deadlines use monotonic time, not
-  wall-clock subtraction between polls. Eligible accounts are selected by oldest
-  due deadline so an overdue initial poll is not starved by accounts polling again.
-- Only one fetch per account and at most two accounts fetch concurrently. The
-  five-second same-origin spacing gate applies after credential resolution,
-  immediately before the provider request starts, not when an attempt is queued.
-  A fetch retrieves the provider's complete snapshot, not one request per metric.
-  Console organization discovery is still an explicit connection operation.
-- `refresh()` is a library-level explicit reconnect attempt; the C11 dashboard's
-  `r` key delegates refresh to its source. Repeated requests coalesce, do not
-  overlap in-flight work, and cannot bypass origin spacing or retry deadlines.
-  Authentication, permission, and unconfigured failures suspend automatic polling
-  until explicit refresh or account update; external login files are not monitored
-  during suspension.
-- Rate-limit, network, provider, and schema failures use exponential retry delays
-  starting at 60, 120, 240 seconds, capped at 15 minutes plus bounded jitter. A valid
-  server `Retry-After` has at least a 60-second delay and is never shortened to that
-  cap. Retry presentation timestamps saturate at the largest representable UTC
-  datetime rather than overflowing; this must not shorten the monotonic embargo.
-  Compatible successful fetches reset failure backoff.
-- Codex uses credential resolution and normal periodic/manual refresh, retry,
-  stale-state and cancellation semantics; no credential-free blocked exception.
-- Account updates invalidate prior in-flight generations, including updates using
-  the same credential reference. Removal, disabling, replacement, and shutdown
-  cancel obsolete work; a late result from an obsolete generation is not published.
-  Account updates cannot erase an existing same-provider retry embargo. Each live
-  attempt captures its credential once; replacing a secret during an attempt must
-  be accompanied by `update_accounts`, even if its opaque reference is unchanged.
-  Otherwise external file changes are discovered on the next attempt. `stop()`
-  cancels scheduler tasks; injected providers/transports are borrowed and their
-  owner remains responsible for their resources.
-
-Fetch errors retain last-good metrics/grants and their original successful
-`fetched_at`, while publishing the new fetch state, `attempted_at`, retry time, and
-safe diagnostic. Failed attempts therefore do not make observations fresh. A new
-compatible response (including `partial`) replaces the current fields: a missing
-Fable/product value is unknown, not an old value silently carried into the new
-observation.
-
-`freshness(snapshot, now, poll_interval_seconds=60, *, metric=None)` returns
-`Freshness(age_seconds, attempted_age_seconds, stale, reset_passed, last_known)`.
-Attempt age is separate from successful-observation age. Successful observation
-age is stale after `max(2 * poll_interval_seconds, 120)` seconds, or when a known
-reset crosses after the observation without a new observation. A reset already
-passed at observation time does not alone imply a missed later observation.
-Without any successful observation, age is unknown and stale is true. Passing
-`metric` scopes the reset check to that row; stale/last-known information does not
-change its raw metric state. Reaching reset never zeroes usage or fabricates a new
-period: presentation must say it is awaiting refresh. Computing freshness does not
-issue requests.
-
-C08 review identified insertion-order starvation, origin spacing consumed before
-slow credential resolution completed, and retry timestamp overflow near
-`datetime.max`. The contracts above include the resulting fairness, actual-request
-spacing, and saturated-retry corrections. Their separate fix verification,
-independent rereviews, and chunk closure are recorded in PLAN.md; earlier green
-checks alone did not verify later corrections.
-
-The C11 dashboard uses these freshness values for countdown and last-known
-presentation. This documentation adds no live authenticated polling or new
-verification outcome; exact exercised evidence belongs separately in PLAN.md.
-
-## Local storage library (C02)
-
-`AccountStore(path=None)` uses
-`$XDG_CONFIG_HOME/usage-tui/accounts.json`, falling back to
-`~/.config/usage-tui/accounts.json`. An explicit path supports isolated callers.
-Schema version `1` contains account metadata and opaque credential references,
-never credential values. `load()` returns accounts; `save(accounts)` replaces a
-validated complete set. For read-modify-write changes use `mutate(change)`, which
-locks and rereads before applying the callback, rather than a stale `load`/`save`
-pair. A callback exception leaves the stored configuration unchanged.
-
-Manual-secret references must use the store's opaque reference format; inline
-manual credentials and persisted references bound to another account are rejected.
-External first-party file references are preserved without opening those files;
-the credential resolver performs read-time permission and schema validation.
-
-On supported POSIX/Linux systems the store uses a private `0700` directory,
-`0600` config/lock files, a separate advisory lock, and atomic same-directory
-replacement. Config reads are limited to 1 MiB. Unsafe file ownership/permissions,
-symlinks, hardlinks, malformed data, and unsupported schema versions raise a safe
-`ConfigError`; an existing invalid configuration is not overwritten. These are
-cooperating-writer locks, not protection against hostile code running as your user.
-
-A failure after atomic replacement (such as a directory-sync failure) can report
-an error after the new config is already visible; atomic visibility is not a
-guarantee that every failed save left the previous version in place.
-
-`CredentialStore().put(account_id, secret, persist=False)` explicitly selects
-instance-local memory and returns an opaque `session:` reference. It does not
-access the OS keyring and cannot survive the store instance/process. With
-`persist=True`, the store lazily uses only the supported Linux Secret Service
-backend, returning a nonsecret `keyring:` reference. Null, fail, plaintext,
-chained, unrecognized, and subclassed backends are rejected; unavailable or locked
-keyring operations raise `CredentialError`, never silently fall back to memory
-or plaintext. `get(ref)` retrieves and `delete(ref)` removes this tool's stored
-credential; neither operates on external Claude/Grok login files or revokes a
-remote session. The C10 account manager coordinates account metadata and local-secret
-removal with confirmation; the low-level store operations remain separate calls.
-
-No real-keyring acceptance or C02 check outcome is claimed here. Python cannot
-guarantee memory zeroization, and a reference is not itself a secret-management
-permission boundary. C10 adds masked inputs and account-removal confirmation; C08
-supplies cancellation of obsolete in-flight provider work when account updates
-are delivered to the scheduler.
-
-## Credential resolution and transport libraries (C03)
-
-`CredentialResolver(credential_store=None, *, clock=None).resolve(account)`
-captures a credential once for a fetch attempt and returns a frozen
-`ResolvedCredential` bound to the account's explicit
-provider and credential kind. The secret is excluded from its representation;
-identity, expiry, selected organization, and a nonsecret generation fingerprint
-are separate metadata. A fingerprint is not a token suffix for display or logging.
-Manual credentials are retrieved through `CredentialStore` opaque references,
-not treated as inline account configuration. Other providers' local API-key storage
-does not enable subscription metrics or Console balances; Codex rejects API-key
-storage and accepts only its external file reference.
-
-Linux first-party imports are literal local paths (absolute or relative), not
-commands or URLs. The explicit `default` reference selects these default files
-only when resolving an account, not when constructing the resolver:
-
-- Claude Code: `$CLAUDE_CONFIG_DIR/.credentials.json`, otherwise
-  `~/.claude/.credentials.json`, or an explicit local file reference. Resolution
-  reads `claudeAiOauth.accessToken`; optional expiry is Unix milliseconds. If
-  scopes are present they must permit `user:profile`. Inference-only setup tokens
-  and API keys are not substitutes for an eligible profile-scoped credential.
-- Grok: `$GROK_HOME/auth.json`, otherwise `~/.grok/auth.json`, or an explicit
-  local file reference. Resolution uses the selected `https://auth.x.ai::<client-id>`
-  entry; the legacy `https://accounts.x.ai/sign-in` entry is a fallback only when
-  unambiguous. Multiple matching identities require a saved nonsecret scope
-  selector; no account is silently chosen. An optional `user_id` comes from that
-  same selected entry. Unknown expiry is not evidence of freshness.
-- Codex: nonempty `$CODEX_HOME/auth.json`, otherwise `~/.codex/auth.json`, or an
-  explicit private file. Read only access bearer and selected account from one
-  stable read; explicit account ID wins, ID-token fallback only when absent.
-  Access JWT `exp` is a seconds-based staleness hint; absent means unknown,
-  malformed/expired requires reauthentication. Decoding is not signature checking.
-  Do not use refresh tokens, `last_refresh` as expiry, scopes from another schema,
-  manual/API-key auth or keyring-only/ephemeral login.
-
-Imported files must be regular, effective-user-owned files with exact `0600` mode
-on supported Linux, with bounded reads of at most 1 MiB. Unsafe permissions,
-symlinks, malformed schema,
-expired credentials, and ambiguous profiles produce safe errors, not fallback
-credentials. Resolution does not chmod, write, refresh, or delete first-party
-files, run login commands, or copy refresh tokens into app storage. Sign in or
-renew credentials with the first-party tool outside this application. Fixtures
-are synthetic; they do not establish authenticated compatibility.
-
-`Transport(*, http_transport=None, clock=None)` accepts an injected in-memory HTTP
-transport and clock for isolated callers; URL guards remain in force with either.
-It needs no persistent client lifecycle: each read creates and closes its client.
-`Transport.get_json(provider, path, credential=resolved)` is an async read-only JSON
-boundary. Before constructing authentication headers or opening a socket it checks
-the resolved provider binding, credential kind, and exact allowlisted path:
-
-| Provider | Fixed HTTPS origin and permitted path | Credential and authentication |
-|---|---|---|
-| Claude subscription | `https://api.anthropic.com/api/oauth/usage` | `claude_code_file` or `manual_bearer`; Bearer plus `anthropic-beta: oauth-2025-04-20` |
-| Claude Platform | `https://platform.claude.com/api/organizations` and `/api/organizations/{id}/prepaid/credits`, with ID `[A-Za-z0-9-]{1,64}` | `console_session` only; `Cookie: sessionKey=<value>` |
-| Grok subscription | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` | `grok_auth_file` or `manual_bearer`; Bearer, `x-xai-token-auth: xai-grok-cli`, and `x-userid` only from the same resolved credential when present |
-| Codex | `https://chatgpt.com/backend-api/wham/usage` | `codex_auth_file` only; Bearer and `ChatGPT-Account-Id`, never Grok headers or cookies |
-
-All other paths, origins, credential-kind/provider combinations, and API keys are
-rejected for these reads. There is no user-configurable base URL. Console accepts
-only a cookie value, not a full Cookie header or HAR; invalid cookie delimiters
-and controls are rejected. Treat a `sessionKey` as a high-sensitivity session, not
-a limited API key. The C10 connection screen warns before accepting it and requires
-explicit organization selection; transport does not discover or select accounts.
-
-Production transport verifies TLS, uses GET only, disables redirects and implicit
-proxy/netrc environment use, and does not persist server cookies between requests.
-Requests include JSON acceptance and the installed-package User-Agent, not an
-invented upstream client identity. Connect timeout is 5 seconds, with a 10-second
-overall request deadline and a streamed 1 MiB response limit. JSON shape validation
-and metric interpretation belong to provider adapters. Safe `TransportError` values
-carry only fetch state, fixed code, optional HTTP status and retry time, never a
-response body, secret, credential path, or arbitrary exception text. A valid 429
-`Retry-After` is preserved with a minimum 60-second deadline; the C08 scheduler
-implements retry/backoff outside this transport boundary.
-
-Account setup and key-management commands above use interactive masked prompts;
-the Textual account screen additionally supports explicit session-only storage.
-Do not paste credentials into chat, issues, documentation, or fixtures. No
-browser extraction, token refresh protocol, live-provider acceptance, or real
-OS-keyring acceptance is claimed. Private HTTP routes and product fields remain
-version-sensitive, not official public API guarantees. Researched sources and
-exact contracts are in PLAN.md §§4 and 11; Codex's fixed private read is separately
-documented there, without a public-API or authenticated-compatibility guarantee.
-
-See [SECURITY.md](SECURITY.md) for implemented controls and current limitations,
-[CHANGELOG.md](CHANGELOG.md) for delivered changes, and PLAN.md for the only progress
-tracker and the separate code/live acceptance matrix.
+The terminal smoke harness exercises both demo scenarios, normal quit, Ctrl-C,
+resize, and terminal restoration with isolated HOME/XDG state—not live providers.
+
+[PLAN.md](PLAN.md) records contracts and exercised acceptance;
+[CHANGELOG.md](CHANGELOG.md) records delivered changes.
