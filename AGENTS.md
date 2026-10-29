@@ -350,3 +350,15 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
 - Cancelling an `asyncio.to_thread` await does not stop its thread: a subprocess-running
   worker needs a cooperative stop checked before each unit of work plus killing the
   tracked child's process group, and locks it guards are released only after it exits.
+- A runtime lock does not lock an isolated Python build backend. With uv 0.13.5,
+  pin every build requirement (including Hatchling's `editables` hook dependency),
+  record approved wheel hashes and require build hashes. Prove fresh editable and
+  wheel installs plus wrong/missing-hash rejection; cached wheels and disabled
+  build isolation do not establish enforcement. A hashless object constraint is
+  invalid uv schema: use its string form when testing missing-hash rejection.
+- Disable npm dependency hooks only after checking native-package entrypoints.
+  Claude Code 2.1.308's wrapper bin is a stub until postinstall places the native
+  binary; a script-disabled container install must link the locked Linux binary
+  directly and reject missing platform packages. esbuild/workerd can resolve their
+  native optional packages without their postinstall optimization. Keep those
+  optional packages and never treat a trust-on-first-use checksum as vendor signing.

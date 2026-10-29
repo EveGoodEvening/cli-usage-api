@@ -1,9 +1,12 @@
-# Build context is only what the Dockerfile copies: pyproject.toml, uv.lock,
-# src/ and docker/. Exclude everything else, including local state and secrets.
+# Only source, Python locks, the entrypoint and the container CLI integrity lock
+# enter the build context; local state and secrets stay excluded.
 **
 !pyproject.toml
 !uv.lock
 !src/
 !docker/entrypoint.sh
+!docker/cli/package.json
+!docker/cli/package-lock.json
+!docker/cli/.npmrc
 **/__pycache__
 **/*.py[cod]

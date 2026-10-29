@@ -4,6 +4,12 @@
 
 技术栈：Vite 7 + React 18 + TypeScript，无 UI 框架，纯 CSS（浅色/深色）。依赖版本全部精确锁定，提交了 `package-lock.json`。
 
+需要 Node.js **22.12+**；Docker 构建固定为 **22.23.4**，静态服务器固定为
+**Caddy 2.11.7**，两个镜像都锁定多架构 OCI index digest。
+`.npmrc` 禁止依赖的安装生命周期脚本，并保留平台可选包：esbuild / workerd 直接使用
+锁定的本机二进制包，不运行 postinstall 下载器。不要省略 optional dependencies，
+也不要跨操作系统或 CPU 架构复制 `node_modules`。
+
 ## 鉴权
 
 - 登录页填写 **API 地址** 和 **API 令牌**（`usk_…`，在服务器上运行 `usage api token create` 获得，只显示一次）。
@@ -79,7 +85,7 @@ usage api serve --host 0.0.0.0 --port "$PORT" --trust-proxy \
 
 1. Workers & Pages → Create → Pages → 连接仓库。
 2. **Root directory** 填 `web`，Build command 填 `npm run build`，Build output directory 填 `dist`。
-3. 可选：设置环境变量 `VITE_API_BASE_URL`；如果构建环境的 Node 太旧，再设置 `NODE_VERSION=22`。
+3. 可选：设置环境变量 `VITE_API_BASE_URL`；构建环境使用 `NODE_VERSION=22.23.4`。
 4. `public/_headers` 会随构建复制到 `dist/`，提供安全响应头。Pages 在没有 `404.html` 时自动把未知路径交给 `index.html`，所以 `_redirects` 里没有规则。
 5. 把 `https://<项目>.pages.dev` 加到 API 的 `--allow-origin`。
 
@@ -88,10 +94,16 @@ usage api serve --host 0.0.0.0 --port "$PORT" --trust-proxy \
 ```bash
 cd web
 npm ci && npm run build
-npx wrangler deploy      # 使用 wrangler.toml：assets 目录 dist，SPA 回退
+npm run deploy          # 使用锁定的本地 Wrangler 和 wrangler.toml，不通过 npx 下载新版本
 ```
 
 `dist/_headers` 同样生效。部署后的来源是 `https://usage-web.<子域>.workers.dev`。
+
+Wrangler **4.155.0** 是精确版本的开发依赖，完整依赖图及 SHA-512 在
+`package-lock.json`。无凭据检查可运行
+`WRANGLER_SEND_METRICS=false npm run deploy -- --dry-run`（先构建 `dist/`）；
+这不代表已部署到 Cloudflare。升级时显式修改依赖版本并重新生成、审查锁文件；
+Docker 镜像升级也必须同时更新标签与对应的多架构 digest，而不是移除 digest。
 
 ### Railway
 

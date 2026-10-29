@@ -84,10 +84,12 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   manual/Console secrets cannot persist; Claude Platform works there only as a
   session-only credential in one-process mode (below).
   Anyone with `railway ssh` or volume access can read the first-party CLI logins,
-  which are password-equivalent. The CLI versions are pinned; Grok's artifact
-  checksums were computed on first download because xAI publishes none, so they
-  detect later changes but do not establish the original artifact's authenticity.
-  Claude Code and Grok self-updaters are disabled by non-secret environment flags.
+  which are password-equivalent. CLI packages have a committed integrity lock and
+  install without dependency lifecycle scripts; base images use digest pins.
+  Grok's artifact checksums were computed on first download because xAI publishes
+  none, so they detect later changes but do not establish the original artifact's
+  authenticity. Claude Code and Grok background self-updaters are disabled by
+  non-secret environment flags; manual updater commands remain a user-controlled risk.
 - One-process mode (`usage --api`, PLAN.md §15.7): the API runs as a task in the
   dashboard's event loop and serves an observer mirror (`AppHub`) of the snapshots
   and account list the TUI shows; it never starts, stops or reconfigures the
@@ -112,6 +114,41 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   accounts' selected scopes (or the legacy scope when none is selected) are protected
   from being marked stale.
 - Local removal of a token or account never revokes provider sessions.
+
+## Build and dependency trust
+
+- Use uv 0.13.5+ with the committed `uv.lock` and build isolation. `pyproject.toml`
+  separately pins Hatchling and every wheel/editable build requirement, permits
+  only the recorded universal-wheel SHA-256 values, and enables
+  `require-build-hashes`. Missing or mismatched build hashes fail closed. A platform
+  requiring unlisted source-build tooling is refused rather than silently fetching
+  another backend. The uv feature currently emits an experimental warning.
+- uv does not recheck already-installed packages or cached built wheels; disabling
+  isolation bypasses its build-hash checks. Ordinary `pip install` does not enforce
+  `[tool.uv]` settings. Fresh-cache isolated installs are the verification boundary,
+  not proof about a previously populated environment.
+- Both Dockerfiles pin upstream image **indexes** by digest, retaining amd64/arm64
+  selection. Node's standalone tarball and Grok's release archive are fetched over
+  HTTPS and hash-checked before extraction. Grok remains trust-on-first-use: no
+  independently verifiable vendor checksum/signature was located in the inspected
+  official installer or installation documentation. Do not describe that pin as
+  vendor-authenticated provenance.
+- `docker/cli/package-lock.json` records the complete Claude/Codex npm graph and
+  SHA-512 integrity. `npm ci --ignore-scripts --include=optional` skips dependency
+  hooks; explicit executable checks reject missing native packages. Claude links
+  directly to its locked Linux binary rather than running its postinstall. The
+  Codex launcher is the upstream locked package, not a replacement wrapper.
+- `web/.npmrc` also disables dependency installation hooks while retaining native
+  optional packages needed by esbuild/workerd. Explicit `npm run build` and
+  `npm run deploy` still run their named project commands. Wrangler is an exact
+  locked dependency; deployment must not use an unversioned `npx` fetch.
+- These controls pin reviewed inputs, not certify that upstream code is benign.
+  Registry/publisher trust remains; Debian packages installed through `apt` and
+  managed cloud build environments are not a fully immutable OS/toolchain snapshot.
+  Update tags/digests, CLI locks and build-wheel hashes deliberately, then repeat
+  clean installation, negative-integrity and container smoke checks. Verification
+  evidence and unauthenticated/live limits are recorded in PLAN.md §16.
+
 
 ## Implemented C12 entry and CLI secret boundary
 

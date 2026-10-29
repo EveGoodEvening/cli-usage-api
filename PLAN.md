@@ -4,6 +4,10 @@
 
 **Latest maintenance authority (2026-10-29): §12 covers the user's Codex display cleanup, Claude polling/rate-limit investigation, and Grok compatibility repair against BYOS; §13 covers the default Nord theme and remembered theme selection; §14 separates Claude Platform balance mismatches from partial data. These sections supersede earlier rules only where stated. Historical gates/reviews below remain historical, not proof of these changes or authenticated compatibility.**
 
+**Supply-chain amendment (2026-10-29): §16 records the user's accepted audit fixes
+1–3 and their fresh-install/container verification. It supersedes the mutable build
+inputs in §15 without changing application, authentication or provider behavior.**
+
 Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex single atomic cutover under §11 is closed for implementation, verification, documentation and independent review at green draft `2d7ea6b`; final tracker-snapshot commit follows and its hash is not yet known. Authorized live acceptance remains unexercised.
 
 Original goal: **终端 TUI，近实时查看 Claude 订阅 5h / 每周 / Fable 用量；Claude Platform 普通购买余额和赠送余额；GPT 订阅每周用量；GrokBuild / GrokChat 用量、剩余与重置时间；支持连接账号或管理密钥。不做网页或 statusline。**
@@ -1194,9 +1198,9 @@ token refresh of first-party logins; live/authenticated provider acceptance.
   `share_percent` is consumption only, balance-mismatch diagnostics remain visible,
   numbers are never truncated. Token in session/local storage per explicit choice,
   never in URLs; any `401` returns to login.
-- Container: `python:3.12-slim-bookworm`, pinned uv 0.13.5, Node.js 22.23.4
-  (SHA-256 verified), Claude Code 2.1.308 and Codex 0.165.0 (npm), Grok Build
-  1.0.70 (versioned xAI artifact, first-download SHA-256), project via
+- Container (hardened inputs in §16): digest-pinned Python 3.12.15 and uv 0.13.5,
+  Node.js 22.23.4 (SHA-256 verified), Claude Code 2.1.308 and Codex 0.165.0
+  (integrity-locked npm, no install hooks), Grok Build 1.0.70 (TOFU SHA-256), project via
   `uv sync --locked --no-dev`; `HOME=/data/home` (`0700`, created by the entrypoint
   under `tini`); `CMD ["sleep","infinity"]`. Only file-backed Claude Code, Codex and
   Grok logins work (no OS keyring); Claude Platform is unsupported in the container.
@@ -1439,3 +1443,108 @@ Acceptance (only what was run, 2026-10-29, this working tree):
   fake CLI killed its process group and released the lock). Fake data only; no real
   login renewal, Railway deployment or live provider read is claimed.
 
+## 16. User-requested supply-chain audit remediation — 2026-10-29
+
+The user requested fixes for all three audit findings: outdated frontend container
+components, unlocked Python build/Wrangler tooling, and incomplete container/CLI
+artifact pinning. The audit found no confirmed malicious source or supply-chain
+compromise. This amendment hardens installation inputs; it does not change quota,
+credential, API or dashboard contracts and does not establish upstream code safety.
+
+### Implemented scope
+
+- [x] **Finding 1:** frontend Node 22.23.4-bookworm-slim and Caddy 2.11.7-alpine,
+  both pinned to registry-verified multi-platform OCI index digests. Caddy's
+  selected exact version returned no matching reviewed GitHub advisories.
+- [x] **Finding 2:** Hatchling 1.33.0 and its complete isolated wheel/editable
+  build graph are exact, universal-wheel-hash constraints in `pyproject.toml`,
+  with `require-build-hashes = true` under uv 0.13.5+. `uv.lock` adds build
+  constraints without changing its 41 existing package records. Wrangler 4.155.0
+  is an exact locked frontend devDependency; `npm run deploy` invokes it locally,
+  replacing the documented unversioned `npx` fetch. Frontend Node minimum is 22.12.
+- [x] **Finding 3:** backend Python 3.12.15-slim-bookworm and uv 0.13.5 use index
+  digest pins; remove the floating external Dockerfile syntax frontend. New
+  `docker/cli/package.json`, `package-lock.json` and `.npmrc` lock both CLI wrappers
+  and their complete platform graph (16 external package/version records) with
+  SHA-512 integrity. Install under `/opt/usage-clis` using
+  `npm ci --ignore-scripts --include=optional`; link Claude's locked Linux binary
+  directly instead of executing its postinstall, retain Codex's official launcher,
+  and reject missing native executables for either supported architecture. Frontend
+  npm policy also skips dependency hooks while retaining required native optional
+  packages. Node/Grok downloads and redirects are HTTPS-only and hashes are checked
+  before extraction. Grok's authenticity limit below remains explicit.
+- [x] README, web README, Railway guide, SECURITY, CHANGELOG and repo Lessons
+  describe the new inputs, upgrade paths, script-disabled installation and limits.
+
+### Source and trust record
+
+- Image index digests are in the two Dockerfiles. Registry inspection established
+  Linux amd64 and arm64 descriptors; the actual build verified digest resolution
+  for amd64. Sources: `ghcr.io/astral-sh/uv:0.13.5`, Docker Official Images Python
+  `3.12.15-slim-bookworm`, Node `22.23.4-bookworm-slim` and Caddy `2.11.7-alpine`.
+- Node security release and standalone hashes:
+  <https://nodejs.org/en/blog/release/v22.23.4/>;
+  <https://nodejs.org/dist/v22.23.4/SHASUMS256.txt>.
+  Caddy stable release: <https://github.com/caddyserver/caddy/releases/tag/v2.11.7>.
+- Approved build wheels (exact versions and SHA-256 in `pyproject.toml`):
+  Hatchling 1.33.0, packaging 26.3, pathspec 1.1.1, pluggy 1.7.0, tomlkit 0.15.2,
+  trove-classifiers 2026.9.21.13 and editables 0.6. Primary version-specific PyPI
+  metadata hashes matched downloaded wheel bytes; wheel dependency metadata and
+  Hatchling's editable-build requirement were inspected without executing them.
+  uv enforcement: <https://docs.astral.sh/uv/concepts/projects/build/#project-build-dependency-hashes>.
+- Claude/Codex exact npm wrapper metadata and downloaded wrapper tarball SHA-512
+  agreed; Claude's `install.cjs`/fallback launcher and Codex's `bin/codex.js` were
+  inspected. No custom runtime launcher was introduced. Sources:
+  <https://registry.npmjs.org/@anthropic-ai%2fclaude-code/2.1.308>;
+  <https://registry.npmjs.org/@openai%2fcodex/0.165.0>.
+- Wrangler source: <https://registry.npmjs.org/wrangler/4.155.0> and upstream stable
+  release <https://github.com/cloudflare/workers-sdk/releases/tag/wrangler%404.155.0>.
+  Its upstream exact prerelease transitive versions (including miniflare/unenv)
+  are retained, not replaced by guessed overrides. esbuild/workerd entrypoints
+  resolve their locked native optional packages without the postinstall optimization.
+- Grok: <https://x.ai/cli/install.sh> and <https://docs.x.ai/build/overview> did not
+  provide an independent vendor checksum/signature mechanism. Keep the existing
+  versioned 1.0.70 artifacts and committed TOFU hashes; never substitute a fresh
+  download's hash automatically. amd64 matched during Docker build; a separate
+  HTTPS streaming download of the arm64 `.gz` matched
+  `0d9e47fc2cb14db2f52f99e9289c41b3723b64de05c284a9f18c2e8df52550cf`.
+
+### Exercised orchestrator evidence
+
+All checks used temporary, credential-free environments. No new permanent tests
+were added for manifest wiring; the changed installation/runtime paths were
+exercised directly. The following are new observations, not inherited old gates.
+
+| Check | Observed result |
+|---|---|
+| Fresh copied project, separate empty cache/environment: `uv sync --locked` | Editable install succeeded; installed `usage --help` ran with account/API commands. |
+| Another empty cache/environment: `uv sync --locked --no-dev --no-editable` | Wheel install succeeded; installed `usage --help` ran. |
+| Zeroed Hatchling hash, regenerated lock with `uv lock --no-build`, fresh `uv sync --locked` | Refused with the expected `Hash mismatch` and computed/expected SHA-256. |
+| Hashless pinned Hatchling string constraint, regenerated lock, fresh `uv sync --locked` | Refused with `Hash-checking is required, but no trusted hash was provided`. The initial fixture's invalid hashless-object schema was corrected; that parse error is not this acceptance proof. |
+| Copied CLI manifest/lock, corrupted Codex SHA-512, fresh `npm ci --ignore-scripts --omit=optional` | Refused with `EINTEGRITY`; the Codex executable was not installed. |
+| Gated `docker buildx build --platform linux/amd64 --load` of root and web Dockerfiles | Both images built. Separate BuildKit container had asserted 2 GiB memory and equal memory-swap limit; no gate bypass. Builder removed afterward. |
+| Frontend image build | Fresh script-disabled `npm ci` succeeded; `npm run build` completed TypeScript checking and Vite production output. |
+| Backend image with `--network none` | `usage --help`, uv 0.13.5, Node 22.23.4, Claude 2.1.308, Codex 0.165.0 and Grok 1.0.70 ran; HOME was 0700; Claude wrapper stub remained untouched by postinstall. |
+| Backend demo API in network-isolated container | Health 200; demo session and dashboard with 4 populated synthetic accounts; no-store header; POST refused with 405; SIGTERM container shutdown exited 0 without OOM. |
+| Caddy final image in network-isolated container | Version 2.11.7 and config validation succeeded; actual HTTP root and SPA fallback returned built HTML with CSP/nosniff; JS asset returned 200 with immutable cache headers. |
+| Frontend build image, no network/credentials, isolated HOME/config | Local Wrangler printed 4.155.0; `npm run deploy -- --dry-run --outdir /tmp/usage-dry-run` read 19 built assets and exited successfully. No cloud deployment occurred. |
+| Exact-version public GitHub advisory queries | All 312 frontend lock records and 7 build-tool versions returned no reviewed or malware matches; Caddy 2.11.7 returned no reviewed matches. This is not an OS-image/SBOM or unknown-malware scan. |
+
+### Remaining boundaries
+
+- Grok's original artifact authenticity cannot be upgraded to vendor-authenticated
+  provenance without a vendor signing/attestation/checksum source. The repository
+  now preserves and rechecks the selected hashes; TOFU is not represented as fixed
+  upstream authenticity. No third-party package or native binary is certified benign.
+- Runtime smoke was linux/amd64. arm64 index/package metadata and the Grok archive
+  hash were checked, but no arm64 image execution/emulation was performed.
+- uv's build-hash feature is experimental; installed packages/cached built wheels
+  are not revalidated, and disabling build isolation bypasses these checks. Approved
+  build-wheel hashes do not freeze Debian apt repositories or managed cloud runtimes.
+- No full application test-suite rerun, browser visual acceptance, authenticated
+  provider request, real CLI login/renewal, or Railway/Cloudflare/Vercel deployment
+  is claimed. Application source and those acceptance boundaries are unchanged.
+
+The orchestrator-owned verification builder, containers, image tags and temporary
+inspection/smoke scripts and caches were removed after these checks. No verification
+service was left running, and no user credential or account state was modified.

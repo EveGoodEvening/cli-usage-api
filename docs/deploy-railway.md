@@ -11,28 +11,33 @@
 
 ## 镜像内容
 
-| 组件 | 版本（`Dockerfile` 中的 `ARG`） | 安装方式 |
+| 组件 | 固定版本 | 安装方式 |
 |---|---|---|
-| Python | 3.12（`python:3.12-slim-bookworm`） | 基础镜像 |
-| uv | 0.13.5 | 从 `ghcr.io/astral-sh/uv:0.13.5` 复制 |
-| 本项目 | 当前源码 | `uv sync --locked --no-dev`，安装到 `/app/.venv`，`usage` 在 `PATH` 上 |
+| Python | 3.12.15 | `python:3.12.15-slim-bookworm`，锁定多架构 OCI index digest |
+| uv | 0.13.5 | 从 digest 固定的 `ghcr.io/astral-sh/uv:0.13.5` 复制 |
+| 本项目 | 当前源码 | `uv sync --locked --no-dev`；构建依赖另有精确版本与 wheel SHA-256；安装到 `/app/.venv` |
 | Node.js | 22.23.4 LTS | 官方 tarball，校验 SHA-256 |
-| Claude Code | 2.1.308 | `npm install -g @anthropic-ai/claude-code@2.1.308` |
-| Codex CLI | 0.165.0 | `npm install -g @openai/codex@0.165.0` |
+| Claude Code | 2.1.308 | `docker/cli/package-lock.json` + `npm ci --ignore-scripts`；直接链接锁定的 Linux 原生二进制 |
+| Codex CLI | 0.165.0 | 同一 CLI 锁文件 + `npm ci --ignore-scripts`，保留官方启动器与平台包 |
 | Grok Build CLI | 1.0.70 | 官方安装脚本所用的同一发布文件 `https://x.ai/cli/grok-1.0.70-linux-<arch>.gz`，校验 SHA-256 |
 | 工具 | — | `curl` `ca-certificates` `git` `tmux` `procps` `less` `tini` |
 
 说明：
 
-- 三个 CLI 都装在 `/usr/local` / `/opt/grok`，**不在** `HOME` 里。原因是 Railway
-  卷只在容器启动时挂载，构建期写到挂载路径的内容会被卷遮住。
+- 三个 CLI 都装在 `/opt/usage-clis` / `/opt/grok`，命令链接到 `/usr/local/bin`，
+  **不在** `HOME` 里。Railway 卷只在容器启动时挂载，不能遮住这些安装路径。
 - Grok 官方安装方式是 `curl -fsSL https://x.ai/cli/install.sh | bash`，它会把二进制
   写进 `$HOME/.grok/bin`。为避开卷遮挡并固定版本，`Dockerfile` 直接下载安装脚本
   使用的同一版本化发布文件。xAI 没有公布校验和；`Dockerfile` 里的 SHA-256 是
   2026-10-29 下载时计算的（首次信任），发布文件一旦变化，构建会失败而不是静默接受。
+- CLI 包装器及所有平台包由 `docker/cli/package-lock.json` 固定版本和 SHA-512。
+  安装时不执行任何依赖生命周期脚本；Claude 的 postinstall 原本负责放置原生二进制，
+  这里直接链接已校验的平台包。缺少当前架构的 Claude/Codex 二进制会使构建失败。
 - 镜像设置 `DISABLE_AUTOUPDATER=1`（Claude Code）和 `GROK_DISABLE_AUTOUPDATER=1`
-  （Grok），这两个都不是秘密，只是让版本保持为构建时的固定版本。要升级，修改
-  `Dockerfile` 中的 `ARG`（Grok 还需更新 SHA-256）后重新部署。
+  （Grok），禁用后台自动升级；这不阻止用户手动运行更新命令。请通过审查后的重建升级，
+  不要在运行中的容器里手动升级：Claude/Codex 修改 `docker/cli/package.json` 后在该目录
+  运行 `npm install --package-lock-only --ignore-scripts` 并审查锁文件；Node/Grok 更新
+  `Dockerfile` 的版本及两个架构的校验和；基础镜像同时更新版本标签和多架构 digest。
 - `ENV HOME=/data/home`。入口脚本 `docker/entrypoint.sh` 在启动时以 `umask 077`
   创建 `HOME` 并设为 `0700`，然后执行 `CMD`（默认 `sleep infinity`）。`tini` 作为
   PID 1 负责转发信号和回收子进程。若 `/data` 不是挂载卷，入口脚本会打印警告。

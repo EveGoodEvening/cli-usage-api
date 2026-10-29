@@ -5,13 +5,14 @@
   "type": "module",
   "description": "Read-only web dashboard for the usage API (front end only).",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.12"
   },
   "scripts": {
     "dev": "vite",
     "dev:mock": "VITE_MOCK=1 vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run"
@@ -32,6 +33,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1",
     "vite": "7.3.7",
-    "vitest": "4.1.12"
+    "vitest": "4.1.12",
+    "wrangler": "4.155.0"
   }
 }

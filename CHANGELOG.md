@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Security — locked build, deployment and container inputs
+
+- Update frontend Node to 22.23.4 and Caddy to 2.11.7; pin both images, backend
+  Python 3.12.15 and uv 0.13.5 to multi-platform index digests. Remove the floating
+  external Dockerfile syntax frontend.
+- Pin Hatchling 1.33.0 and its complete isolated wheel/editable build graph to
+  exact versions and universal-wheel SHA-256 values; require build hashes through
+  uv 0.13.5+. Runtime dependency versions are unchanged.
+- Lock Wrangler 4.155.0 and use `npm run deploy` instead of an unversioned `npx`
+  fetch. Disable frontend dependency install hooks while retaining native optional
+  packages; frontend development now requires Node 22.12+.
+- Replace global unlocked CLI installation with `docker/cli/package-lock.json`
+  and script-disabled `npm ci` under `/opt/usage-clis`; link Claude's locked native
+  binary directly and fail the build if Claude/Codex native packages are absent.
+  Restrict Node/Grok download redirects to HTTPS. Grok's hash remains explicitly
+  trust-on-first-use, not a vendor signature. See PLAN.md §16 for exercised proof.
+
 ### Changed — renamed to `cli-usage-api` (breaking, no migration)
 
 - Distribution `usage-tui` → `cli-usage-api`, module `usage_tui` → `cli_usage_api`

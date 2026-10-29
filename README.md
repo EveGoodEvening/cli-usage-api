@@ -10,7 +10,7 @@ integrations use private, version-sensitive APIs.
 
 ## Quick start
 
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), and an interactive terminal.
+Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) 0.13.5+, and an interactive terminal.
 Linux/POSIX is the supported credential-import and persistence target.
 
 ```sh
@@ -18,6 +18,11 @@ uv sync --locked
 uv run usage --demo   # Offline demo
 uv run usage          # Live dashboard
 ```
+
+Runtime dependencies are locked in `uv.lock`; isolated build dependencies, including
+Hatchling and its editable-build helper, are separately pinned and hash-checked in
+`pyproject.toml`. Keep build isolation enabled. uv currently prints an experimental
+build-hash warning; it does not disable enforcement. See [build trust boundaries](SECURITY.md#build-and-dependency-trust).
 
 Demo uses fictional data without reading account configuration, credentials, or
 keyring, and makes no network requests. Use `--demo --scenario errors` to preview

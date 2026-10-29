@@ -1,4 +1,4 @@
-# Optional: deploy as Cloudflare Workers static assets (`npx wrangler deploy`).
+# Optional: deploy as Cloudflare Workers static assets (`npm run deploy`).
 # Cloudflare Pages does not need this file; it reads public/_headers from dist.
 name = "usage-web"
 compatibility_date = "2025-09-01"
