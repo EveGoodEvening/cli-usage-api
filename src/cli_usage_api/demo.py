@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from importlib.resources import files
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     Diagnostic,
@@ -106,7 +106,7 @@ class DemoSource:
         if scenario not in {"healthy", "errors"}:
             raise ValueError("Unknown demo scenario; choose healthy or errors.")
         fixture = json.loads(
-            files("usage_tui").joinpath("fixtures/demo.json").read_text(encoding="utf-8")
+            files("cli_usage_api").joinpath("fixtures/demo.json").read_text(encoding="utf-8")
         )
         self.clock = clock if clock is not None else DemoClock(parse_timestamp(fixture["now"]))
         self._epoch = self.clock.now()

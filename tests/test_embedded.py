@@ -22,9 +22,9 @@ import httpx
 import pytest
 from textual.widgets._toast import Toast
 
-from usage_tui import api, cli, keepalive
-from usage_tui.app import UsageApp
-from usage_tui.domain import (
+from cli_usage_api import api, cli, keepalive
+from cli_usage_api.app import UsageApp
+from cli_usage_api.domain import (
     Account,
     FetchState,
     Metric,
@@ -36,7 +36,7 @@ from usage_tui.domain import (
     SourceKind,
     SourceRef,
 )
-from usage_tui.storage import ApiTokenStore
+from cli_usage_api.storage import ApiTokenStore
 
 FIRST = "11111111-1111-4111-8111-111111111111"
 SECOND = "22222222-2222-4222-8222-222222222222"

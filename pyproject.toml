@@ -3,24 +3,24 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "usage-tui"
+name = "cli-usage-api"
 version = "0.1.0"
 description = "Immutable usage snapshots for a read-only terminal account dashboard"
 requires-python = ">=3.11"
 dependencies = ["textual", "httpx", "keyring", "starlette>=1.10.0", "uvicorn>=0.54.0"]
 
 [project.scripts]
-usage = "usage_tui.cli:main"
-usage-keepalive = "usage_tui.keepalive:main"
+usage = "cli_usage_api.cli:main"
+usage-keepalive = "cli_usage_api.keepalive:main"
 
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio", "respx", "ruff"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/usage_tui"]
+packages = ["src/cli_usage_api"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/usage_tui", "tests", "pyproject.toml"]
+include = ["src/cli_usage_api", "tests", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

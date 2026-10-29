@@ -8,9 +8,9 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from usage_tui.app import UsageApp, local_time, metric_value
-from usage_tui.demo import DEMO_NOW
-from usage_tui.domain import (
+from cli_usage_api.app import UsageApp, local_time, metric_value
+from cli_usage_api.demo import DEMO_NOW
+from cli_usage_api.domain import (
     Account,
     CredentialKind,
     FetchState,
@@ -22,9 +22,9 @@ from usage_tui.domain import (
     SourceKind,
     SourceRef,
 )
-from usage_tui.providers.claude import ClaudeProvider
-from usage_tui.providers.codex import CodexProvider
-from usage_tui.transport import Transport
+from cli_usage_api.providers.claude import ClaudeProvider
+from cli_usage_api.providers.codex import CodexProvider
+from cli_usage_api.transport import Transport
 
 
 def shown(app, row=None) -> str:

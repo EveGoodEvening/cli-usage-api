@@ -12,10 +12,10 @@ from uuid import uuid4
 
 import pytest
 
-from usage_tui import cli
-from usage_tui.domain import Account, CredentialKind, ProviderId
-from usage_tui.providers.console import OrganizationChoice
-from usage_tui.storage import AccountStore, ConfigCommittedError, ConfigError, CredentialStore
+from cli_usage_api import cli
+from cli_usage_api.domain import Account, CredentialKind, ProviderId
+from cli_usage_api.providers.console import OrganizationChoice
+from cli_usage_api.storage import AccountStore, ConfigCommittedError, ConfigError, CredentialStore
 
 SECRET = "synthetic-cli-secret-never-display"
 
@@ -353,7 +353,7 @@ def test_missing_account_is_safe_error(capsys):
 
 
 def test_unavailable_keyring_never_saves_session_ref(monkeypatch, capsys):
-    from usage_tui.storage import CredentialError
+    from cli_usage_api.storage import CredentialError
 
     item = account()
     seed(item)
@@ -455,7 +455,7 @@ def test_module_entrypoint_uses_same_main(monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "main", lambda: calls.append(True) or 3)
     with pytest.raises(SystemExit) as error:
-        runpy.run_module("usage_tui", run_name="__main__")
+        runpy.run_module("cli_usage_api", run_name="__main__")
     assert error.value.code == 3
     assert calls == [True]
 
@@ -606,7 +606,7 @@ class ServeCapture:
     """Replace binding/serving so CLI composition is observable without a socket."""
 
     def __init__(self, monkeypatch, *, bind_error=False):
-        from usage_tui import api as api_server
+        from cli_usage_api import api as api_server
 
         self.app = None
         self.bound = None
@@ -627,7 +627,7 @@ class ServeCapture:
 
 
 def make_api_token():
-    from usage_tui.storage import ApiTokenStore
+    from cli_usage_api.storage import ApiTokenStore
 
     return ApiTokenStore().create("cli-test")[0]
 
@@ -821,7 +821,7 @@ def test_api_serve_bind_failure_is_curated(monkeypatch, capsys):
 
 def test_api_serve_real_source_startup_failure_is_curated(monkeypatch, capsys):
     """Real uvicorn on a real 127.0.0.1:0 socket; only the demo source is made to fail."""
-    from usage_tui import api as api_server
+    from cli_usage_api import api as api_server
 
     real_bind = api_server.bind_socket
     bound = []
@@ -848,7 +848,7 @@ def test_api_serve_real_source_startup_failure_is_curated(monkeypatch, capsys):
 def test_api_serve_real_socket_bind_conflict(monkeypatch, capsys):
     import socket
 
-    from usage_tui import api as api_server
+    from cli_usage_api import api as api_server
 
     holder = socket.socket()
     holder.bind(("127.0.0.1", 0))
@@ -870,7 +870,7 @@ def test_api_serve_real_socket_bind_conflict(monkeypatch, capsys):
 def test_api_bind_localhost_is_reachable_over_ipv4():
     import socket
 
-    from usage_tui import api as api_server
+    from cli_usage_api import api as api_server
 
     sock = api_server.bind_socket("localhost", 0)
     try:
@@ -894,7 +894,7 @@ def test_api_serve_non_local_host_bind_failure_message(monkeypatch, capsys):
 
 
 def test_api_token_create_refuses_without_tty(monkeypatch, capsys, terminal_boundary):
-    from usage_tui.storage import ApiTokenStore
+    from cli_usage_api.storage import ApiTokenStore
 
     monkeypatch.setattr(cli, "_tty", terminal_boundary)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
@@ -904,7 +904,7 @@ def test_api_token_create_refuses_without_tty(monkeypatch, capsys, terminal_boun
 
 
 def test_api_token_lifecycle(monkeypatch, capsys):
-    from usage_tui.storage import ApiTokenStore, api_token_digest
+    from cli_usage_api.storage import ApiTokenStore, api_token_digest
 
     assert cli.main(["api", "token", "list"]) == 0
     assert "No API tokens" in capsys.readouterr().out
@@ -933,7 +933,7 @@ def test_api_token_lifecycle(monkeypatch, capsys):
 
 
 def test_api_token_limit_has_curated_message(monkeypatch, capsys):
-    from usage_tui.storage import MAX_API_TOKENS, ApiTokenStore
+    from cli_usage_api.storage import MAX_API_TOKENS, ApiTokenStore
 
     store = ApiTokenStore()
     for index in range(MAX_API_TOKENS):
@@ -948,7 +948,7 @@ def test_api_token_limit_has_curated_message(monkeypatch, capsys):
 
 
 def test_api_token_revoke_requires_tty(monkeypatch, capsys, terminal_boundary):
-    from usage_tui.storage import ApiTokenStore
+    from cli_usage_api.storage import ApiTokenStore
 
     make_api_token()
     monkeypatch.setattr(cli, "_tty", terminal_boundary)

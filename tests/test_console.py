@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     CredentialKind,
@@ -21,8 +21,8 @@ from usage_tui.domain import (
     SourceKind,
     TransportError,
 )
-from usage_tui.providers.console import ConsoleProvider, OrganizationChoice
-from usage_tui.transport import Transport
+from cli_usage_api.providers.console import ConsoleProvider, OrganizationChoice
+from cli_usage_api.transport import Transport
 
 NOW = datetime(2026, 10, 28, 12, tzinfo=UTC)
 ACCOUNT = Account(

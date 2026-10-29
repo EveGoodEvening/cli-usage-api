@@ -17,9 +17,9 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from usage_tui import debuglog
-from usage_tui.credentials import CredentialResolutionError, CredentialResolver
-from usage_tui.domain import (
+from cli_usage_api import debuglog
+from cli_usage_api.credentials import CredentialResolutionError, CredentialResolver
+from cli_usage_api.domain import (
     Account,
     Diagnostic,
     FetchState,
@@ -32,7 +32,7 @@ from usage_tui.domain import (
     TransportError,
     utc_datetime,
 )
-from usage_tui.providers.base import Provider
+from cli_usage_api.providers.base import Provider
 
 _SUCCESS = frozenset({FetchState.OK, FetchState.PARTIAL})
 _SUSPEND = frozenset(

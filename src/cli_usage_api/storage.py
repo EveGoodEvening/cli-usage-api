@@ -26,7 +26,7 @@ from uuid import UUID, uuid4
 import keyring
 from keyring.backends.SecretService import Keyring as SecretServiceKeyring
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     Account,
     CredentialKind,
     DomainError,
@@ -37,7 +37,7 @@ from usage_tui.domain import (
 )
 
 MAX_FILE_BYTES = 1_048_576
-_SERVICE = "usage-tui"
+_SERVICE = "cli-usage-api"
 _SECURE_BACKEND_TYPES = (SecretServiceKeyring,)
 _FILE_KINDS = {
     CredentialKind.CLAUDE_CODE_FILE,
@@ -145,7 +145,7 @@ class _ConfigFile:
         if path is None:
             root = os.environ.get("XDG_CONFIG_HOME")
             base = Path(root) if root and Path(root).is_absolute() else Path.home() / ".config"
-            path = base / "usage-tui" / filename
+            path = base / "cli-usage-api" / filename
         self.path = Path(os.path.abspath(path))
         self._thread_lock = threading.RLock()
 

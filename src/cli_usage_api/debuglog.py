@@ -20,9 +20,9 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
-from usage_tui.domain import ProviderId, Snapshot
+from cli_usage_api.domain import ProviderId, Snapshot
 
-LOGGER = logging.getLogger("usage_tui.debug")
+LOGGER = logging.getLogger("cli_usage_api.debug")
 LOGGER.propagate = False
 LOGGER.addHandler(logging.NullHandler())
 MAX_BODY_CHARS = 262_144

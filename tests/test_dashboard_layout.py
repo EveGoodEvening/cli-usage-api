@@ -8,8 +8,8 @@ from decimal import Decimal
 import pytest
 from rich.cells import cell_len
 
-from usage_tui.app import InformationScreen, UsageApp, short_local_time
-from usage_tui.domain import (
+from cli_usage_api.app import InformationScreen, UsageApp, short_local_time
+from cli_usage_api.domain import (
     Account,
     Diagnostic,
     FetchState,

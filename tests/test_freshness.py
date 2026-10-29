@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 
-from usage_tui.app import UsageApp
-from usage_tui.domain import (
+from cli_usage_api.app import UsageApp
+from cli_usage_api.domain import (
     Account,
     Diagnostic,
     FetchState,
@@ -20,7 +20,7 @@ from usage_tui.domain import (
     SourceKind,
     SourceRef,
 )
-from usage_tui.scheduler import freshness
+from cli_usage_api.scheduler import freshness
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

@@ -15,9 +15,9 @@ import httpx
 import keyring
 import pytest
 
-from usage_tui import credentials, storage, transport
-from usage_tui.demo import DEMO_NOW, DemoClock, DemoSource
-from usage_tui.domain import (
+from cli_usage_api import credentials, storage, transport
+from cli_usage_api.demo import DEMO_NOW, DemoClock, DemoSource
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     CredentialKind,
     FetchState,
@@ -27,7 +27,7 @@ from usage_tui.domain import (
     Snapshot,
     SourceKind,
 )
-from usage_tui.scheduler import freshness
+from cli_usage_api.scheduler import freshness
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def forbid_live(monkeypatch):
         raise AssertionError("Demo accessed a forbidden live dependency.")
 
     real_open = io.open
-    fixture_path = str(files("usage_tui").joinpath("fixtures/demo.json"))
+    fixture_path = str(files("cli_usage_api").joinpath("fixtures/demo.json"))
 
     def fixture_only(path, mode="r", *args, **kwargs):
         if str(path) != fixture_path or mode not in {"r", "rb"}:
@@ -90,7 +90,7 @@ async def test_lifecycle_without_live_construction_or_reads(forbid_live, scenari
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario", ["healthy", "errors"])
 async def test_packaged_fixture_fictional_identity_and_required_rows(scenario):
-    assert files("usage_tui").joinpath("fixtures/demo.json").is_file()
+    assert files("cli_usage_api").joinpath("fixtures/demo.json").is_file()
     published = []
     source = DemoSource(scenario=scenario, publish=published.append)
     await source.start()
@@ -177,7 +177,7 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
 async def test_codex_fixture_preserves_required_weekly_and_optional_extras(
     inventory, tmp_path, monkeypatch
 ):
-    fixture = json.loads(files("usage_tui").joinpath("fixtures/demo.json").read_text())
+    fixture = json.loads(files("cli_usage_api").joinpath("fixtures/demo.json").read_text())
     metrics = fixture["providers"]["codex_subscription"]["metrics"]
     if inventory == "weekly_only":
         metrics.pop()
@@ -197,7 +197,7 @@ async def test_codex_fixture_preserves_required_weekly_and_optional_extras(
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
     (fixture_dir / "demo.json").write_text(json.dumps(fixture))
-    monkeypatch.setattr("usage_tui.demo.files", lambda package: tmp_path)
+    monkeypatch.setattr("cli_usage_api.demo.files", lambda package: tmp_path)
     published = []
     source = DemoSource(publish=published.append)
     try:
@@ -399,6 +399,6 @@ def test_unknown_scenario_is_rejected_before_fixture_access(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("Unknown scenario read a fixture.")
 
-    monkeypatch.setattr("usage_tui.demo.files", forbidden)
+    monkeypatch.setattr("cli_usage_api.demo.files", forbidden)
     with pytest.raises(ValueError, match="scenario"):
         DemoSource(scenario="live-fallback", publish=lambda snapshot: None)

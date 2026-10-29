@@ -51,10 +51,10 @@ import uvicorn
 from starlette.datastructures import Headers
 from starlette.types import Receive, Scope, Send
 
-from usage_tui.demo import DemoSource
-from usage_tui.domain import Account, Snapshot, format_timestamp
-from usage_tui.scheduler import freshness
-from usage_tui.storage import (
+from cli_usage_api.demo import DemoSource
+from cli_usage_api.domain import Account, Snapshot, format_timestamp
+from cli_usage_api.scheduler import freshness
+from cli_usage_api.storage import (
     API_TOKEN_PREFIX,
     ApiTokenStore,
     ConfigError,
@@ -90,7 +90,7 @@ class OriginError(ValueError):
 
 def package_version() -> str:
     try:
-        return version("usage-tui")
+        return version("cli-usage-api")
     except PackageNotFoundError:
         return "0.0.0"
 

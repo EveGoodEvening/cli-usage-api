@@ -13,8 +13,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 import httpx
 
-from usage_tui import debuglog
-from usage_tui.domain import (
+from cli_usage_api import debuglog
+from cli_usage_api.domain import (
     DomainError,
     FetchState,
     ProviderId,
@@ -40,10 +40,10 @@ _ORIGINS = {
 
 def _user_agent() -> str:
     try:
-        installed_version = version("usage-tui")
+        installed_version = version("cli-usage-api")
     except PackageNotFoundError:
         installed_version = "0.1.0"
-    return f"usage-tui/{installed_version}"
+    return f"cli-usage-api/{installed_version}"
 
 
 def _allowed_path(provider: ProviderId, path: str) -> bool:

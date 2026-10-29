@@ -12,9 +12,9 @@ from uuid import UUID
 import httpx
 import pytest
 
-from usage_tui import cli, debuglog
-from usage_tui import transport as transport_module
-from usage_tui.domain import (
+from cli_usage_api import cli, debuglog
+from cli_usage_api import transport as transport_module
+from cli_usage_api.domain import (
     Account,
     CredentialKind,
     FetchState,
@@ -22,9 +22,9 @@ from usage_tui.domain import (
     ResolvedCredential,
     TransportError,
 )
-from usage_tui.providers.base import build_providers
-from usage_tui.scheduler import Scheduler
-from usage_tui.transport import Transport
+from cli_usage_api.providers.base import build_providers
+from cli_usage_api.scheduler import Scheduler
+from cli_usage_api.transport import Transport
 
 SECRET = "synthetic-bearer-secret-value"
 USER_ID = "synthetic-grok-user-id"

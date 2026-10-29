@@ -1,5 +1,5 @@
 // Wire types for the read-only usage API. They mirror the Python dataclasses in
-// src/usage_tui/domain.py exactly (Snapshot.to_dict()). Decimals arrive as
+// src/cli_usage_api/domain.py exactly (Snapshot.to_dict()). Decimals arrive as
 // strings and must stay strings: never parse them into a float for display.
 
 export type ProviderId =

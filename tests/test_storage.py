@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from usage_tui.domain import Account, CredentialKind, ProviderId, new_account_id
-from usage_tui.storage import MAX_FILE_BYTES, AccountStore, ConfigCommittedError, ConfigError
+from cli_usage_api.domain import Account, CredentialKind, ProviderId, new_account_id
+from cli_usage_api.storage import MAX_FILE_BYTES, AccountStore, ConfigCommittedError, ConfigError
 
 ACCOUNT_ID = "00000000-0000-4000-8000-000000000001"
 
@@ -43,11 +43,11 @@ def _concurrent_append(path, ready, start, label):
 def test_default_paths_are_lazy_and_xdg_aware(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     store = AccountStore()
-    assert store.path == tmp_path / "xdg" / "usage-tui" / "accounts.json"
+    assert store.path == tmp_path / "xdg" / "cli-usage-api" / "accounts.json"
     assert not store.path.parent.exists()
     monkeypatch.setenv("XDG_CONFIG_HOME", "relative-is-not-xdg")
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
-    assert AccountStore().path == tmp_path / "home" / ".config" / "usage-tui" / "accounts.json"
+    assert AccountStore().path == tmp_path / "home" / ".config" / "cli-usage-api" / "accounts.json"
 
 
 def test_private_roundtrip_and_crud(store):
@@ -377,7 +377,7 @@ def test_legacy_normal_operations_direct_explicit_migration_without_write(store)
 
 
 def test_migration_mixed_profiles_detaches_and_preserves_all_secrets(store, monkeypatch):
-    from usage_tui.storage import CredentialStore
+    from cli_usage_api.storage import CredentialStore
 
     def forbidden(*args, **kwargs):
         raise AssertionError("migration must not access credential backends")

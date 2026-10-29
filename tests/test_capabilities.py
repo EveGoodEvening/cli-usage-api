@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     CredentialKind,
@@ -18,7 +18,7 @@ from usage_tui.domain import (
     Snapshot,
     SourceKind,
 )
-from usage_tui.providers import (
+from cli_usage_api.providers import (
     ClaudeProvider,
     CodexProvider,
     ConsoleProvider,
@@ -26,7 +26,7 @@ from usage_tui.providers import (
     Provider,
     build_providers,
 )
-from usage_tui.transport import Transport
+from cli_usage_api.transport import Transport
 
 NOW = datetime(2026, 10, 28, 12, tzinfo=UTC)
 ACCOUNT = Account(

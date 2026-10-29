@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed — renamed to `cli-usage-api` (breaking, no migration)
+
+- Distribution `usage-tui` → `cli-usage-api`, module `usage_tui` → `cli_usage_api`
+  (`python -m cli_usage_api`), User-Agent `cli-usage-api/<version>`. Console scripts
+  `usage` and `usage-keepalive` are unchanged.
+- Config moves to `$XDG_CONFIG_HOME/cli-usage-api/` and keyring secrets to service
+  `cli-usage-api`. Nothing under `~/.config/usage-tui/` or keyring service `usage-tui`
+  is read, moved or deleted: re-add accounts and API tokens, or move the directory
+  yourself (keyring secrets must be re-entered).
+
 ### Added — one-process dashboard + API (+ keepalive)
 
 - `usage --api [--api-host H] [--api-port P] [--allow-origin O ...] [--trust-proxy]`
@@ -112,7 +122,7 @@
   validation, exact Decimal parsing, and positive unified-pool evidence remain.
 - Pin Grok's compatibility header to `1.0.70`, observed from the
   [official stable feed](https://x.ai/cli/stable), while retaining the identifying
-  `usage-tui` User-Agent; no runtime version download or client impersonation.
+  `cli-usage-api` User-Agent; no runtime version download or client impersonation.
 - Synthetic HTTP/provider/dashboard and scheduler smoke, plus four isolated
   installed-entry PTY runs, passed. Exact checks are recorded in PLAN.md §12.
   No real account response or credential was inspected: the user's specific Grok
@@ -231,7 +241,7 @@ application includes the C12 CLI/dashboard composition.
 
 ### Added — C12 production CLI and entry-point harness
 
-- Wired `usage` and `python -m usage_tui` to live dashboard composition, with
+- Wired `usage` and `python -m cli_usage_api` to live dashboard composition, with
   empty-account setup guidance, shared account/credential services and scheduler
   lifecycle. `--demo` and `--demo --scenario errors` select offline synthetic
   scenarios without constructing live dependencies.

@@ -8,14 +8,14 @@ from email.utils import format_datetime
 import httpx
 import pytest
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     CredentialKind,
     FetchState,
     ProviderId,
     ResolvedCredential,
     TransportError,
 )
-from usage_tui.transport import MAX_RESPONSE_BYTES, Transport
+from cli_usage_api.transport import MAX_RESPONSE_BYTES, Transport
 
 NOW = datetime(2026, 10, 28, 12, tzinfo=UTC)
 
@@ -89,7 +89,7 @@ async def test_exact_routes_and_auth_headers(provider, path, host, expected_head
         assert request.method == "GET"
         assert str(request.url) == f"https://{host}{path}"
         assert request.headers["accept"] == "application/json"
-        assert request.headers["user-agent"].startswith("usage-tui/")
+        assert request.headers["user-agent"].startswith("cli-usage-api/")
         for name, value in expected_headers.items():
             assert request.headers[name] == value
         for name in (
@@ -307,7 +307,7 @@ async def test_error_body_is_not_read():
 
 
 async def test_total_deadline_covers_the_stream(monkeypatch):
-    import usage_tui.transport as module
+    import cli_usage_api.transport as module
 
     monkeypatch.setattr(module, "TOTAL_TIMEOUT_SECONDS", 0.01)
 

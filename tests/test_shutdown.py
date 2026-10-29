@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from usage_tui.accounts import AccountManagerScreen
-from usage_tui.app import InformationScreen, UsageApp
+from cli_usage_api.accounts import AccountManagerScreen
+from cli_usage_api.app import InformationScreen, UsageApp
 
 
 @pytest.mark.parametrize("scenario", ["healthy", "errors"])

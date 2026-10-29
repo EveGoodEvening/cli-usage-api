@@ -9,17 +9,17 @@ import httpx
 import pytest
 from textual.widgets import Input, OptionList, Select
 
-from usage_tui.accounts import AccountForm, AccountManagerScreen
-from usage_tui.app import InformationScreen, UsageApp
-from usage_tui.domain import (
+from cli_usage_api.accounts import AccountForm, AccountManagerScreen
+from cli_usage_api.app import InformationScreen, UsageApp
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     CredentialKind,
     ProviderId,
     ResolvedCredential,
 )
-from usage_tui.providers.grok import GrokProvider
-from usage_tui.transport import Transport
+from cli_usage_api.providers.grok import GrokProvider
+from cli_usage_api.transport import Transport
 
 
 @pytest.mark.parametrize("size", [(80, 24), (40, 12)])
@@ -73,7 +73,7 @@ async def test_demo_does_not_touch_any_live_dependencies(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("live dependency touched by demo")
 
-    monkeypatch.setattr("usage_tui.credentials.CredentialResolver", forbidden)
+    monkeypatch.setattr("cli_usage_api.credentials.CredentialResolver", forbidden)
     factory = Mock(side_effect=forbidden)
     stores = Mock()
     stores.load.side_effect = forbidden

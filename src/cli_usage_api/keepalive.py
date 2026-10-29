@@ -62,7 +62,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Self
 
-from usage_tui.credentials import (
+from cli_usage_api.credentials import (
     _LEGACY_SCOPE,
     _MODERN_SCOPE,
     CredentialResolutionError,
@@ -71,7 +71,7 @@ from usage_tui.credentials import (
     _grok_expiry,
     _jwt_payload,
 )
-from usage_tui.domain import Account, CredentialKind, ProviderId
+from cli_usage_api.domain import Account, CredentialKind, ProviderId
 
 WINDOW_SECONDS = 290  # Each CLI refreshes within 300 s of expiry; keep a margin.
 UNKNOWN_EXPIRY_INTERVAL = 24 * 3600
@@ -906,7 +906,7 @@ def _log(message: str) -> None:
 
 def _saved_grok_scopes(log: Callable[[str], None]) -> frozenset[str]:
     """Read saved accounts once (never written); fail soft without protection."""
-    from usage_tui.storage import AccountStore, ConfigError
+    from cli_usage_api.storage import AccountStore, ConfigError
 
     try:
         return grok_protected_scopes(AccountStore().load())

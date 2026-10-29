@@ -115,7 +115,7 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
 
 ## Implemented C12 entry and CLI secret boundary
 
-- `usage` and `python -m usage_tui` compose the live dashboard with one shared
+- `usage` and `python -m cli_usage_api` compose the live dashboard with one shared
   account store, credential store, resolver and provider/scheduler factory. The
   factory exposes the canonical bound async Console discovery callable; app
   teardown stops its source before awaiting factory cleanup, which stops any
@@ -230,8 +230,8 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
 
 - `AccountStore` stores schema-versioned nonsecret account metadata and opaque
   credential references, not credential values or provider response bodies. The
-  default path is `$XDG_CONFIG_HOME/usage-tui/accounts.json`, falling back to
-  `~/.config/usage-tui/accounts.json`; callers may supply an isolated path.
+  default path is `$XDG_CONFIG_HOME/cli-usage-api/accounts.json`, falling back to
+  `~/.config/cli-usage-api/accounts.json`; callers may supply an isolated path.
   Inline manual secrets and persisted references bound to another account are
   rejected. The store neither opens nor modifies external first-party credential
   files; read-time import checks belong to `CredentialResolver`.
@@ -316,7 +316,7 @@ tokens, and, on a container host, the first-party CLI login files on the volume.
   to another Anthropic service. Grok sends Bearer plus
   `x-xai-token-auth: xai-grok-cli`; optional `x-userid` belongs to the same resolved
   credential. Grok's `x-grok-client-version: 1.0.70` is release-pinned from the
-  official stable feed; requests retain the identifying `usage-tui` User-Agent.
+  official stable feed; requests retain the identifying `cli-usage-api` User-Agent.
 - Codex has an explicit authentication branch: Bearer from `tokens.access_token`
   and `ChatGPT-Account-Id` from the same stable file read, never Grok headers,
   cookies or query parameters. Provider and transport independently enforce binding
@@ -553,7 +553,7 @@ remains the orchestrator's separate PLAN.md record.
 ## Implemented C09 deterministic offline-source boundary
 
 - The offline source reads only the packaged synthetic
-  `usage_tui/fixtures/demo.json` resource. It does not load account configuration,
+  `cli_usage_api/fixtures/demo.json` resource. It does not load account configuration,
   probe HOME/XDG or first-party credential files, access the keyring, resolve a
   credential, build the live provider registry, construct a live transport/client,
   or send network requests. It is explicitly selected, never a fallback after a

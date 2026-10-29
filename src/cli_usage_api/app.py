@@ -21,9 +21,9 @@ from textual.screen import Screen
 from textual.widgets import Footer, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
-from usage_tui.accounts import GUIDANCE, AccountManagerScreen
-from usage_tui.demo import DemoSource
-from usage_tui.domain import (
+from cli_usage_api.accounts import GUIDANCE, AccountManagerScreen
+from cli_usage_api.demo import DemoSource
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     Metric,
@@ -33,8 +33,8 @@ from usage_tui.domain import (
     Snapshot,
     sanitize_text,
 )
-from usage_tui.scheduler import freshness
-from usage_tui.storage import ConfigError, SettingsStore
+from cli_usage_api.scheduler import freshness
+from cli_usage_api.storage import ConfigError, SettingsStore
 
 METRIC_LABELS = {
     "claude.subscription.five_hour": "Claude 5h 用量",
@@ -1210,7 +1210,7 @@ class UsageApp(App[None]):
                 )
             )
             return
-        from usage_tui.credentials import CredentialResolver
+        from cli_usage_api.credentials import CredentialResolver
 
         resolver = getattr(self.scheduler_factory, "resolver", None)
         if resolver is None:

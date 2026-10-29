@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from usage_tui import api
-from usage_tui.domain import (
+from cli_usage_api import api
+from cli_usage_api.domain import (
     Account,
     CredentialKind,
     FetchState,
@@ -25,7 +25,7 @@ from usage_tui.domain import (
     SourceKind,
     SourceRef,
 )
-from usage_tui.storage import ApiTokenStore, ConfigError, api_token_digest
+from cli_usage_api.storage import ApiTokenStore, ConfigError, api_token_digest
 
 SECURITY_HEADERS = {
     "cache-control": "no-store",
@@ -719,7 +719,7 @@ async def test_demo_hub_constructs_no_live_dependencies(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("live dependency constructed")
 
-    from usage_tui import cli, credentials, scheduler, storage, transport
+    from cli_usage_api import cli, credentials, scheduler, storage, transport
 
     for module, name in (
         (storage, "AccountStore"),

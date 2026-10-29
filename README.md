@@ -34,8 +34,8 @@ error states. In live mode, press `a` to connect accounts.
 | `q` / Ctrl-C | Quit dashboard / exit from any screen |
 
 The initial theme is **nord**. Live and demo mode share the last selected theme in
-`$XDG_CONFIG_HOME/usage-tui/settings.json` (default:
-`~/.config/usage-tui/settings.json`). This separate, nonsecret UI preference never
+`$XDG_CONFIG_HOME/cli-usage-api/settings.json` (default:
+`~/.config/cli-usage-api/settings.json`). This separate, nonsecret UI preference never
 changes account configuration or credentials. Unreadable settings or an unavailable
 theme produce a warning and fall back to nord; save failures are also reported.
 
@@ -151,8 +151,8 @@ files are refused.
   disappear when the process exits; there is no silent storage fallback.
 - Removing an account or stored key does not revoke its remote session.
 
-Account metadata lives at `$XDG_CONFIG_HOME/usage-tui/accounts.json`, falling back
-to `~/.config/usage-tui/accounts.json`; credential values are stored separately.
+Account metadata lives at `$XDG_CONFIG_HOME/cli-usage-api/accounts.json`, falling back
+to `~/.config/cli-usage-api/accounts.json`; credential values are stored separately.
 See [SECURITY.md](SECURITY.md) for boundaries and limitations.
 
 ## Read-only HTTP API

@@ -7,10 +7,10 @@ from uuid import uuid4
 
 import pytest
 
-from usage_tui.accounts import AccountFlowError, AccountService
-from usage_tui.credentials import CredentialResolver
-from usage_tui.domain import Account, CredentialKind, ProviderId
-from usage_tui.storage import AccountStore, CredentialError, CredentialStore
+from cli_usage_api.accounts import AccountFlowError, AccountService
+from cli_usage_api.credentials import CredentialResolver
+from cli_usage_api.domain import Account, CredentialKind, ProviderId
+from cli_usage_api.storage import AccountStore, CredentialError, CredentialStore
 
 
 @pytest.fixture

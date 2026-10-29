@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal, DecimalException
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     Diagnostic,
@@ -23,7 +23,7 @@ from usage_tui.domain import (
     utc_datetime,
     validate_credential_binding,
 )
-from usage_tui.transport import Transport
+from cli_usage_api.transport import Transport
 
 _PROVIDER = ProviderId.CLAUDE_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "claude.oauth.usage", version_sensitive=True)

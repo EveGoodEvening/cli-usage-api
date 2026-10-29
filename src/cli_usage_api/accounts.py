@@ -21,8 +21,8 @@ from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Input, Label, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
-from usage_tui.credentials import CredentialResolutionError, CredentialResolver, _read_file
-from usage_tui.domain import (
+from cli_usage_api.credentials import CredentialResolutionError, CredentialResolver, _read_file
+from cli_usage_api.domain import (
     READ_CREDENTIAL_KINDS,
     Account,
     CredentialKind,
@@ -30,8 +30,8 @@ from usage_tui.domain import (
     ResolvedCredential,
     sanitize_text,
 )
-from usage_tui.providers.console import OrganizationChoice
-from usage_tui.storage import AccountStore, ConfigCommittedError, ConfigError, CredentialStore
+from cli_usage_api.providers.console import OrganizationChoice
+from cli_usage_api.storage import AccountStore, ConfigCommittedError, ConfigError, CredentialStore
 
 FILE_KINDS = {
     CredentialKind.CLAUDE_CODE_FILE,
@@ -145,7 +145,7 @@ class AccountService:
             except Exception:  # noqa: BLE001 - Redact injected credential cleanup errors.
                 raise AccountFlowError(
                     "Config saved, but old credential cleanup failed. Unlock the secure store "
-                    "and remove the obsolete usage-tui entry there. External files were not touched.",
+                    "and remove the obsolete cli-usage-api entry there. External files were not touched.",
                     updated=updated,
                 ) from None
 

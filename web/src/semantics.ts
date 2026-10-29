@@ -1,4 +1,4 @@
-// Domain meaning shared by every view. Mirrors src/usage_tui/app.py where the
+// Domain meaning shared by every view. Mirrors src/cli_usage_api/app.py where the
 // TUI already settled a rule (labels, Grok aggregate naming, nesting, hoisting).
 
 import type { AccountView, FetchState, Metric, ProviderId, Snapshot } from "./types";

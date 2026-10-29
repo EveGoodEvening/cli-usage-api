@@ -12,8 +12,8 @@ from uuid import UUID
 import httpx
 import pytest
 
-from usage_tui.credentials import CredentialResolver
-from usage_tui.domain import (
+from cli_usage_api.credentials import CredentialResolver
+from cli_usage_api.domain import (
     Account,
     CredentialKind,
     Diagnostic,
@@ -28,9 +28,9 @@ from usage_tui.domain import (
     SourceRef,
     TransportError,
 )
-from usage_tui.providers.codex import CodexProvider
-from usage_tui.scheduler import Scheduler, freshness
-from usage_tui.transport import Transport
+from cli_usage_api.providers.codex import CodexProvider
+from cli_usage_api.scheduler import Scheduler, freshness
+from cli_usage_api.transport import Transport
 
 
 class FakeClock:
@@ -683,7 +683,7 @@ async def test_late_old_generation_is_discarded_before_replacement_fetch():
 
 
 async def test_resolution_failure_is_safe_and_does_not_call_provider():
-    from usage_tui.credentials import CredentialResolutionError
+    from cli_usage_api.credentials import CredentialResolutionError
 
     scheduler, clock, provider, resolver, published = setup()
 

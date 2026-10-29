@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     CredentialKind,
@@ -20,8 +20,8 @@ from usage_tui.domain import (
     ResolvedCredential,
     SourceKind,
 )
-from usage_tui.providers.grok import GrokProvider
-from usage_tui.transport import Transport
+from cli_usage_api.providers.grok import GrokProvider
+from cli_usage_api.transport import Transport
 
 NOW = datetime(2026, 10, 28, 12, tzinfo=UTC)
 ACCOUNT = Account(
@@ -53,7 +53,7 @@ def provider_for(payload, *, status=200, headers=None, credential=CREDENTIAL):
         assert request.headers["x-xai-token-auth"] == "xai-grok-cli"
         assert request.headers["accept"] == "application/json"
         assert request.headers["x-grok-client-version"] == "1.0.70"
-        assert request.headers["user-agent"].startswith("usage-tui/")
+        assert request.headers["user-agent"].startswith("cli-usage-api/")
         assert "cookie" not in request.headers
         if credential.user_id is None:
             assert "x-userid" not in request.headers

@@ -7,7 +7,7 @@ from decimal import Decimal, localcontext
 
 import pytest
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     CredentialKind,
@@ -318,7 +318,7 @@ def test_extreme_percentage_exponents_rejected_before_arithmetic(raw, representa
     def unexpected_arithmetic():
         pytest.fail("Out-of-bounds percentages must be rejected before subtraction")
 
-    monkeypatch.setattr("usage_tui.domain.localcontext", unexpected_arithmetic)
+    monkeypatch.setattr("cli_usage_api.domain.localcontext", unexpected_arithmetic)
     value = representation(raw)
     for operation in (
         lambda: percent(value),
@@ -339,7 +339,7 @@ def test_serialized_extreme_percentage_exponents_are_rejected(raw, field, monkey
     def unexpected_arithmetic():
         pytest.fail("Serialized percentages must be bounded before subtraction")
 
-    monkeypatch.setattr("usage_tui.domain.localcontext", unexpected_arithmetic)
+    monkeypatch.setattr("cli_usage_api.domain.localcontext", unexpected_arithmetic)
     with pytest.raises(DomainError):
         loads(json.dumps(payload))
 

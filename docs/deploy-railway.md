@@ -78,7 +78,7 @@
 ### 2. 挂载卷到 `/data`
 
 在服务上添加 Volume，挂载路径填 **`/data`**。每个服务只能挂一个卷。
-CLI 登录文件、`~/.config/usage-tui/accounts.json` 和 `api_tokens.json` 都在
+CLI 登录文件、`~/.config/cli-usage-api/accounts.json` 和 `api_tokens.json` 都在
 `/data/home` 下，重新部署后仍然保留。没有卷时，每次重新部署都会丢失全部登录和账号。
 
 ### 3. 端口与公开域名
@@ -194,7 +194,7 @@ usage api token create --label web
 ```
 
 令牌（`usk_` 开头）只打印**一次**，立即复制到前端登录框或你的密码管理器。
-文件 `~/.config/usage-tui/api_tokens.json` 里只保存它的 SHA-256 哈希。
+文件 `~/.config/cli-usage-api/api_tokens.json` 里只保存它的 SHA-256 哈希。
 
 ```sh
 usage api token list          # 只显示 id、label、创建时间

@@ -10,7 +10,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     CredentialKind,
@@ -22,8 +22,8 @@ from usage_tui.domain import (
     Snapshot,
     SourceKind,
 )
-from usage_tui.providers.codex import CodexProvider
-from usage_tui.transport import Transport
+from cli_usage_api.providers.codex import CodexProvider
+from cli_usage_api.transport import Transport
 
 NOW = datetime(2026, 10, 28, 12, tzinfo=UTC)
 RESET = 1793232000

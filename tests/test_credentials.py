@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from usage_tui.credentials import MAX_FILE_BYTES, CredentialResolutionError, CredentialResolver
-from usage_tui.domain import Account, CredentialKind, FetchState, ProviderId
-from usage_tui.storage import CredentialStore
+from cli_usage_api.credentials import MAX_FILE_BYTES, CredentialResolutionError, CredentialResolver
+from cli_usage_api.domain import Account, CredentialKind, FetchState, ProviderId
+from cli_usage_api.storage import CredentialStore
 
 NOW = datetime(2026, 10, 28, tzinfo=UTC)
 FUTURE = datetime(2030, 1, 1, tzinfo=UTC)

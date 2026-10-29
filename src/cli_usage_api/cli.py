@@ -15,9 +15,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from usage_tui import api as api_server
-from usage_tui import debuglog, keepalive
-from usage_tui.accounts import (
+from cli_usage_api import api as api_server
+from cli_usage_api import debuglog, keepalive
+from cli_usage_api.accounts import (
     CONSOLE_SESSION_WARNING,
     FILE_KINDS,
     GUIDANCE,
@@ -25,14 +25,14 @@ from usage_tui.accounts import (
     AccountFlowError,
     AccountService,
 )
-from usage_tui.api import DEFAULT_HOST, DEFAULT_PORT, OriginError, is_loopback_host
-from usage_tui.app import UsageApp
-from usage_tui.credentials import (
+from cli_usage_api.api import DEFAULT_HOST, DEFAULT_PORT, OriginError, is_loopback_host
+from cli_usage_api.app import UsageApp
+from cli_usage_api.credentials import (
     CredentialResolutionError,
     CredentialResolver,
     _read_file,
 )
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     READ_CREDENTIAL_KINDS,
     Account,
     CredentialKind,
@@ -40,9 +40,9 @@ from usage_tui.domain import (
     ProviderId,
     sanitize_text,
 )
-from usage_tui.providers.base import build_providers
-from usage_tui.scheduler import Scheduler
-from usage_tui.storage import (
+from cli_usage_api.providers.base import build_providers
+from cli_usage_api.scheduler import Scheduler
+from cli_usage_api.storage import (
     MAX_API_TOKENS,
     AccountStore,
     ApiTokenLimitError,
@@ -53,7 +53,7 @@ from usage_tui.storage import (
     CredentialStore,
     SettingsStore,
 )
-from usage_tui.transport import Transport, TransportError, _cookie_value, _header_token
+from cli_usage_api.transport import Transport, TransportError, _cookie_value, _header_token
 
 PROVIDER_NAMES = {
     "claude-subscription": ProviderId.CLAUDE_SUBSCRIPTION,
@@ -450,7 +450,9 @@ def _accounts(args) -> int:
     credentials = CredentialStore()
     service = AccountService(store, credentials)
     if args.action == "remove":
-        print("Removes only usage-tui config/owned secrets. External login files are not deleted.")
+        print(
+            "Removes only cli-usage-api config/owned secrets. External login files are not deleted."
+        )
         print("This does not revoke any remote session.")
         if not _confirm("Remove this account?"):
             raise Cancelled

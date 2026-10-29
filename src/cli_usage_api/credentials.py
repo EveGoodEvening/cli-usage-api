@@ -21,7 +21,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     Account,
     CredentialKind,
     Diagnostic,
@@ -32,7 +32,7 @@ from usage_tui.domain import (
     utc_datetime,
     validate_credential_kind,
 )
-from usage_tui.storage import CredentialError, CredentialStore
+from cli_usage_api.storage import CredentialError, CredentialStore
 
 MAX_FILE_BYTES = 1_048_576
 _MODERN_SCOPE = "https://auth.x.ai::"

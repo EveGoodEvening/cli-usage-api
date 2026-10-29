@@ -10,11 +10,11 @@ import pytest
 from textual.app import App
 from textual.widgets import Input, Select, Static
 
-from usage_tui.accounts import AccountForm, AccountManagerScreen, ConfirmDialog
-from usage_tui.credentials import CredentialResolver
-from usage_tui.domain import Account, CredentialKind, ProviderId
-from usage_tui.providers.console import OrganizationChoice
-from usage_tui.storage import AccountStore, CredentialError, CredentialStore
+from cli_usage_api.accounts import AccountForm, AccountManagerScreen, ConfirmDialog
+from cli_usage_api.credentials import CredentialResolver
+from cli_usage_api.domain import Account, CredentialKind, ProviderId
+from cli_usage_api.providers.console import OrganizationChoice
+from cli_usage_api.storage import AccountStore, CredentialError, CredentialStore
 
 
 class Host(App):

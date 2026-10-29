@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from hashlib import sha256
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     Diagnostic,
@@ -25,7 +25,7 @@ from usage_tui.domain import (
     utc_datetime,
     validate_credential_binding,
 )
-from usage_tui.transport import Transport
+from cli_usage_api.transport import Transport
 
 _PROVIDER = ProviderId.GROK_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "grok.cli.billing.credits", version_sensitive=True)

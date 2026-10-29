@@ -9,9 +9,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from usage_tui import keepalive
-from usage_tui.domain import Account, CredentialKind, ProviderId
-from usage_tui.keepalive import (
+from cli_usage_api import keepalive
+from cli_usage_api.domain import Account, CredentialKind, ProviderId
+from cli_usage_api.keepalive import (
     BACKUP_SUFFIX,
     CLAUDE_MODEL,
     CLAUDE_STATUS,
@@ -29,7 +29,7 @@ from usage_tui.keepalive import (
     observe_grok,
     run_async,
 )
-from usage_tui.storage import AccountStore
+from cli_usage_api.storage import AccountStore
 
 NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 

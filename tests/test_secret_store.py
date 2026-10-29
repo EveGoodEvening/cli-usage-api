@@ -6,9 +6,9 @@ from dataclasses import replace
 import pytest
 from keyring.backends import fail, null
 
-from usage_tui import storage
-from usage_tui.domain import Account, CredentialKind, ProviderId
-from usage_tui.storage import AccountStore, CredentialError, CredentialStore
+from cli_usage_api import storage
+from cli_usage_api.domain import Account, CredentialKind, ProviderId
+from cli_usage_api.storage import AccountStore, CredentialError, CredentialStore
 
 ACCOUNT_ID = "00000000-0000-4000-8000-000000000001"
 SECRET = "synthetic-test-secret-not-a-real-token"
@@ -85,7 +85,7 @@ def test_persistent_roundtrip_uses_namespaced_opaque_reference(encrypted):
     ref = store.put(ACCOUNT_ID, SECRET, persist=True)
     assert ref.startswith(f"keyring:{ACCOUNT_ID}:")
     assert SECRET not in ref
-    assert encrypted.values == {("usage-tui", ref): SECRET}
+    assert encrypted.values == {("cli-usage-api", ref): SECRET}
     assert CredentialStore(backend=encrypted).get(ref) == SECRET
     store.delete(ref)
     store.delete(ref)
@@ -236,6 +236,6 @@ def test_invalid_put_never_reaches_backend(encrypted, changes):
 def test_backend_returned_secret_must_be_valid(encrypted, invalid):
     store = CredentialStore(encrypted)
     ref = store.put(ACCOUNT_ID, SECRET, persist=True)
-    encrypted.values["usage-tui", ref] = invalid
+    encrypted.values["cli-usage-api", ref] = invalid
     with pytest.raises(CredentialError):
         store.get(ref)

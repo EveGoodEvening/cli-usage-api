@@ -100,7 +100,7 @@ Historical out of scope (Codex exclusion superseded by §11): web UI/server, sta
 
 ## 2. Chosen boring implementation
 
-**Python 3.11+; `uv`; Textual + Rich; `httpx`; OS `keyring`; `pytest`, `pytest-asyncio`, and `respx` for tests.** Python supports this small read-only local tool without compiling an application framework. Textual supplies terminal rendering, masked inputs, responsive layout, and headless Pilot tests. Use standard-library dataclasses, enums, `Decimal`, `datetime`, `json`, `argparse`, and filesystem APIs instead of a schema/DI/plugin/database framework. `uv.lock` is committed once generated. Pin resolved versions in the lock, not guessed version numbers in this plan. Configure a `src/` layout and console entry point `usage = usage_tui.cli:main`.
+**Python 3.11+; `uv`; Textual + Rich; `httpx`; OS `keyring`; `pytest`, `pytest-asyncio`, and `respx` for tests.** Python supports this small read-only local tool without compiling an application framework. Textual supplies terminal rendering, masked inputs, responsive layout, and headless Pilot tests. Use standard-library dataclasses, enums, `Decimal`, `datetime`, `json`, `argparse`, and filesystem APIs instead of a schema/DI/plugin/database framework. `uv.lock` is committed once generated. Pin resolved versions in the lock, not guessed version numbers in this plan. Configure a `src/` layout and console entry point `usage = cli_usage_api.cli:main`.
 
 One async process, one dashboard, a bounded fetch scheduler, immutable normalized snapshots, and explicit provider modules. No general-purpose endpoint configuration, dynamic provider loading, background daemon, SQLite, or server. POSIX/Linux is the initial fully supported target. Other OS credential locations must fail with explicit instructions unless implemented and tested; do not claim cross-platform credential import from a Linux-only implementation.
 
@@ -108,15 +108,15 @@ Required dependency groups: runtime `textual`, `httpx`, `keyring`; dev `pytest`,
 
 ### Planned source ownership
 
-- `src/usage_tui/domain.py`: public value types, metric IDs, validation and serialization helpers.
-- `src/usage_tui/storage.py`: nonsecret account/config persistence and secure credential backend.
-- `src/usage_tui/credentials.py`: read-only first-party credential references and connection validation.
-- `src/usage_tui/transport.py`: fixed-origin HTTP transport and safe response/error boundary.
-- `src/usage_tui/providers/{base,claude,console,grok,chatgpt}.py`: normalized provider adapters, no UI imports.
-- `src/usage_tui/scheduler.py`: polling, retries, cancellation, stale-state merge.
-- `src/usage_tui/demo.py`, `src/usage_tui/fixtures/demo.json`: deterministic offline source.
-- `src/usage_tui/app.py`, `src/usage_tui/accounts.py`, `src/usage_tui/app.tcss`: dashboard and account management.
-- `src/usage_tui/cli.py`, `src/usage_tui/__main__.py`: thin CLI/TUI launch.
+- `src/cli_usage_api/domain.py`: public value types, metric IDs, validation and serialization helpers.
+- `src/cli_usage_api/storage.py`: nonsecret account/config persistence and secure credential backend.
+- `src/cli_usage_api/credentials.py`: read-only first-party credential references and connection validation.
+- `src/cli_usage_api/transport.py`: fixed-origin HTTP transport and safe response/error boundary.
+- `src/cli_usage_api/providers/{base,claude,console,grok,chatgpt}.py`: normalized provider adapters, no UI imports.
+- `src/cli_usage_api/scheduler.py`: polling, retries, cancellation, stale-state merge.
+- `src/cli_usage_api/demo.py`, `src/cli_usage_api/fixtures/demo.json`: deterministic offline source.
+- `src/cli_usage_api/app.py`, `src/cli_usage_api/accounts.py`, `src/cli_usage_api/app.tcss`: dashboard and account management.
+- `src/cli_usage_api/cli.py`, `src/cli_usage_api/__main__.py`: thin CLI/TUI launch.
 - `tests/`: focused contract, parser, scheduler, storage/security, CLI and TUI tests.
 
 Directories may be created as needed; path lists in §8 are actual worker edit ownership limits, not permission to create arbitrary additional abstractions.
@@ -159,7 +159,7 @@ Do not commit empty placeholder providers as “done.” Missing-contract ChatGP
 
 ## 4. Defensible provider wire contracts
 
-All HTTP production requests are read-only GET, TLS verified, no redirects, `trust_env=False` (avoid implicit proxies/netrc), `Accept: application/json`, identifying `User-Agent: usage-tui/<installed-version>`. No configured base URL, credential-forwarding redirect, arbitrary cookie jar, HTTP downgrade, telemetry, or unrelated hosts. A custom host is available only through injected in-memory test transports, never user configuration. Avoid copying upstream tools' browser import, insecure cookie config, inferred quotas, or telemetry behavior.
+All HTTP production requests are read-only GET, TLS verified, no redirects, `trust_env=False` (avoid implicit proxies/netrc), `Accept: application/json`, identifying `User-Agent: cli-usage-api/<installed-version>`. No configured base URL, credential-forwarding redirect, arbitrary cookie jar, HTTP downgrade, telemetry, or unrelated hosts. A custom host is available only through injected in-memory test transports, never user configuration. Avoid copying upstream tools' browser import, insecure cookie config, inferred quotas, or telemetry behavior.
 
 ### 4.1 Claude subscription
 
@@ -193,7 +193,7 @@ Credits expire; they do not “reset weekly.” Show nearest expiry plus expanda
 
 ### 4.3 Grok shared pool, Build, and Chat
 
-Prefer a direct implementation of the **official CLI's existing read-only billing request**, not spawning a potentially updating/telemetry-enabled agent process. Fixed origin `https://cli-chat-proxy.grok.com`; exact path `/v1/billing?format=credits`; headers `Authorization: Bearer <key>`, `x-xai-token-auth: xai-grok-cli`, `Accept: application/json`. Include `x-userid` only from the same resolved credential. Under §12, add release-pinned `x-grok-client-version: 1.0.70`, sourced from the official stable feed; retain identifying `User-Agent: usage-tui/<installed-version>`. No runtime download, guessed version, client-mode header, or upstream User-Agent impersonation. This sourced compatibility adjustment does not prove the user's billing failure was a version rejection.
+Prefer a direct implementation of the **official CLI's existing read-only billing request**, not spawning a potentially updating/telemetry-enabled agent process. Fixed origin `https://cli-chat-proxy.grok.com`; exact path `/v1/billing?format=credits`; headers `Authorization: Bearer <key>`, `x-xai-token-auth: xai-grok-cli`, `Accept: application/json`. Include `x-userid` only from the same resolved credential. Under §12, add release-pinned `x-grok-client-version: 1.0.70`, sourced from the official stable feed; retain identifying `User-Agent: cli-usage-api/<installed-version>`. No runtime download, guessed version, client-mode header, or upstream User-Agent impersonation. This sourced compatibility adjustment does not prove the user's billing failure was a version rejection.
 
 Connection: official `grok login` runs outside this app. Read `$GROK_HOME/auth.json` or `~/.grok/auth.json`; top-level keys identify scopes. Prefer the selected `https://auth.x.ai::<client-id>` entry, fallback to `https://accounts.x.ai/sign-in` only if no ambiguity. Entry contains `key`, `expires_at`, `user_id`, `team_id`, `auth_mode`, and optional `principal_type`. Expiry parser accepts timezone-aware RFC3339 and explicitly tested Unix seconds/milliseconds; unknown expiry is not asserted fresh. Multiple matching identities require user selection stored as a nonsecret scope selector; do not accidentally choose another account. Never copy `refresh_token` into app storage or refresh it. Manual bearer is supported with unknown identity until configured; API/management keys beginning `xai-` are rejected for subscription use. Team principal unsupported responses are actionable, not retried under an unrelated personal account.
 
@@ -240,7 +240,7 @@ Provider CLI spellings map explicitly to underscore internal IDs. `add` asks for
 
 Default persistence: OS keyring backend with actual encrypted OS store (Secret Service on supported Linux). Reject null/fail/plaintext backends; do not install or silently select `keyrings.alt`. Credential strings never enter account JSON. If secure keyring is unavailable/locked, offer explicit **session-only** mode from the TUI; CLI persistent `accounts key set` fails with actionable guidance rather than pretending memory survives exit. Do not invent home-grown encryption or a plaintext fallback. Python cannot promise memory zeroization; document this honestly. Session-only secrets are discarded on exit but remain subject to process-memory risk.
 
-Config path: `$XDG_CONFIG_HOME/usage-tui/accounts.json` (fallback `~/.config/usage-tui/accounts.json`). Create private parent directory `0700`; atomic same-directory config replacement with `0600`; reject symlink config targets and unsafe ownership/modes on credential import before reading on POSIX. Imported first-party credential paths must be regular, user-owned, not group/world-readable; report permission instructions rather than chmod or mutate them. Max credential/config file size 1 MiB. App stores no secret or raw-response cache; snapshots are memory-only. A config load error does not overwrite existing data. Account changes are serialized in one process; do not claim safe concurrent config writers without a lock. Implement a standard-library POSIX advisory lock for config mutations and reread under lock to prevent lost updates.
+Config path: `$XDG_CONFIG_HOME/cli-usage-api/accounts.json` (fallback `~/.config/cli-usage-api/accounts.json`). Create private parent directory `0700`; atomic same-directory config replacement with `0600`; reject symlink config targets and unsafe ownership/modes on credential import before reading on POSIX. Imported first-party credential paths must be regular, user-owned, not group/world-readable; report permission instructions rather than chmod or mutate them. Max credential/config file size 1 MiB. App stores no secret or raw-response cache; snapshots are memory-only. A config load error does not overwrite existing data. Account changes are serialized in one process; do not claim safe concurrent config writers without a lock. Implement a standard-library POSIX advisory lock for config mutations and reread under lock to prevent lost updates.
 
 HTTP credentials are limited to their exact origins (§4). Disable redirects, netrc, implicit proxy env, and cookie persistence. Never send an API key for an OAuth source or a Console cookie to another Anthropic service. No browser imports, analytics, crash-report uploads, endpoint override, or raw HTTP debug flag. Logs contain safe codes and local opaque account IDs only; logging is off by default. UI shows “stored securely,” “session only,” or “external credential reference,” not a token suffix. Diagnostics cannot interpolate upstream body strings, URLs with query credentials, arbitrary exception repr, or local identity data.
 
@@ -343,7 +343,7 @@ A worker assignment must contain: chunk/unit ID, exact owned paths, referenced c
 
 Two sequential bounded assignments:
 
-- **C01-A package/domain**, owned paths: `pyproject.toml`, `src/usage_tui/__init__.py`, `src/usage_tui/domain.py`, `tests/test_domain.py`, `.gitignore`. Implement §2/§3 types, metric constants, finite numeric/timestamp helpers, schema serialization, dependency/entry-point/dev group declarations. `.gitignore` excludes venvs/caches/builds/local secrets and smoke transcripts without hiding source fixtures. Tests cover bool-as-number, >100%, partial values, money arithmetic and aware timestamps. Do not add a fake CLI/provider. Return an exact throwaway library smoke snippet; do not invoke the future `usage` entry point.
+- **C01-A package/domain**, owned paths: `pyproject.toml`, `src/cli_usage_api/__init__.py`, `src/cli_usage_api/domain.py`, `tests/test_domain.py`, `.gitignore`. Implement §2/§3 types, metric constants, finite numeric/timestamp helpers, schema serialization, dependency/entry-point/dev group declarations. `.gitignore` excludes venvs/caches/builds/local secrets and smoke transcripts without hiding source fixtures. Tests cover bool-as-number, >100%, partial values, money arithmetic and aware timestamps. Do not add a fake CLI/provider. Return an exact throwaway library smoke snippet; do not invoke the future `usage` entry point.
 - **C01-B initial lock**, owned path: `uv.lock`, after C01-A metadata lands. Run `uv lock` for dependency resolution only; return the exact command/outcome and lock path. No installation, tests, lint, formatting, application launch, or commits. If metadata must change, request a bounded C01-A owner fix first.
 
 Then D(C01) owns only the four documentation paths above. Exit: domain signatures and IDs match the plan, initial lock exists, and the orchestrator installs the locked environment and exercises domain round-trip/validation smoke before draft/review/closure. Suggested draft subject: `feat(domain): draft C01 package and frozen contracts`.
@@ -352,7 +352,7 @@ Closed: final gates and actual domain smoke passed, both independent rereviews w
 
 ### [x] C02 — local account config and secure key management
 
-One worker; target paths: `src/usage_tui/storage.py`, `tests/test_storage.py`, `tests/test_secret_store.py`.
+One worker; target paths: `src/cli_usage_api/storage.py`, `tests/test_storage.py`, `tests/test_secret_store.py`.
 
 Implement AccountStore/CredentialStore, locking/atomic private config, secure-backend validation, session-only references, CRUD and cancellation-safe mutation. Tests inject fake encrypted/insecure/locked backends, malformed/newer config, permissions, symlinks, atomic write failure, and concurrent mutation lock behavior. Never contact a real keyring in tests.
 
@@ -364,8 +364,8 @@ Closed: C02 implementation and bounded documentation/Lessons landed in green dra
 
 Both independent worker units landed after C02 closure commit `2ab03fb`; their ownership and implementation contracts are preserved below:
 
-- **C03-A**, owned paths: `src/usage_tui/transport.py`, `tests/test_transport.py`, `tests/test_security.py`. Implement §4 fixed origins/path guards/auth-header mapping, streaming response bound, deadlines, no redirects/proxy inheritance, structured safe failures and Retry-After parsing. Test allowlisted origins/paths, attempted redirect exfiltration, credentials in exception bodies, cross-provider credential rejection, oversized/error/non-JSON bodies.
-- **C03-B**, owned paths: `src/usage_tui/credentials.py`, `tests/test_credentials.py`, `tests/fixtures/credentials.json`. Implement read-only first-party reference resolution, profile selection, import permission checks, expiry/scope parsing and manual-secret references. Fixture is synthetic and clearly labeled. No actual home-directory reads in tests.
+- **C03-A**, owned paths: `src/cli_usage_api/transport.py`, `tests/test_transport.py`, `tests/test_security.py`. Implement §4 fixed origins/path guards/auth-header mapping, streaming response bound, deadlines, no redirects/proxy inheritance, structured safe failures and Retry-After parsing. Test allowlisted origins/paths, attempted redirect exfiltration, credentials in exception bodies, cross-provider credential rejection, oversized/error/non-JSON bodies.
+- **C03-B**, owned paths: `src/cli_usage_api/credentials.py`, `tests/test_credentials.py`, `tests/fixtures/credentials.json`. Implement read-only first-party reference resolution, profile selection, import permission checks, expiry/scope parsing and manual-secret references. Fixture is synthetic and clearly labeled. No actual home-directory reads in tests.
 
 Exit: exact Transport and Resolver interfaces in §3 available; source credentials captured once per attempt. Integrator resolves only true interface discrepancies through a worker, not ad hoc rewrites.
 
@@ -373,7 +373,7 @@ Closed: C03 implementation and bounded documentation/Lessons landed in green dra
 
 ### [x] C04 — Claude subscription adapter
 
-One worker; owned paths: `src/usage_tui/providers/claude.py`, `tests/test_claude.py`, `tests/fixtures/claude_usage.json`.
+One worker; owned paths: `src/cli_usage_api/providers/claude.py`, `tests/test_claude.py`, `tests/fixtures/claude_usage.json`.
 
 Implement §4.1 with all three required metric rows. Fixtures cover five-hour, weekly, scoped Fable inactive flag, legacy aliases, missing/invalid/null fields, duplicate conflicts, seconds/milliseconds and invalid resets. Tests assert one request, correct beta header via transport contract, percent direction and no fabricated eligibility.
 
@@ -383,7 +383,7 @@ Closed: implementation and bounded documentation/changelog/Lessons completed; gr
 
 ### [x] C05 — Console balance adapter and organization discovery
 
-One worker; owned paths: `src/usage_tui/providers/console.py`, `tests/test_console.py`, `tests/fixtures/console_credits.json`.
+One worker; owned paths: `src/cli_usage_api/providers/console.py`, `tests/test_console.py`, `tests/fixtures/console_credits.json`.
 
 Implement §4.2 plus async `discover_organizations(credential) -> tuple[OrganizationChoice, ...]` local to this module; `OrganizationChoice` is a frozen `{id, label}` record. Discovery only lists candidates, never silently picks one. Tests cover multi-org selection, permission failures, complete/missing/empty category arrays, multiple grants, zero/negative amounts, exponent/currency defaults/invalidity, expiry/unknown expiry and disagreement with authoritative total. Tests assert no calls to current_spend/Admin endpoints.
 
@@ -393,7 +393,7 @@ Closed: implementation and bounded documentation landed in green draft `98e0c6d`
 
 ### [x] C06 — Grok billing and product shares
 
-One worker; owned paths: `src/usage_tui/providers/grok.py`, `tests/test_grok.py`, `tests/fixtures/grok_billing.json`.
+One worker; owned paths: `src/cli_usage_api/providers/grok.py`, `tests/test_grok.py`, `tests/fixtures/grok_billing.json`.
 
 Implement §4.3. Tests cover unified true/false/missing, weekly/monthly/unknown periods, explicit percent zero vs missing, same-payload validated shares, unknown products, missing Build/Chat, duplicate/malformed arrays, sum tolerance, expired credentials, teams and missing reset. No ACP subprocess/gRPC/browser code, on-demand-derived included quota, or implicit-zero logic.
 
@@ -406,7 +406,7 @@ Closed: implementation and bounded documentation/Lessons landed. Approved detail
 Two units with disjoint ownership:
 
 - **C07-A research**, owned planning path: `PLAN.md` §4.4/§7/§9 only. Revisit unresolved ordinary-chat endpoint leads from §7 using static read/search, no browser, credentials, requests to authenticated provider APIs, or implementation. Return sourced request/schema/metric semantics if defensible. Otherwise add a concise exhausted-leads record and exact missing prerequisite; do not declare the feature complete. This is a research-only committable update. Research worker owns PLAN during this unit; integration owner must not edit it concurrently.
-- **C07-B capability/registry**, owned paths: `src/usage_tui/providers/chatgpt.py`, `src/usage_tui/providers/base.py`, `src/usage_tui/providers/__init__.py`, `tests/test_capabilities.py`. Implement the explicitly unresolved provider result and complete explicit registry for other implemented adapters. Test required metric enumeration and zero requests from the blocked provider, plus no WHAM/Codex fallback. This is honest capability/error behavior, not ordinary GPT quota implementation.
+- **C07-B capability/registry**, owned paths: `src/cli_usage_api/providers/chatgpt.py`, `src/cli_usage_api/providers/base.py`, `src/cli_usage_api/providers/__init__.py`, `tests/test_capabilities.py`. Implement the explicitly unresolved provider result and complete explicit registry for other implemented adapters. Test required metric enumeration and zero requests from the blocked provider, plus no WHAM/Codex fallback. This is honest capability/error behavior, not ordinary GPT quota implementation.
 
 Exit: ordinary ChatGPT metric remains separately visible/tracked. If C07-A finds a real contract, amend the plan with a bounded C07-C (adapter, fixture, tests; at most five paths) before moving to C08; do not silently narrow or skip it. If unresolved, code work continues while metric acceptance remains blocked.
 
@@ -415,7 +415,7 @@ Closed research/capability milestone only: C07-A sourced exhausted-leads record 
 
 ### [x] C08 — polling and stale snapshot state machine
 
-One worker; owned paths: `src/usage_tui/scheduler.py`, `tests/test_scheduler.py`, `tests/test_freshness.py`.
+One worker; owned paths: `src/cli_usage_api/scheduler.py`, `tests/test_scheduler.py`, `tests/test_freshness.py`.
 
 Implement §6 with injected clocks/RNG/transport-independent providers and explicit credential generation. Test initial poll, no overlap, global concurrency, origin spacing, coalesced manual refresh, longer Retry-After preservation, exponential cap, auth suspension, account replacement/removal, cancellation, last-good preservation, successful-field disappearance, passed reset, and stale threshold. No real sleeps/network in tests.
 
@@ -425,7 +425,7 @@ Closed scheduler milestone: implementation, bounded documentation/changelog/secu
 
 ### [x] C09 — deterministic offline source
 
-One worker; owned paths: `src/usage_tui/demo.py`, `src/usage_tui/fixtures/demo.json`, `tests/test_demo.py`.
+One worker; owned paths: `src/cli_usage_api/demo.py`, `src/cli_usage_api/fixtures/demo.json`, `tests/test_demo.py`.
 
 Implement healthy/errors scenarios with fixed time and required metrics including clearly synthetic GPT data; no live configuration/secret reads. Tests patch storage/resolver/HTTP construction to raise and prove demo never accesses them. Fixture isn't a fallback used after a live fetch fails.
 
@@ -435,7 +435,7 @@ Closed: implementation and bounded documentation landed at green draft `0880c02`
 
 ### [x] C10 — account management and secret-input UI
 
-One worker; owned paths: `src/usage_tui/accounts.py`, `tests/test_accounts_ui.py`, `tests/test_account_flows.py`.
+One worker; owned paths: `src/cli_usage_api/accounts.py`, `tests/test_accounts_ui.py`, `tests/test_account_flows.py`.
 
 Implement reusable Textual account manager screens/modal forms using §5 services. Include create/edit/disable/remove, external references, masked secret set/delete, session-only warning, Console organization selection, Grok scope selection, local-key unsupported-metric explanation, and reconnect guidance. No provider requests except explicit connection discovery/check via injected services. Tests use Pilot plus fake stores/discovery to cover cancel, masked inputs/focus, replacement/removal and no secret in notifications. Keep CLI prompts in C12, not in this screen module.
 
@@ -445,7 +445,7 @@ Closed: implementation and bounded documentation/changelog/security/Lessons land
 
 ### [x] C11 — dashboard TUI and help
 
-One worker; owned paths: `src/usage_tui/app.py`, `src/usage_tui/app.tcss`, `tests/test_app.py`, `tests/test_rendering.py`.
+One worker; owned paths: `src/cli_usage_api/app.py`, `src/cli_usage_api/app.tcss`, `tests/test_app.py`, `tests/test_rendering.py`.
 
 Implement §6, wire account manager, subscription/balance/product rows, grant details, provenance, all error/blocked/stale views and keys. Required constructor is §3.2; app depends only on injected scheduler/store factory interfaces. Pilot tests cover 80×24 and 40×12, keyboard navigation, empty state, account manager return, stale countdown, safe labels, DEMO banner and blocked ChatGPT distinction. No new public web/statusline output.
 
@@ -457,7 +457,7 @@ Closed at closure commit `cd5561a`: dashboard/help implementation and bounded do
 
 Two sequential bounded units:
 
-- **C12-A CLI**, owned paths: `src/usage_tui/cli.py`, `src/usage_tui/__main__.py`, `tests/test_cli.py`. Implement exact §5 commands, live/demo composition, interactive getpass, non-TTY refusal for secret operations, friendly config/keyring/import instructions and error exit codes. API-key storage must not imply subscription support. The C01 entry-point target becomes real here. Exit codes: 0 success/normal TUI quit; 2 usage/config/secret-input error; 3 credential/backend/provider connection failure. Dashboard per-account errors remain in UI. The initial lock already exists; only actual dependency changes justify a separate explicitly bounded metadata/lock owner task.
+- **C12-A CLI**, owned paths: `src/cli_usage_api/cli.py`, `src/cli_usage_api/__main__.py`, `tests/test_cli.py`. Implement exact §5 commands, live/demo composition, interactive getpass, non-TTY refusal for secret operations, friendly config/keyring/import instructions and error exit codes. API-key storage must not imply subscription support. The C01 entry-point target becomes real here. Exit codes: 0 success/normal TUI quit; 2 usage/config/secret-input error; 3 credential/backend/provider connection failure. Dashboard per-account errors remain in UI. The initial lock already exists; only actual dependency changes justify a separate explicitly bounded metadata/lock owner task.
 - **C12-B production PTY harness**, owned paths: `scripts/tui_smoke.py`, `tests/test_smoke_harness.py`, `tests/test_shutdown.py`. Implement a stdlib POSIX PTY harness launching the actual installed `usage --demo` entry point, healthy/errors scenarios, window 80×24 then 40×12, known-token waits, `?`, Escape, `a`, Escape, `r`, then `q`; assert exit 0 and restore termios/cursor/echo. A second run sends Ctrl-C. Bound waits and total timeout, kill/reap in finally, sanitize captures, and fail on traceback. Check provider names, DEMO marker, required synthetic quota/balance labels and account modal, not just startup. Use the same uv environment with isolated temporary HOME/XDG. No worker executes the harness; orchestrator does so before draft/review. Headless Pilot alone is not actual terminal smoke.
 
 Exit: all commands are actual wired behavior, no TODO branches; demo constructs no live client.
@@ -720,16 +720,16 @@ This callable **never calls CredentialStore.get/put/delete**, AccountService's r
 
 | Unit / exclusive owner | Exact owned paths | Bounded responsibility / dependencies |
 |---|---|---|
-| S1 identity/storage owner | `src/usage_tui/domain.py`; `src/usage_tui/storage.py`; `tests/test_domain.py`; `tests/test_storage.py` | Freeze IDs/read allowlists/ResolvedCredential field and the two migration callables, narrow legacy detection and atomic safe migration; first shared prerequisite |
-| S2 resolver owner | `src/usage_tui/credentials.py`; `tests/test_credentials.py` | After S1 identity contract, secure explicit Codex file branch/account selection/JWT hints; no generic Grok fallback, no real files |
-| W wire/provider owner | `src/usage_tui/transport.py`; `src/usage_tui/providers/codex.py`; `src/usage_tui/providers/chatgpt.py` (delete); `src/usage_tui/providers/base.py`; `src/usage_tui/providers/__init__.py` | After S1, implement exact route/headers/parser, delete old provider/export/registry; S2 needed only for integrated smoke, not editing |
+| S1 identity/storage owner | `src/cli_usage_api/domain.py`; `src/cli_usage_api/storage.py`; `tests/test_domain.py`; `tests/test_storage.py` | Freeze IDs/read allowlists/ResolvedCredential field and the two migration callables, narrow legacy detection and atomic safe migration; first shared prerequisite |
+| S2 resolver owner | `src/cli_usage_api/credentials.py`; `tests/test_credentials.py` | After S1 identity contract, secure explicit Codex file branch/account selection/JWT hints; no generic Grok fallback, no real files |
+| W wire/provider owner | `src/cli_usage_api/transport.py`; `src/cli_usage_api/providers/codex.py`; `src/cli_usage_api/providers/chatgpt.py` (delete); `src/cli_usage_api/providers/base.py`; `src/cli_usage_api/providers/__init__.py` | After S1, implement exact route/headers/parser, delete old provider/export/registry; S2 needed only for integrated smoke, not editing |
 | T wire/security test owner | `tests/test_transport.py`; `tests/test_security.py`; `tests/test_capabilities.py`; `tests/test_codex.py` (new) | After S1 contract, develop synthetic contract tests alongside W; replace no-WHAM/blocked assumptions, assert exact request and duration/pool/reset/absence behavior |
-| U account/CLI owner | `src/usage_tui/accounts.py`; `src/usage_tui/cli.py`; `tests/test_accounts_ui.py`; `tests/test_account_flows.py`; `tests/test_cli.py` | After S1 callables, replace choices/guidance/reconnect, add explicit migration CLI and safe TUI error instruction; prove file-only Codex and no old-secret operations |
-| V dashboard/scheduler-test owner | `src/usage_tui/app.py`; `tests/test_app.py`; `tests/test_rendering.py`; `tests/test_scheduler.py` | After S1, required weekly/optional-extra labels/details and Codex poll/resolve/refresh/stale/stop tests; remove old credential-free scheduling assertions |
-| D synthetic/PTY owner | `src/usage_tui/demo.py`; `src/usage_tui/fixtures/demo.json`; `scripts/tui_smoke.py`; `tests/test_demo.py`; `tests/test_smoke_harness.py` | After S1, synthetic Codex weekly plus optional reported extras; keep demo isolation; installed-entry harness checks Codex labels, not old ChatGPT token |
+| U account/CLI owner | `src/cli_usage_api/accounts.py`; `src/cli_usage_api/cli.py`; `tests/test_accounts_ui.py`; `tests/test_account_flows.py`; `tests/test_cli.py` | After S1 callables, replace choices/guidance/reconnect, add explicit migration CLI and safe TUI error instruction; prove file-only Codex and no old-secret operations |
+| V dashboard/scheduler-test owner | `src/cli_usage_api/app.py`; `tests/test_app.py`; `tests/test_rendering.py`; `tests/test_scheduler.py` | After S1, required weekly/optional-extra labels/details and Codex poll/resolve/refresh/stale/stop tests; remove old credential-free scheduling assertions |
+| D synthetic/PTY owner | `src/cli_usage_api/demo.py`; `src/cli_usage_api/fixtures/demo.json`; `scripts/tui_smoke.py`; `tests/test_demo.py`; `tests/test_smoke_harness.py` | After S1, synthetic Codex weekly plus optional reported extras; keep demo isolation; installed-entry harness checks Codex labels, not old ChatGPT token |
 | R documentation/acceptance owner | `README.md`; `SECURITY.md`; `CHANGELOG.md`; `AGENTS.md`; `PLAN.md` | After contracts and alongside implementation, own all active-scope reconciliation, Unreleased entry, repo-root Lessons and final proof/status ledger; preserve historical claims as historical, never rewrite old test results |
 
-Intentionally unchanged production paths: `src/usage_tui/scheduler.py` (generic credentialed path), `src/usage_tui/providers/claude.py`, `src/usage_tui/providers/console.py`, `src/usage_tui/providers/grok.py`, `src/usage_tui/app.tcss`, `src/usage_tui/__main__.py`; unrelated provider tests and dependency/lock/package files have no established cutover change. Any discovered necessary change first receives explicit nonoverlapping ownership in this appendix; do not invent an adjacent refactor. R reconciles active scope/provider tables/security headers/credential setup/CLI/help examples/demo labels and removes stale current “ordinary ChatGPT remains blocked” claims, including old manual commands in this plan; historical C07 evidence stays truthful. Root Lessons must capture duration-not-position, explicit transport branch, unverified-JWT limits and consent/detached-secret migration.
+Intentionally unchanged production paths: `src/cli_usage_api/scheduler.py` (generic credentialed path), `src/cli_usage_api/providers/claude.py`, `src/cli_usage_api/providers/console.py`, `src/cli_usage_api/providers/grok.py`, `src/cli_usage_api/app.tcss`, `src/cli_usage_api/__main__.py`; unrelated provider tests and dependency/lock/package files have no established cutover change. Any discovered necessary change first receives explicit nonoverlapping ownership in this appendix; do not invent an adjacent refactor. R reconciles active scope/provider tables/security headers/credential setup/CLI/help examples/demo labels and removes stale current “ordinary ChatGPT remains blocked” claims, including old manual commands in this plan; historical C07 evidence stays truthful. Root Lessons must capture duration-not-position, explicit transport branch, unverified-JWT limits and consent/detached-secret migration.
 
 ### 11.6 Integrated gate specification, smoke and live boundary
 
@@ -1045,8 +1045,8 @@ Implemented:
   Startup/cancellation do not rewrite the preference. A watcher registered with
   `init=False` avoids saving initialization instead of user choice.
 - `SettingsStore` stores only schema version and theme in
-  `$XDG_CONFIG_HOME/usage-tui/settings.json`, falling back to
-  `~/.config/usage-tui/settings.json`. Shared private file primitives retain the
+  `$XDG_CONFIG_HOME/cli-usage-api/settings.json`, falling back to
+  `~/.config/cli-usage-api/settings.json`. Shared private file primitives retain the
   existing stable-lock, no-symlink, bounded-read, `0700` directory / `0600` file,
   atomic replacement and fsync policy. Account committed-write error semantics
   remain intact; account schema and secret references are unchanged.
@@ -1114,8 +1114,8 @@ Exercised evidence:
   **331 passed in 7.18s**. Coverage includes positive one-minor-unit differences,
   negative differences/negative totals, nondefault units, original amount retention,
   and partial-diagnostic precedence when expiry is unknown.
-- `uv run --locked ruff check src/usage_tui/domain.py
-  src/usage_tui/providers/console.py tests/test_console.py`: passed;
+- `uv run --locked ruff check src/cli_usage_api/domain.py
+  src/cli_usage_api/providers/console.py tests/test_console.py`: passed;
   corresponding `ruff format --check` passed for **3 files**.
   Ruff LSP diagnostics were clean for domain and Console provider. This server
   does not implement definition/reference navigation; scoped searches were used
@@ -1153,7 +1153,7 @@ can shell in, log in manually, configure accounts and start API mode by hand.
 
 | Unit | Owned paths | Status |
 |---|---|---|
-| Backend API | `src/usage_tui/api.py`, CLI wiring in `cli.py`, `ApiTokenStore` in `storage.py`, `tests/`, `pyproject.toml`/`uv.lock` (Starlette + uvicorn) | Implementation landed in the working tree; gates/review pending verification |
+| Backend API | `src/cli_usage_api/api.py`, CLI wiring in `cli.py`, `ApiTokenStore` in `storage.py`, `tests/`, `pyproject.toml`/`uv.lock` (Starlette + uvicorn) | Implementation landed in the working tree; gates/review pending verification |
 | Web frontend | `web/` (Vite + React 18 + TypeScript, deploy configs for Vercel, Cloudflare Pages/Workers, Railway) | Implementation landed in the working tree; build/lint/browser verification pending |
 | Deploy + docs | `Dockerfile`, `.dockerignore`, `railway.json`, `docker/entrypoint.sh`, `docs/deploy-railway.md`, README/SECURITY/CHANGELOG, this section | Landed; local image build and container smoke exercised (§15.4); Railway pending |
 
@@ -1269,7 +1269,7 @@ Request: idle Railway hosts let first-party access tokens lapse; design a renewa
 path, and (user choice) for Claude Code use `claude auth status` first, then a minimal
 Haiku request. The reader still never refreshes or reads refresh tokens (§4.3 is
 unchanged for the reader); this separate opt-in loop deliberately spawns the official
-CLIs so each CLI renews its own file. Implementation: `src/usage_tui/keepalive.py`,
+CLIs so each CLI renews its own file. Implementation: `src/cli_usage_api/keepalive.py`,
 console script `usage-keepalive`, `tests/test_keepalive.py` (fake CLIs only).
 
 - Scheduling: all three CLIs refresh only within 300 s of access-token expiry at the

@@ -98,7 +98,7 @@ COPY docker/entrypoint.sh /usr/local/bin/usage-entrypoint
 RUN chmod 0755 /usr/local/bin/usage-entrypoint \
  && printf '\n# usage-api image: private files by default\numask 077\n' >> /etc/bash.bashrc
 
-# Per-user state (CLI logins, usage-tui accounts.json/api_tokens.json) lives on
+# Per-user state (CLI logins, cli-usage-api accounts.json/api_tokens.json) lives on
 # the Railway volume. The self-updaters are disabled so the pinned versions stay
 # what this image was built and verified with; rebuild to upgrade.
 ENV HOME=/data/home \

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     Diagnostic,
@@ -26,7 +26,7 @@ from usage_tui.domain import (
     utc_datetime,
     validate_credential_binding,
 )
-from usage_tui.transport import Transport
+from cli_usage_api.transport import Transport
 
 _PROVIDER = ProviderId.CLAUDE_PLATFORM
 _SOURCE = SourceRef(

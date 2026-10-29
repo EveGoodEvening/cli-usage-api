@@ -7,7 +7,7 @@ import traceback
 import httpx
 import pytest
 
-from usage_tui.domain import (
+from cli_usage_api.domain import (
     CredentialKind,
     Diagnostic,
     FetchState,
@@ -15,7 +15,7 @@ from usage_tui.domain import (
     ResolvedCredential,
     TransportError,
 )
-from usage_tui.transport import MAX_RESPONSE_BYTES, Transport
+from cli_usage_api.transport import MAX_RESPONSE_BYTES, Transport
 
 SECRET = "synthetic-never-real-secret"
 
