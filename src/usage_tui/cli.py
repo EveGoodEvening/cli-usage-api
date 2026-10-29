@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
+from usage_tui import debuglog
 from usage_tui.accounts import (
     CONSOLE_SESSION_WARNING,
     FILE_KINDS,
@@ -105,6 +106,22 @@ def _parser() -> Parser:
         "--demo", action="store_true", help="Offline synthetic demo; no live files."
     )
     parser.add_argument("--scenario", choices=("healthy", "errors"), default=None)
+    parser.add_argument(
+        "--debug-log",
+        metavar="PATH",
+        default=None,
+        help="Live dashboard only: append JSON-lines provider responses/snapshots to a "
+        "private file. Contains raw response bodies; secrets are redacted best-effort.",
+    )
+    parser.add_argument(
+        "--debug-provider",
+        action="append",
+        choices=tuple(PROVIDER_NAMES),
+        metavar="PROVIDER",
+        default=None,
+        help="Limit --debug-log to this provider (repeatable; default: all). "
+        f"One of: {', '.join(PROVIDER_NAMES)}.",
+    )
     commands = parser.add_subparsers(dest="command")
     accounts = commands.add_parser("accounts", help="Manage local accounts and secure credentials")
     actions = accounts.add_subparsers(dest="action", required=True)
@@ -373,6 +390,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise CommandError("--scenario requires --demo.")
         if args.command is not None and args.demo:
             raise CommandError("--demo cannot be combined with account commands.")
+        if args.debug_provider is not None and args.debug_log is None:
+            raise CommandError("--debug-provider requires --debug-log.")
+        if args.debug_log is not None and args.demo:
+            raise CommandError("--debug-log cannot be combined with --demo.")
+        if args.debug_log is not None and args.command is not None:
+            raise CommandError("--debug-log applies only to the live dashboard.")
         if args.command == "accounts":
             return _accounts(args)
         settings = SettingsStore()
@@ -381,6 +404,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 mode="demo", scenario=args.scenario or "healthy", settings_store=settings
             ).run()
         else:
+            if args.debug_log is not None:
+                try:
+                    debuglog.configure(
+                        args.debug_log,
+                        None
+                        if args.debug_provider is None
+                        else {PROVIDER_NAMES[name] for name in args.debug_provider},
+                    )
+                except debuglog.DebugLogError:
+                    raise CommandError(
+                        "Cannot open debug log. Its directory must exist; the file must be "
+                        "your own regular file (not a symlink) without group/other access."
+                    ) from None
             store = AccountStore()
             accounts = store.load()
             credentials = CredentialStore()
@@ -441,3 +477,5 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 3
+    finally:
+        debuglog.close()

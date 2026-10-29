@@ -110,6 +110,34 @@ Legacy ChatGPT profiles require `uv run usage accounts migrate-chatgpt-to-codex`
 After explicit confirmation, replacements are disabled and credentials detached;
 old keyring secrets remain unmanaged. Configure a Codex file reference, then enable.
 
+## Debug log
+
+To investigate malformed or missing provider data, start the live dashboard with a
+debug log file (output never goes to the terminal):
+
+```sh
+uv run usage --debug-log ~/usage-debug.jsonl                      # all providers
+uv run usage --debug-log ~/usage-debug.jsonl \
+  --debug-provider codex-subscription --debug-provider grok-subscription
+```
+
+`--debug-provider` is repeatable (`claude-subscription`, `claude-platform`,
+`codex-subscription`, `grok-subscription`) and requires `--debug-log`; neither
+works with `--demo` or account commands. The file is appended as JSON lines
+(`ts`, `provider`, `event`): `http_response` (path, status, byte length, decoded
+body with exact numbers, or bounded raw text when not JSON), `http_error`
+(diagnostic code, fetch state, status, or only an exception type name), and
+`snapshot` (account ID, fetch state, diagnostic, and every metric's state, detail,
+quota, reset, balance and share as parsed). The parent directory must exist; the
+file is created `0600`, and symlinks, non-regular files and group/other-readable
+files are refused.
+
+> **Warning:** the log contains raw provider response bodies, which may include
+> personal data such as email addresses or account IDs. Request headers are never
+> logged; values under secret-looking keys, JWT-like strings and the request's own
+> credential values are redacted best-effort. Keep the file private, and review it
+> before sharing.
+
 ## Credential safety
 
 - Never put secrets in arguments, environment variables, labels, chat, or issues.

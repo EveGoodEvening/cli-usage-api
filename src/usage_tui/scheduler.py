@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from usage_tui import debuglog
 from usage_tui.credentials import CredentialResolutionError, CredentialResolver
 from usage_tui.domain import (
     Account,
@@ -347,6 +348,8 @@ class Scheduler:
             result = self._failure(state, now, error)
         if not self._running or self._states.get(account.id) is not state:
             return
+        # The adapter's own observation, before retained/unknown rows are merged.
+        debuglog.snapshot(account.provider, result)
         current = self._clock.monotonic()
         if result.fetch_state in _SUCCESS:
             present = {metric.id for metric in result.metrics}

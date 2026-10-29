@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added — opt-in provider debug log
+
+- `usage --debug-log PATH` appends JSON-lines records of each provider response
+  (path, status, size, decoded body with exact Decimal numerals), transport failure
+  codes, and every adapter snapshot's per-metric state/detail/values, to explain
+  `schema_error`/`partial_data` and missing rows. Repeatable
+  `--debug-provider NAME` limits records to selected providers; the default is all.
+- Live dashboard only: rejected with `--demo`, account commands, or
+  `--debug-provider` alone. The file is opened owner-only (`0600`) without
+  following symlinks; unsafe or unopenable targets fail with a curated error.
+- Logging stays file-only and silent when disabled. Request headers, cookies and
+  exception messages are never recorded; secret-looking keys, JWT-like strings and
+  the request's own credential values are redacted best-effort. Bodies can contain
+  personal data such as email. Synthetic HTTP/scheduler/CLI tests only; no live
+  account response was inspected.
+
 ### Changed — default and remembered UI theme
 
 - Default the dashboard to Nord; restore the last selected theme on subsequent

@@ -13,6 +13,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 import httpx
 
+from usage_tui import debuglog
 from usage_tui.domain import (
     DomainError,
     FetchState,
@@ -24,6 +25,7 @@ from usage_tui.domain import (
 
 MAX_RESPONSE_BYTES = 1_048_576
 TOTAL_TIMEOUT_SECONDS = 10.0
+DEBUG_BODY_TIMEOUT_SECONDS = 2.0
 CONNECT_TIMEOUT_SECONDS = 5.0
 _ORGANIZATION_PATH = re.compile(r"/api/organizations/[A-Za-z0-9-]{1,64}/prepaid/credits")
 # Release-pinned from https://x.ai/cli/stable; never fetched at runtime.
@@ -162,12 +164,13 @@ class Transport:
             if credential.user_id is not None:
                 headers["x-userid"] = credential.user_id
 
+        scrub = (credential.secret, credential.user_id, credential.codex_account_id)
         # Raise outside exception handlers: even __context__ must not retain the
         # original upstream exception (which may contain credentials or bodies).
         error = None
         try:
             async with (
-                asyncio.timeout(TOTAL_TIMEOUT_SECONDS),
+                asyncio.timeout(TOTAL_TIMEOUT_SECONDS) as deadline,
                 httpx.AsyncClient(
                     transport=self._http_transport,
                     trust_env=False,
@@ -177,6 +180,13 @@ class Transport:
                 ) as client,
                 client.stream("GET", _ORIGINS[provider] + path, headers=headers) as response,
             ):
+                if not 200 <= response.status_code < 300 and debuglog.enabled(provider):
+                    # Classify from headers first; the diagnostic read cannot replace it.
+                    try:
+                        self._check_status(provider, path, response)
+                    except TransportError as status_error:
+                        await self._debug_error_body(provider, path, response, scrub, deadline)
+                        raise status_error from None
                 self._check_status(provider, path, response)
                 # Do not allow a compressed chunk to expand without a
                 # bound inside httpx's automatic content decoder.
@@ -196,12 +206,73 @@ class Transport:
                             status=response.status_code,
                         )
                     body.extend(chunk)
-                return self._decode(body, response.status_code)
+                result = None
+                try:
+                    result = self._decode(body, response.status_code)
+                finally:
+                    debuglog.http_response(
+                        provider, path, response.status_code, body, decoded=result, scrub=scrub
+                    )
+                return result
         except TransportError as failure:
             error = failure
-        except Exception:  # noqa: BLE001 - Redact arbitrary third-party transport failures.
+            debuglog.http_error(
+                provider,
+                path,
+                code=failure.code,
+                fetch_state=failure.fetch_state.value,
+                status=failure.status,
+            )
+        except Exception as failure:  # noqa: BLE001 - Redact arbitrary transport failures.
             error = TransportError(FetchState.NETWORK_ERROR, "network_error")
+            # Only the type name: exception text may contain URLs, headers or bodies.
+            debuglog.http_error(
+                provider,
+                path,
+                code=error.code,
+                fetch_state=error.fetch_state.value,
+                exception=type(failure).__name__,
+            )
         raise error from None
+
+    @staticmethod
+    async def _debug_error_body(
+        provider: ProviderId,
+        path: str,
+        response: httpx.Response,
+        scrub: tuple,
+        deadline: asyncio.Timeout,
+    ) -> None:
+        """Debug-only bounded read of a non-2xx body; failures keep the status error.
+
+        The read has its own deadline ending before the request's, so a slow body
+        times out here instead of cancelling the request into a network error.
+        """
+        body = None
+        loop = asyncio.get_running_loop()
+        outer = deadline.when()
+        limit = loop.time() + DEBUG_BODY_TIMEOUT_SECONDS
+        if outer is not None:
+            limit = min(limit, outer - 0.25)
+        try:
+            if response.headers.get("Content-Encoding", "identity").strip().lower() == "identity":
+                body = bytearray()
+                async with asyncio.timeout_at(limit):
+                    async for chunk in response.aiter_bytes():
+                        if len(body) + len(chunk) > MAX_RESPONSE_BYTES:
+                            break
+                        body.extend(chunk)
+        except Exception:  # noqa: BLE001 - Best-effort diagnostics never change the result.
+            body = None
+        decoded = None
+        if body is not None:
+            try:
+                decoded = Transport._decode(body, response.status_code)
+            except TransportError:
+                pass
+        debuglog.http_response(
+            provider, path, response.status_code, body, decoded=decoded, scrub=scrub
+        )
 
     def _check_status(self, provider: ProviderId, path: str, response: httpx.Response) -> None:
         status = response.status_code

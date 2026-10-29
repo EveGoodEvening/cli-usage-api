@@ -296,3 +296,15 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   a row. Preserve `highlighted=None` through startup snapshots and filter rebuilds;
   treat `全部账号` as the filter value, not a metric selection. Recover the nearest
   metric only when a previously selected row disappears.
+- The `--debug-log` file is the only debug output: keep `usage_tui.debug`
+  non-propagating with a NullHandler, guard work with `debuglog.enabled(provider)`,
+  and never let a debug-only non-2xx body read change the curated TransportError.
+  Redact by key, JWT shape and the request's own bound credential values; log only
+  exception type names. pytest's caplog attaches to non-propagating loggers too, so
+  "Captured log" output in tests does not mean records reach the terminal.
+- Debug diagnostics must not change fetch outcomes: classify non-2xx status from
+  headers before any diagnostic body read, give that read its own deadline ending
+  before the request's (an outer `asyncio.timeout` cancellation is not an
+  `Exception`), and guard serialization, since `json.loads` accepts nesting deeper
+  than recursive redaction can walk. Redact undecodable text by key too, scrub
+  before truncating, and anchor/bound regexes so 1 MB bodies cannot scan quadratically.
