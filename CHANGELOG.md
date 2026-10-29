@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed — distinct Claude Platform balance mismatch warning
+
+- Complete balance reads no longer become `partial_data` solely because category
+  sums disagree with the reported total. Keep `ok` with a curated `balance_mismatch`
+  warning, visible in the dashboard and debug snapshots.
+- Preserve all reported amounts; show the exact signed difference (total minus
+  category sums) in total-balance details, using the reported currency/exponent.
+  No tolerance, rounding, or inferred missing balance is introduced.
+- Missing/invalid amounts and unknown grant expiry retain partial/schema diagnostics;
+  a simultaneous mismatch remains visible in total-balance details.
+- Targeted regressions and real-PTY component smoke passed; see PLAN.md §14.
+  HTTP responses and credentials in the smoke were synthetic, not live acceptance.
+
 ### Added — opt-in provider debug log
 
 - `usage --debug-log PATH` appends JSON-lines records of each provider response

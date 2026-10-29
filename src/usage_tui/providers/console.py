@@ -227,13 +227,17 @@ class ConsoleProvider:
         except DomainError:
             total = None
         total_detail = "Authoritative reported total; independent of category grant sums."
-        mismatch = (
-            total is not None
-            and all(category[0] is not None for category in categories)
-            and sum(category[0].minor for category in categories) != total.minor
+        difference = (
+            total.minor - sum(category[0].minor for category in categories)
+            if total is not None and all(category[0] is not None for category in categories)
+            else None
         )
-        if mismatch:
-            total_detail += " Category sums disagree with the authoritative total; no reconciliation is inferred."
+        if difference:
+            difference_text = Money(difference, currency, exponent).format()
+            total_detail += (
+                " Category sums disagree with the authoritative total; amounts are unchanged."
+                f" Difference (total - category sums): {difference_text}."
+            )
         if total is None:
             total_detail = (
                 "Authoritative total is missing or invalid; category values remain independent."
@@ -262,7 +266,7 @@ class ConsoleProvider:
             ),
         )
         usable = any(row.balance is not None for row in metrics)
-        partial = total is None or mismatch or any(category[4] for category in categories)
+        partial = total is None or any(category[4] for category in categories)
         state = (
             FetchState.SCHEMA_ERROR
             if not usable
@@ -279,6 +283,8 @@ class ConsoleProvider:
             fetched_at=now if usable else None,
             diagnostic=Diagnostic("schema_error" if not usable else "partial_data")
             if partial
+            else Diagnostic("balance_mismatch")
+            if difference
             else None,
             organization_id=organization_id,
         )

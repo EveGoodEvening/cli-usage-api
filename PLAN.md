@@ -2,7 +2,7 @@
 
 ## 0. Status, purpose, and scheduling authority
 
-**Latest maintenance authority (2026-10-29): §12 covers the user's Codex display cleanup, Claude polling/rate-limit investigation, and Grok compatibility repair against BYOS; §13 covers the default Nord theme and remembered theme selection. These sections supersede earlier rules only where stated. Historical gates/reviews below remain historical, not proof of these changes or authenticated compatibility.**
+**Latest maintenance authority (2026-10-29): §12 covers the user's Codex display cleanup, Claude polling/rate-limit investigation, and Grok compatibility repair against BYOS; §13 covers the default Nord theme and remembered theme selection; §14 separates Claude Platform balance mismatches from partial data. These sections supersede earlier rules only where stated. Historical gates/reviews below remain historical, not proof of these changes or authenticated compatibility.**
 
 Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex single atomic cutover under §11 is closed for implementation, verification, documentation and independent review at green draft `2d7ea6b`; final tracker-snapshot commit follows and its hash is not yet known. Authorized live acceptance remains unexercised.
 
@@ -182,6 +182,12 @@ Fixed origin `https://platform.claude.com`; requests send only `Cookie: sessionK
 3. Each grant has `granted_amount_minor_units: int`, `remaining_amount_minor_units: int`, optional `expires_at` RFC3339, optional `name`, optional `program_id`. `tranches` means purchased; `promo_tranches` means promotional. `program_id == "subscription_api_credit"` annotates included subscription-origin API credits; it does not change category or turn them into Claude subscription windows.
 
 Compute each category total from **all** unexpired grants in its corresponding complete validated array, not the soonest-expiring tranche. Keep zero-valued grants and expose grant amounts/expiry in details. Explicit empty array means category zero; missing/null array means category unknown, not zero. Negative balances remain visible if the upstream explicitly reports them; do not silently clamp money. Invalid grant numeric fields make that category unavailable, retaining the authoritative total and any independently valid category. Unknown/unparseable expiry means expiry unknown; include in the reported total with an uncertainty note rather than claiming it is unexpired. Expired grants are excluded from active category totals. Preserve total `amount` independently: if sums disagree, show “category totals do not reconcile” and the discrepancy, not subtraction to manufacture missing promotional or purchased values. No common currency/exponent means no sum.
+
+A mismatch alone is a successful read (`ok`) with a curated `balance_mismatch`
+advisory, not `partial_data`. Total-balance details show the exact signed difference
+(reported total minus category sums), formatted with the validated currency/exponent;
+no tolerance or rounding is applied. Missing/invalid values and uncertain expiry
+retain partial/schema diagnostics. A simultaneous mismatch stays in the total detail.
 
 Credits expire; they do not “reset weekly.” Show nearest expiry plus expandable per-grant expiries, never a fabricated renewal. Do not call `/current_spend` or Admin reporting just to fill a balance gap. HTTP 401 or organization-list 403 means reconnect; selected-org credits 403 means billing permission denied. Session credential never goes to api.anthropic.com or claude.ai.
 
@@ -1077,3 +1083,56 @@ Exercised evidence:
   passed with **45 files already formatted**.
 - Ruff LSP diagnostics were clean for app, CLI and storage. No full-suite rerun,
   independent review, authenticated provider request or real-keyring check is claimed.
+
+## 14. User-requested Console balance mismatch warning — 2026-10-29
+
+The user supplied redacted debug output showing a successful credits response,
+three ready balances, and a one-minor-unit discrepancy between total and category
+sums. Earlier local replay reproduced `partial_data`; changing only the reported
+total to match the categories yielded `ok`. The discrepancy was already present
+in the response, not introduced by local floating-point arithmetic. Its upstream
+cause is unverified. No credentials, raw responses, or account identifiers are
+recorded here.
+
+Implemented at the user's request:
+- Separate complete-but-mismatched balances from missing/invalid observations:
+  `fetch_state=ok`, `diagnostic=balance_mismatch`, with a curated Chinese warning
+  in the existing dashboard diagnostic surface. No new fetch state or schema field.
+- Preserve the authoritative total and independently calculated categories. The
+  total detail reports the signed difference (total minus category sums), formatted
+  through `Money` in the validated currency/exponent. No tolerance, rounding, or
+  subtraction to manufacture a missing category is introduced.
+- Missing/invalid amounts and uncertain expiry still produce `partial_data` when
+  any usable balance remains; wholly unusable responses retain `schema_error`.
+  These diagnostics take precedence over the advisory, while a calculable mismatch
+  remains in total-balance details. Scheduler freshness and retry policy are unchanged.
+- Updated behavior regressions, README, CHANGELOG, active §4.2, and repository Lessons.
+
+Exercised evidence:
+- `uv run --locked pytest -q tests/test_console.py tests/test_domain.py
+  tests/test_scheduler.py tests/test_freshness.py tests/test_debuglog.py`:
+  **331 passed in 7.18s**. Coverage includes positive one-minor-unit differences,
+  negative differences/negative totals, nondefault units, original amount retention,
+  and partial-diagnostic precedence when expiry is unknown.
+- `uv run --locked ruff check src/usage_tui/domain.py
+  src/usage_tui/providers/console.py tests/test_console.py`: passed;
+  corresponding `ruff format --check` passed for **3 files**.
+  Ruff LSP diagnostics were clean for domain and Console provider. This server
+  does not implement definition/reference navigation; scoped searches were used
+  after those requests returned method-not-supported errors.
+- Two real-PTY component hosts exercised actual `Scheduler -> ConsoleProvider ->
+  Transport -> UsageApp` with an in-memory HTTP response, synthetic credential
+  resolver, fixed observation time, and isolated HOME/XDG. Complete mismatched
+  balances rendered normal status plus the separate warning, not partial data;
+  adding unknown expiry retained partial data. Both preserved all three amounts,
+  opened total details showing the exact difference, resized 80x24 -> 56x24, and
+  exited (normal `q` / Ctrl-C) with terminal restoration. Snapshot serialization
+  round-tripped the new diagnostic without altering values.
+- Initial throwaway host startup failed because an inline `python -c` subclass
+  has no source path for Textual's inherited stylesheet lookup. Instantiating the
+  production `UsageApp` directly with an injected fixed clock corrected the host;
+  no application fix was needed. Temporary homes and owned children were cleaned
+  on both failed and successful runs; no smoke script was saved in the repository.
+- This is local replay/component-PTY evidence, not an installed-entry live request,
+  billing-UI comparison, real-keyring check, full-suite rerun, or independent review.
+

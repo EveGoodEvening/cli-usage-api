@@ -102,6 +102,7 @@ async def test_missing_category_not_derived_from_total(payload, raw, key, index)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert_rows(snapshot)
     assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.diagnostic.code == "partial_data"
     assert snapshot.metrics[index].state == MetricState.UNKNOWN
     assert snapshot.metrics[index].balance is None
     assert snapshot.metrics[1 - index].state == MetricState.READY
@@ -220,13 +221,35 @@ async def test_invalid_units_never_assume_usd_or_cents(payload, patch):
     assert all(row.balance is None for row in snapshot.metrics)
 
 
-async def test_authoritative_total_disagreement_never_overwrites_categories(payload):
-    payload["amount"] = -123
+@pytest.mark.parametrize(
+    "amount,currency,exponent,difference",
+    [(1451, "USD", 2, "0.01 USD"), (-123, "USD", 2, "-15.73 USD"), (1451, "JPY", 0, "1 JPY")],
+)
+async def test_authoritative_total_disagreement_is_a_warning_without_overwriting_amounts(
+    payload, amount, currency, exponent, difference
+):
+    payload.update(amount=amount, currency=currency)
+    payload["balance"]["credits"]["exponent"] = exponent
     provider, _ = provider_for(payload)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
-    assert [row.balance.minor for row in snapshot.metrics] == [1200, 250, -123]
+    assert [row.balance.minor for row in snapshot.metrics] == [1200, 250, amount]
+    assert all(row.state == MetricState.READY for row in snapshot.metrics)
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.fetched_at == NOW
+    assert snapshot.diagnostic.code == "balance_mismatch"
+    assert difference in snapshot.metrics[2].detail
+
+
+async def test_unknown_expiry_with_total_disagreement_remains_partial(payload):
+    payload["amount"] = 1451
+    payload["tranches"][0]["expires_at"] = None
+    provider, _ = provider_for(payload)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.fetch_state == FetchState.PARTIAL
-    assert "disagree" in snapshot.metrics[2].detail
+    assert snapshot.diagnostic.code == "partial_data"
+    assert [row.balance.minor for row in snapshot.metrics] == [1200, 250, 1451]
+    assert snapshot.grants[0].expires_at is None
+    assert "0.01 USD" in snapshot.metrics[2].detail
 
 
 @pytest.mark.parametrize("amount", [None, True, "1450", 1450.5])
@@ -235,6 +258,7 @@ async def test_invalid_total_independent_from_valid_categories(payload, amount):
     provider, _ = provider_for(payload)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.diagnostic.code == "partial_data"
     assert [row.balance.minor for row in snapshot.metrics[:2]] == [1200, 250]
     assert snapshot.metrics[2].balance is None
 

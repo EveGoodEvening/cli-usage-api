@@ -308,3 +308,13 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   `Exception`), and guard serialization, since `json.loads` accepts nesting deeper
   than recursive redaction can walk. Redact undecodable text by key too, scrub
   before truncating, and anchor/bound regexes so 1 MB bodies cannot scan quadratically.
+- Complete Console balances can disagree with their authoritative total even when
+  every metric is ready. Treat that as an `ok` read with a separate `balance_mismatch`
+  advisory, not missing data. Preserve amounts and show the exact signed difference
+  using the currency/exponent; do not invent a tolerance or fill missing categories.
+  Genuine missing/invalid data and unknown expiry retain partial/schema diagnostics,
+  with any simultaneous difference still visible in total-balance details.
+- Inline `python -c` subclasses lack a source file for Textual's relative stylesheet
+  resolution. A throwaway PTY host should instantiate the production `UsageApp`
+  directly with an injected clock, or define its subclass in a real temporary file;
+  a host startup failure does not establish an application regression.
