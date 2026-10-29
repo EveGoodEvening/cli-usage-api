@@ -276,3 +276,10 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   sequence can still reach the intended cap. Cover both first-retry timing and
   repeated capped failures; lowering the base alone can accidentally plateau
   below the documented maximum.
+- Keep nonsecret UI preferences separate from account/credential configuration,
+  while sharing the existing private, locked, atomic file primitives. Restore a
+  Textual theme before mount and register its persistence watcher with `init=False`
+  afterward: startup defaults must not overwrite a saved choice. Demo may read
+  these UI preferences without constructing live dependencies. Verify selection
+  through the actual command palette and a fresh process; an in-memory theme value
+  alone does not establish restart persistence.

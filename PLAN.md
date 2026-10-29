@@ -2,7 +2,7 @@
 
 ## 0. Status, purpose, and scheduling authority
 
-**Latest maintenance authority (2026-10-29): §12 covers the user's Codex display cleanup, Claude polling/rate-limit investigation, and Grok compatibility repair against BYOS. It supersedes the earlier polling, omitted-zero, and product-reconciliation rules only where stated. Historical gates/reviews below remain historical, not proof of these changes or authenticated compatibility.**
+**Latest maintenance authority (2026-10-29): §12 covers the user's Codex display cleanup, Claude polling/rate-limit investigation, and Grok compatibility repair against BYOS; §13 covers the default Nord theme and remembered theme selection. These sections supersede earlier rules only where stated. Historical gates/reviews below remain historical, not proof of these changes or authenticated compatibility.**
 
 Historical pre-Codex baseline: C01–C14 and final split-review fix `d653397` are closed within their recorded scopes. The supplied final post-fix gate passed **851 tests in 28.90s**, Ruff check, **43 files already formatted**, all **17 source-file LSP diagnostics clean**, installed help, four installed-entry healthy/errors PTY runs, installed CLI CRUD/cancel/non-TTY and no-credential empty-state/account dialogs, and the extra-product PTY regression. Those are historical offline/local results, not Codex proof. The corrected Codex single atomic cutover under §11 is closed for implementation, verification, documentation and independent review at green draft `2d7ea6b`; final tracker-snapshot commit follows and its hash is not yet known. Authorized live acceptance remains unexercised.
 
@@ -1024,3 +1024,56 @@ Exercised with synthetic credentials/responses, never real account requests:
   `uv run --locked ruff format --check .` passed for **45 files**.
   These checks cover the updated initial retry, exponential cap, negative jitter,
   longer settings/server embargoes and actual dashboard freshness boundaries.
+
+## 13. User-requested default and remembered theme — 2026-10-29
+
+The user requested Nord as the initial theme, asked which information persists,
+then requested restoring the last selected theme after restart. Account metadata
+remains in `accounts.json`; manual persistent secrets remain in the secure keyring,
+session-only secrets remain process-local, and external logins remain file references.
+No actual user configuration or credentials were inspected for this work.
+
+Implemented:
+- `UsageApp` defaults to `nord`, restores a valid saved selection before mount, and
+  saves subsequent theme changes from the existing Ctrl-P → Theme command palette.
+  Startup/cancellation do not rewrite the preference. A watcher registered with
+  `init=False` avoids saving initialization instead of user choice.
+- `SettingsStore` stores only schema version and theme in
+  `$XDG_CONFIG_HOME/usage-tui/settings.json`, falling back to
+  `~/.config/usage-tui/settings.json`. Shared private file primitives retain the
+  existing stable-lock, no-symlink, bounded-read, `0700` directory / `0600` file,
+  atomic replacement and fsync policy. Account committed-write error semantics
+  remain intact; account schema and secret references are unchanged.
+- CLI live/demo modes share UI preferences without giving demo access to account
+  stores, resolvers, keyrings or providers. Embedded apps may explicitly inject a
+  settings store; omission keeps preference I/O disabled.
+- Unavailable themes and unreadable/invalid preferences warn and use Nord without
+  rewriting settings. Save failures warn while retaining the chosen in-memory theme;
+  malformed configuration is not silently repaired or claimed saved.
+- README/CHANGELOG/SECURITY and repo-root Lessons document the bounded change.
+  The CLI demo-isolation regression now constructs and mounts the real app instead
+  of asserting copied constructor kwargs.
+
+Exercised evidence:
+- Initial installed-entry demo and empty-live PTYs rendered the Nord surface
+  (`#3B4252`), opened help, quit normally and restored terminals. The first probe
+  incorrectly expected the theme's background color; the existing stylesheet uses
+  `$surface`, and the corrected actual ANSI-color assertion passed.
+- Actual mounted UsageApp/Pilot with isolated real settings files: demo selection
+  restored in a fresh live app; subsequent changes persisted; startup did not create
+  a default settings file; synthetic accounts stayed byte-for-byte unchanged;
+  private permissions, unknown-theme fallback, invalid-JSON warnings and failed-save
+  warnings passed without crashing or rewriting invalid settings.
+- Three fresh installed-entry PTYs sharing isolated HOME/XDG exercised the actual
+  command palette: demo Nord → Dracula; restart live restored Dracula → Nord;
+  restart demo restored Nord. Palette cancellation kept saved bytes unchanged;
+  synthetic disabled-account configuration was unchanged, both normal quit and
+  Ctrl-C exited cleanly, and every terminal was restored.
+- `uv run --locked pytest -q tests/test_storage.py tests/test_account_flows.py
+  tests/test_cli.py tests/test_secret_store.py`: **172 passed in 1.82s**. These include
+  account atomic-write/committed-fsync and credential rollback regressions.
+- `uv run --locked ruff check .` passed. The initial format check requested one
+  warning-string wrap; after correction, `uv run --locked ruff format --check .`
+  passed with **45 files already formatted**.
+- Ruff LSP diagnostics were clean for app, CLI and storage. No full-suite rerun,
+  independent review, authenticated provider request or real-keyring check is claimed.

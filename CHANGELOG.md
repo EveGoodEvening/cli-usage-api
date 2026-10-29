@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed — default and remembered UI theme
+
+- Default the dashboard to Nord; restore the last selected theme on subsequent
+  launches. Ctrl-P → Theme changes are saved in a separate `settings.json` beside
+  account configuration, shared by live and demo mode without reading credentials
+  or changing accounts.
+- Reuse private-directory, locked, atomic config I/O for preferences. Unknown or
+  unreadable saved themes warn and use Nord; failed saves remain visible.
+- Installed-entry PTY verification exercised theme selection, cancellation and
+  restoration across demo/live restarts, with unchanged synthetic account data and
+  restored terminals. Related storage/CLI regressions passed; see PLAN.md §13.
+
 ### Fixed — provider display, conservative polling, and Grok compatibility
 
 - Removed Codex `plan_type`, `allowed`, and `limit_reached` from dashboard and

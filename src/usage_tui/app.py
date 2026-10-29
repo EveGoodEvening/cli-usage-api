@@ -31,6 +31,7 @@ from usage_tui.domain import (
     sanitize_text,
 )
 from usage_tui.scheduler import freshness
+from usage_tui.storage import ConfigError, SettingsStore
 
 METRIC_LABELS = {
     "claude.subscription.five_hour": "Claude 5h 用量",
@@ -327,6 +328,7 @@ class UsageApp(App[None]):
         scheduler_factory=None,
         account_store=None,
         credential_store=None,
+        settings_store: SettingsStore | None = None,
         scenario: str = "healthy",
     ) -> None:
         if mode not in {"live", "demo"}:
@@ -338,6 +340,22 @@ class UsageApp(App[None]):
         ):
             raise ValueError("Configured live mode requires a scheduler factory.")
         super().__init__()
+        self.theme = "nord"
+        self._settings_store = settings_store
+        self._theme_notice = ""
+        if settings_store is not None:
+            try:
+                saved_theme = settings_store.load_theme()
+            except ConfigError:
+                self._theme_notice = (
+                    "无法读取主题设置，已使用 nord；请检查 settings.json 的格式和权限。"
+                )
+            else:
+                if saved_theme is not None:
+                    if saved_theme in self.available_themes:
+                        self.theme = saved_theme
+                    else:
+                        self._theme_notice = "已保存的主题不可用，已使用 nord；可重新选择主题。"
         self.mode = mode
         self.accounts = tuple(accounts)
         self.scheduler_factory = scheduler_factory
@@ -383,6 +401,22 @@ class UsageApp(App[None]):
             await self.scheduler.start()
         self.set_interval(1, self._tick)
         self.listing.focus()
+        self.watch(self, "theme", self._save_theme, init=False)
+        if self._theme_notice:
+            self.notify(self._theme_notice, title="主题设置", severity="warning", timeout=10)
+
+    def _save_theme(self, theme: str) -> None:
+        if self._settings_store is None:
+            return
+        try:
+            self._settings_store.save_theme(theme)
+        except ConfigError:
+            self.notify(
+                "本次主题已应用，但无法确认保存；请检查 settings.json 的格式和权限。",
+                title="主题设置",
+                severity="warning",
+                timeout=10,
+            )
 
     def now(self) -> datetime:
         if self.mode == "demo":

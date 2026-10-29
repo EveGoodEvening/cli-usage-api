@@ -39,6 +39,7 @@ from usage_tui.storage import (
     ConfigError,
     CredentialError,
     CredentialStore,
+    SettingsStore,
 )
 from usage_tui.transport import Transport, TransportError, _cookie_value, _header_token
 
@@ -374,8 +375,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise CommandError("--demo cannot be combined with account commands.")
         if args.command == "accounts":
             return _accounts(args)
+        settings = SettingsStore()
         if args.demo:
-            UsageApp(mode="demo", scenario=args.scenario or "healthy").run()
+            UsageApp(
+                mode="demo", scenario=args.scenario or "healthy", settings_store=settings
+            ).run()
         else:
             store = AccountStore()
             accounts = store.load()
@@ -387,6 +391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 scheduler_factory=factory,
                 account_store=store,
                 credential_store=credentials,
+                settings_store=settings,
             ).run()
         return 0
     except SystemExit as error:

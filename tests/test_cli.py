@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 import getpass
 import json
@@ -97,8 +98,6 @@ def test_help_never_constructs_services(monkeypatch, capsys):
 
 @pytest.mark.parametrize("scenario", ["healthy", "errors"])
 def test_demo_has_no_live_construction(monkeypatch, scenario):
-    calls = []
-
     def forbidden(*args, **kwargs):
         pytest.fail("Demo must not construct or read live services")
 
@@ -110,13 +109,20 @@ def test_demo_has_no_live_construction(monkeypatch, scenario):
         "LiveFactory",
     ):
         monkeypatch.setattr(cli, name, forbidden)
-    monkeypatch.setattr(
-        cli,
-        "UsageApp",
-        lambda **kwargs: SimpleNamespace(run=lambda: calls.append(kwargs)),
-    )
+
+    def run_demo(app):
+        async def exercise():
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert "DEMO" in str(app.banner.content)
+                await pilot.press("a")
+                assert app.screen.readonly
+                await pilot.press("ctrl+c")
+
+        asyncio.run(exercise())
+
+    monkeypatch.setattr(cli.UsageApp, "run", run_demo)
     assert cli.main(["--demo", "--scenario", scenario]) == 0
-    assert calls == [{"mode": "demo", "scenario": scenario}]
 
 
 def test_live_passes_real_composition_to_app(monkeypatch):

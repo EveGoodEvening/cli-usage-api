@@ -54,7 +54,7 @@ class CredentialError(ValueError):
 
 def _config_error() -> ConfigError:
     return ConfigError(
-        "Cannot use account configuration. Check its schema and user-owned "
+        "Cannot use local configuration. Check its schema and user-owned "
         "0700 directory / 0600 regular files; configuration was not repaired automatically."
     )
 
@@ -126,20 +126,14 @@ def _reject_constant(value: str) -> None:
     raise _config_error()
 
 
-class AccountStore:
-    """Version-one account config; mutate is the read/modify/write transaction.
+class _ConfigFile:
+    """Shared private file I/O; callers own schema and commit-error semantics."""
 
-    A stable sibling lock inode is held across reread and same-directory replace.
-    Callbacks must be synchronous and return a tuple; callback exceptions leave
-    configuration unchanged. ConfigCommittedError reports replacement with uncertain
-    crash durability. save also refuses to overwrite an invalid config.
-    """
-
-    def __init__(self, path: str | Path | None = None) -> None:
+    def __init__(self, path: str | Path | None, filename: str) -> None:
         if path is None:
             root = os.environ.get("XDG_CONFIG_HOME")
             base = Path(root) if root and Path(root).is_absolute() else Path.home() / ".config"
-            path = base / "usage-tui" / "accounts.json"
+            path = base / "usage-tui" / filename
         self.path = Path(os.path.abspath(path))
         self._thread_lock = threading.RLock()
 
@@ -194,15 +188,13 @@ class AccountStore:
         except OSError:
             raise _config_error() from None
 
-    def _read_config(
-        self, directory: int
-    ) -> tuple[tuple[Account, ...], tuple[tuple[str, str], ...]]:
+    def _read_content(self, directory: int) -> bytes | None:
         try:
             fd = os.open(
                 self.path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
             )
         except FileNotFoundError:
-            return (), ()
+            return None
         try:
             self._check_file(fd)
             with os.fdopen(fd, "rb", closefd=False) as source:
@@ -211,6 +203,48 @@ class AccountStore:
                 raise _config_error()
         finally:
             os.close(fd)
+        return content
+
+    def _replace(self, directory: int, content: bytes) -> None:
+        temporary = f".{self.path.name}.{uuid4()}.tmp"
+        fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory,
+        )
+        try:
+            with os.fdopen(fd, "wb", closefd=False) as target:
+                target.write(content)
+                target.flush()
+                os.fsync(fd)
+            os.replace(temporary, self.path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        finally:
+            os.close(fd)
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+
+
+class AccountStore(_ConfigFile):
+    """Version-one account config; mutate is the read/modify/write transaction.
+
+    A stable sibling lock inode is held across reread and same-directory replace.
+    Callbacks must be synchronous and return a tuple; callback exceptions leave
+    configuration unchanged. ConfigCommittedError reports replacement with uncertain
+    crash durability. save also refuses to overwrite an invalid config.
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        super().__init__(path, "accounts.json")
+
+    def _read_config(
+        self, directory: int
+    ) -> tuple[tuple[Account, ...], tuple[tuple[str, str], ...]]:
+        content = self._read_content(directory)
+        if content is None:
+            return (), ()
         try:
             data = json.loads(
                 content, object_pairs_hook=_unique_object, parse_constant=_reject_constant
@@ -304,29 +338,11 @@ class AccountStore:
             raise _config_error() from None
         if len(content) > MAX_FILE_BYTES:
             raise _config_error()
-        temporary = f".{self.path.name}.{uuid4()}.tmp"
-        fd = os.open(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600,
-            dir_fd=directory,
-        )
+        self._replace(directory, content)
         try:
-            with os.fdopen(fd, "wb", closefd=False) as target:
-                target.write(content)
-                target.flush()
-                os.fsync(fd)
-            os.replace(temporary, self.path.name, src_dir_fd=directory, dst_dir_fd=directory)
-            try:
-                os.fsync(directory)
-            except OSError:
-                raise ConfigCommittedError(accounts) from None
-        finally:
-            os.close(fd)
-            try:
-                os.unlink(temporary, dir_fd=directory)
-            except FileNotFoundError:
-                pass
+            os.fsync(directory)
+        except OSError:
+            raise ConfigCommittedError(accounts) from None
 
     def load(self) -> tuple[Account, ...]:
         with self._locked() as directory:
@@ -344,6 +360,50 @@ class AccountStore:
             accounts = change(self._read(directory))
             self._write(directory, accounts)
             return accounts
+
+
+class SettingsStore(_ConfigFile):
+    """Nonsecret UI preferences, independent of accounts and credential stores."""
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        super().__init__(path, "settings.json")
+
+    @staticmethod
+    def _theme(value: object) -> str:
+        if not isinstance(value, str) or not 1 <= len(value) <= 128:
+            raise _config_error()
+        return value
+
+    def _read(self, directory: int) -> str | None:
+        content = self._read_content(directory)
+        if content is None:
+            return None
+        try:
+            data = json.loads(
+                content, object_pairs_hook=_unique_object, parse_constant=_reject_constant
+            )
+            if (
+                type(data) is not dict
+                or set(data) != {"schema_version", "theme"}
+                or type(data["schema_version"]) is not int
+                or data["schema_version"] != 1
+            ):
+                raise _config_error()
+            return self._theme(data["theme"])
+        except (ValueError, TypeError, RecursionError, UnicodeError):
+            raise _config_error() from None
+
+    def load_theme(self) -> str | None:
+        with self._locked() as directory:
+            return self._read(directory)
+
+    def save_theme(self, theme: str) -> None:
+        theme = self._theme(theme)
+        content = json.dumps({"schema_version": 1, "theme": theme}).encode("utf-8")
+        with self._locked() as directory:
+            self._read(directory)
+            self._replace(directory, content)
+            os.fsync(directory)
 
 
 class CredentialStore:

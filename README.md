@@ -28,8 +28,15 @@ error states. In live mode, press `a` to connect accounts.
 | `r` | Request refresh; retry limits still apply |
 | Enter on a metric | View details and provenance |
 | `?` | Help |
+| Ctrl-P → Theme | Choose a theme; selection is saved automatically |
 | Escape | Back / cancel |
 | `q` / Ctrl-C | Quit dashboard / exit from any screen |
+
+The initial theme is **nord**. Live and demo mode share the last selected theme in
+`$XDG_CONFIG_HOME/usage-tui/settings.json` (default:
+`~/.config/usage-tui/settings.json`). This separate, nonsecret UI preference never
+changes account configuration or credentials. Unreadable settings or an unavailable
+theme produce a warning and fall back to nord; save failures are also reported.
 
 ## Metrics
 

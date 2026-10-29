@@ -33,8 +33,9 @@ exposed, revoke or replace it through the relevant first-party service.
   created schedulers. Transport HTTP clients are request-scoped, not leaked
   shared clients. Config load failures do not replace the existing file. Dashboard
   per-account failures stay in the UI; they are not a reason to substitute demo
-  data. `--demo` branches before live dependency construction and reads only the
-  packaged synthetic scenario, never real accounts, keyring or credential files.
+  data. `--demo` branches before live dependency construction and reads the
+  packaged synthetic scenario plus separate nonsecret UI theme preferences, never
+  real accounts, keyring or credential files.
 - Account/key commands accept opaque account IDs and nonsecret provider selection,
   not secret arguments or secret-bearing environment-variable configuration.
   CLI manual entry uses `getpass` and refuses echoed-input fallback. Every mutating
@@ -59,6 +60,11 @@ exposed, revoke or replace it through the relevant first-party service.
   synthetic demo scenarios. It does not establish live metric, real-keyring or
   authenticated acceptance. Its captures must be sanitized and its child process
   bounded, killed/reaped on failure, and terminal settings restored.
+- UI theme preferences live in `settings.json` beside `accounts.json`, with a
+  private `0700` directory, `0600` files, a stable sibling lock, and atomic
+  replacement. Live/demo modes share preferences, not account data. Startup never
+  rewrites the stored theme; unavailable themes or invalid settings warn and use
+  nord. Failed saves warn without crashing the dashboard or claiming persistence.
 
 ## Implemented C11 dashboard boundary
 
