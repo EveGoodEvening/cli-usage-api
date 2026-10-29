@@ -91,3 +91,30 @@ export function planRows(view: AccountView): { rows: RowPlan[]; groupNote: strin
   }
   return { rows, groupNote };
 }
+
+/** Every board note an account would show: subline, group note and row notes. */
+function accountNotes(view: AccountView): Set<string> {
+  const notes = new Set<string>();
+  const hoisted = accountNote(view);
+  if (hoisted) notes.add(hoisted);
+  const mismatch = view.snapshot?.diagnostic?.code === "balance_mismatch";
+  const { rows, groupNote } = planRows(view);
+  if (groupNote) notes.add(groupNote);
+  for (const row of rows) {
+    if (row.detail && !(mismatch && row.id === TOTAL_BALANCE_ID)) notes.add(row.detail);
+  }
+  return notes;
+}
+
+/**
+ * Notes repeated by two or more of the shown accounts, with how many accounts
+ * carry each. The board states them once; each group then omits them. A
+ * balance mismatch difference is account-specific and never shared.
+ */
+export function sharedNotes(views: AccountView[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const view of views) {
+    for (const note of accountNotes(view)) counts.set(note, (counts.get(note) ?? 0) + 1);
+  }
+  return new Map([...counts].filter(([, n]) => n >= 2));
+}

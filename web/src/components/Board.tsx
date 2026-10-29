@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AccountView } from "../types";
 import { orderedMetrics } from "../semantics";
+import { sharedNotes } from "../view";
 import { AccountGroup, GRANTS_KEY, rowKey } from "./AccountGroup";
 
 export type BoardEmpty = "provider" | "attention" | null;
@@ -53,6 +54,8 @@ export function Board({
   const [rows, setRows] = useState<Set<string>>(() => new Set());
   const [facts, setFacts] = useState<Set<string>>(() => new Set());
   const live = useMemo(() => liveKeys(all), [all]);
+  const notes = useMemo(() => sharedNotes(views), [views]);
+  const shared = useMemo(() => new Set(notes.keys()), [notes]);
 
   useEffect(() => {
     setRows((current) => prune(current, live.rows));
@@ -80,6 +83,16 @@ export function Board({
 
   return (
     <div className="board">
+      {notes.size ? (
+        <ul className="board__notes" aria-label="共同说明">
+          {[...notes].map(([note, n]) => (
+            <li key={note}>
+              {note}
+              <span className="board__count"> · {n} 个账号</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {views.map((view) => (
         <AccountGroup
           key={view.account.id}
@@ -89,6 +102,7 @@ export function Board({
           onToggleRow={toggleRow}
           factsOpen={facts.has(view.account.id)}
           onToggleFacts={() => setFacts((current) => toggled(current, view.account.id))}
+          shared={shared}
         />
       ))}
     </div>

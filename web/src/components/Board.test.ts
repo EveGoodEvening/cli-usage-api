@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AccountView, Dashboard, Metric } from "../types";
 import fixture from "../mock/demo-dashboard.json";
 import css from "../styles.css?raw";
-import { accountNote } from "../view";
+import { accountNote, sharedNotes } from "../view";
 import { Board } from "./Board";
 import { DemoBadge, DemoStrip } from "./Header";
 
@@ -18,6 +18,10 @@ function board(views: AccountView[]): string {
 
 function text(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+}
+
+function nodes(html: string): string[] {
+  return [...html.matchAll(/>([^<]+)</g)].map((m) => (m[1] ?? "").replace(/^ · /, "").trim());
 }
 
 function groups(html: string): string[] {
@@ -70,25 +74,44 @@ describe("Board", () => {
     expect(text(renderToStaticMarkup(createElement(DemoStrip)))).toContain("离线合成演示");
   });
 
-  it("shows the hoisted synthetic note once per account subline", () => {
-    const html = board(healthy.accounts);
-    const parts = groups(html);
-    expect(parts).toHaveLength(healthy.accounts.length);
-    healthy.accounts.forEach((view, i) => {
-      const hoisted = accountNote(view);
-      if (!hoisted) return;
-      const part = parts[i] ?? "";
-      expect(part.split(hoisted).length - 1).toBe(1);
-      expect(part).toMatch(new RegExp(`class="group__sub">[^<]*${hoisted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-    });
+  it("states a note repeated across accounts once, above the groups", () => {
+    for (const data of [healthy, errors]) {
+      const html = board(data.accounts);
+      const plain = text(html);
+      const shared = sharedNotes(data.accounts);
+      expect(shared.size).toBeGreaterThan(0);
+      for (const [note, n] of shared) {
+        // Exact text nodes: one shared note can contain another as a substring.
+        expect(nodes(html).filter((t) => t === note)).toHaveLength(1);
+        expect(plain).toContain(`${note} · ${n} 个账号`);
+      }
+      const parts = groups(html);
+      data.accounts.forEach((view, i) => {
+        const hoisted = accountNote(view);
+        if (!hoisted || shared.has(hoisted)) return;
+        expect(parts[i] ?? "").toMatch(new RegExp(`class="group__sub">[^<]*${hoisted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      });
+    }
   });
 
-  it("keeps demo provenance on a healthy Console account's subline", () => {
-    const parts = groups(board(healthy.accounts));
-    const i = healthy.accounts.findIndex((v) => v.account.provider === "claude_platform");
-    expect(i).toBeGreaterThanOrEqual(0);
-    const sub = (parts[i] ?? "").split('class="group__sub">')[1]?.split("</p>")[0] ?? "";
-    expect(sub).toContain("Fictional synthetic demonstration; not live account data.");
+  it("keeps a lone account's note on its own subline", () => {
+    const view = healthy.accounts.find((v) => accountNote(v)) as AccountView;
+    const note = accountNote(view) as string;
+    const html = board([view]);
+    expect(html).not.toContain("board__notes");
+    expect(html.split('class="group__sub">')[1]?.split("</p>")[0]).toContain(note);
+  });
+
+  it("keeps demo provenance visible for every Console account", () => {
+    const provenance = "Fictional synthetic demonstration; not live account data.";
+    expect(text(board(healthy.accounts))).toContain(provenance);
+    const consoleOnly = healthy.accounts.filter((v) => v.account.provider === "claude_platform");
+    expect(consoleOnly.length).toBeGreaterThan(0);
+    expect(text(board(consoleOnly))).toContain(provenance);
+  });
+
+  it("puts a balance figure in the meter's place on wider screens", () => {
+    expect(css).toMatch(/\.row--money \.row__used[^{]*\{[^}]*grid-column: meter \/ rest/);
   });
 
   it("draws no meter on an unknown balance row", () => {

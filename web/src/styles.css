@@ -282,6 +282,29 @@ button:disabled { cursor: default; }
 .group__facts, .group__empty { margin-top: 12px; }
 .rows { margin-top: 8px; }
 
+/* Notes several shown accounts repeat, stated once above the groups. */
+.board__notes {
+  grid-column: 1 / -1;
+  margin: -8px 0 24px;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--line-strong);
+  list-style: none;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-2);
+}
+.board__notes li + li { margin-top: 4px; }
+.board__count { color: var(--ink-3); white-space: nowrap; }
+
+/* Balances and grant counts have no meter: their figure takes the meter's place. */
+@media (min-width: 640px) {
+  .row--money .row__meter, .row--grants .row__meter { display: none; }
+  .row--money .row__label, .row--grants .row__label { grid-column: label; }
+  .row--money .row__used, .row--grants .row__used { grid-column: meter / rest; justify-self: start; }
+  .row--money .row__rest, .row--grants .row__rest { grid-column: rest; }
+  .row--money .row__reset, .row--grants .row__reset { grid-column: reset; }
+}
+
 /* ------------------------------------------------------------------- row */
 
 .row { position: relative; isolation: isolate; }

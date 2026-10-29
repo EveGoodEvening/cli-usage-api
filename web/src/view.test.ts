@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AccountView, Dashboard, Metric } from "./types";
 import fixture from "./mock/demo-dashboard.json";
 import { hoistedDetail } from "./semantics";
-import { GROK_MISSING_DETAIL, accountNote, planRows } from "./view";
+import { GROK_MISSING_DETAIL, TOTAL_BALANCE_ID, accountNote, planRows, sharedNotes } from "./view";
 
 const errors = fixture.errors as unknown as Dashboard;
 const byLabel = (label: string) => errors.accounts.find((a) => a.account.label.includes(label)) as AccountView;
@@ -125,5 +125,21 @@ describe("planRows", () => {
       metric("claude.platform.total_balance", { balance: { minor: 1, currency: "USD", exponent: 2 }, detail: "x" }),
     ]);
     expect(accountNote(live)).toBeNull();
+  });
+});
+
+describe("sharedNotes", () => {
+  it("counts notes repeated by two or more accounts only", () => {
+    const a = view("claude_subscription", [metric("claude.subscription.five_hour", { state: "unknown", detail: "same" })]);
+    const b = { ...a, account: { ...a.account, id: "b" } };
+    expect(sharedNotes([a])).toEqual(new Map());
+    expect(sharedNotes([a, b])).toEqual(new Map([["same", 2]]));
+  });
+
+  it("never shares a balance mismatch difference", () => {
+    const total = metric(TOTAL_BALANCE_ID, { balance: { minor: 100, exponent: 2, currency: "USD" }, detail: "diff" });
+    const a = view("claude_platform", [total], "balance_mismatch");
+    const b = { ...a, account: { ...a.account, id: "b" } };
+    expect(sharedNotes([a, b]).has("diff")).toBe(false);
   });
 });

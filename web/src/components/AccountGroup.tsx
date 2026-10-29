@@ -139,6 +139,8 @@ export function rowKey(accountId: string, metricId: string): string {
 
 export const GRANTS_KEY = "#grants";
 
+const EMPTY: ReadonlySet<string> = new Set();
+
 export function AccountGroup({
   view,
   now,
@@ -146,6 +148,7 @@ export function AccountGroup({
   onToggleRow,
   factsOpen,
   onToggleFacts,
+  shared = EMPTY,
 }: {
   view: AccountView;
   now: number;
@@ -153,11 +156,15 @@ export function AccountGroup({
   onToggleRow: (key: string) => void;
   factsOpen: boolean;
   onToggleFacts: () => void;
+  /** Notes the board already states once for several accounts. */
+  shared?: ReadonlySet<string>;
 }) {
   const { account, snapshot } = view;
   const health = accountHealth(view);
-  const hoisted = accountNote(view);
-  const { rows, groupNote } = planRows(view);
+  const own = (note: string | null) => (note && !shared.has(note) ? note : null);
+  const hoisted = own(accountNote(view));
+  const plan = planRows(view);
+  const groupNote = own(plan.groupNote);
   const muted = !!view.freshness && (view.freshness.stale || view.freshness.last_known);
   const diag = snapshot?.diagnostic ?? null;
   const diagLabel = diag ? diagnosticLabel(diag.code) : null;
@@ -206,7 +213,7 @@ export function AccountGroup({
         <p className="group__empty">等待首次读取。</p>
       ) : (
         <ul className="rows">
-          {rows.map((row) => {
+          {plan.rows.map((row) => {
             const key = rowKey(account.id, row.id);
             return (
               <MetricRow
@@ -216,7 +223,7 @@ export function AccountGroup({
                 now={now}
                 branch={row.branch}
                 muted={muted}
-                detail={row.detail}
+                detail={mismatch && row.id === TOTAL_BALANCE_ID ? row.detail : own(row.detail)}
                 mismatch={mismatch && row.id === TOTAL_BALANCE_ID}
                 expanded={expanded.has(key)}
                 onToggle={() => onToggleRow(key)}
