@@ -56,7 +56,20 @@ async def test_headers_are_never_highlighted_and_enter_opens_metric():
         await pilot.pause()
         headers = [o for o in app.listing._options if o.id.startswith("h")]
         assert len(headers) == len(app.accounts) and all(o.disabled for o in headers)
-        assert app.highlighted_row() == app.rows[0]
+        assert app.highlighted_row() is None
+        assert app.listing.highlighted is None
+        assert app.query_one("#account-selector").value == "all"
+        app._tick()
+        assert app.highlighted_row() is None
+        selector = app.query_one("#account-selector")
+        selector.value = app.accounts[0].id
+        await pilot.pause()
+        assert app.highlighted_row() is None
+        selector.value = "all"
+        await pilot.pause()
+        assert app.highlighted_row() is None
+        await pilot.press("enter")
+        assert not isinstance(app.screen, InformationScreen)
         seen = []
         for _ in range(len(app.rows) + 2):
             await pilot.press("down")
@@ -524,12 +537,14 @@ async def test_page_keys_never_clear_the_metric_selection(size):
     app = UsageApp(mode="demo")
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
+        assert app.highlighted_row() is None
         for keys in (("home", "pageup"), ("pagedown", "pagedown", "pageup", "pageup")):
             for key in keys:
                 await pilot.press(key)
                 assert app.highlighted_row() is not None
+        selected = app.highlighted_row()
         app._tick()
-        assert app.highlighted_row() == app.rows[0]
+        assert app.highlighted_row() == selected
         await pilot.press("end", "pagedown")
         assert app.highlighted_row() == app.rows[-1]
         await pilot.press("pageup", "enter")

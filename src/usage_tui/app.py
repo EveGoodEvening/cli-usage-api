@@ -572,13 +572,14 @@ class UsageApp(App[None]):
                 self._row_option.append(len(options))
                 options.append(Option(self._metric_prompt(*self.rows[index]), id=f"m{index}"))
         self.listing.add_options(options)
-        if self.rows:
-            # Only metric options are ever highlighted, never a disabled header.
-            self.listing.highlighted = self._row_option[
-                self.rows.index(selected)
-                if selected in self.rows
-                else min(previous or 0, len(self.rows) - 1)
-            ]
+        if selected in self.rows:
+            self.listing.highlighted = self._row_option[self.rows.index(selected)]
+        elif previous is not None and self.rows:
+            # If a selected row disappeared, keep the nearest surviving metric.
+            self.listing.highlighted = self._row_option[min(previous, len(self.rows) - 1)]
+        else:
+            # Startup and later unselected states stay unselected through rebuilds.
+            self.listing.highlighted = None
         self._render_header()
 
     def _metric(self, account: Account, metric_id: str) -> Metric | None:
