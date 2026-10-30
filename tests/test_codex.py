@@ -372,7 +372,7 @@ async def test_enforcement_plan_credits_and_review_limits_do_not_fabricate_usage
                 "limit_reached": True,
                 "primary_window": value,
             },
-            "rate_limit_reached_type": {"type": "[red]weekly\x1b[31m"},
+            "rate_limit_reached_type": {"type": "rate_limit_reached"},
             "credits": {"has_credits": True, "unlimited": True, "balance": "999"},
             "code_review_rate_limit": {"primary_window": window(604800, 99)},
         }
@@ -383,7 +383,8 @@ async def test_enforcement_plan_credits_and_review_limits_do_not_fabricate_usage
     assert tuple(result) == (MetricId.CODEX_WEEKLY, MetricId.CODEX_CREDITS)
     assert result[MetricId.CODEX_WEEKLY].state == MetricState.UNKNOWN
     assert result[MetricId.CODEX_WEEKLY].quota is None
-    assert "\x1b" not in (result[MetricId.CODEX_WEEKLY].detail or "")
+    # The response-level reached type is not shown: it names no window.
+    assert "rate_limit_reached" not in (result[MetricId.CODEX_WEEKLY].detail or "")
     credits = result[MetricId.CODEX_CREDITS]
     assert credits.unlimited is True
     assert credits.credits is None and credits.quota is None
@@ -560,10 +561,11 @@ async def test_distinct_feature_pools_with_same_duration_are_not_summed_or_alias
     result = rows(snapshot)
     assert len(result) == 3
     assert result[MetricId.CODEX_WEEKLY].quota.used_percent == 5
-    for feature, used in zip(features, (20, 30), strict=True):
+    for index, (feature, used) in enumerate(zip(features, (20, 30), strict=True)):
         metric_id = f"codex.pool.{hashlib.sha256(feature.encode()).hexdigest()}.window.604800"
         assert result[metric_id].quota.used_percent == used
-        assert feature in result[metric_id].detail
+        assert result[metric_id].label.endswith(f"Synthetic pool {index}")
+        assert result[metric_id].detail is None
     assert snapshot.fetch_state == FetchState.OK
 
 
@@ -645,6 +647,7 @@ async def test_credit_balance_text_is_exact_and_not_money(balance, expected):
     assert row.unlimited is False
     assert row.balance is None and row.quota is None and row.spent is None
     assert row.reset_at is None and row.expires_at is None
+    assert row.detail is None  # the row's value speaks for itself
     assert result[MetricId.CODEX_WEEKLY].quota.used_percent == Decimal("12.5")
     assert snapshot.fetch_state == FetchState.OK
     assert snapshot.diagnostic is None

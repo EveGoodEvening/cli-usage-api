@@ -172,7 +172,7 @@ DIAGNOSTIC_MESSAGES = MappingProxyType(
         "schema_error": "The provider response does not match the supported contract.",
         "response_too_large": "The provider response exceeded the supported size limit.",
         "partial_data": "Some values are unavailable; inspect the individual metric details.",
-        "balance_mismatch": "余额明细与总额不一致；金额保持原值，差额见总余额详情。",
+        "balance_mismatch": "余额明细与总额不一致；差额见总余额详情。",
         "unconfigured": "Connect an account to retrieve live usage.",
         "upstream_contract_missing": "A verified read contract is unavailable for this usage data.",
     }

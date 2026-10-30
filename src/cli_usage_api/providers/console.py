@@ -226,7 +226,7 @@ class ConsoleProvider:
             total = Money(payload.get("amount"), currency, exponent)
         except DomainError:
             total = None
-        total_detail = "Authoritative reported total; independent of category grant sums."
+        total_detail = None
         difference = (
             total.minor - sum(category[0].minor for category in categories)
             if total is not None and all(category[0] is not None for category in categories)
@@ -234,10 +234,7 @@ class ConsoleProvider:
         )
         if difference:
             difference_text = Money(difference, currency, exponent).format()
-            total_detail += (
-                " Category sums disagree with the authoritative total; amounts are unchanged."
-                f" Difference (total - category sums): {difference_text}."
-            )
+            total_detail = f"总额 − 明细合计 = {difference_text}"
         if total is None:
             total_detail = (
                 "Authoritative total is missing or invalid; category values remain independent."

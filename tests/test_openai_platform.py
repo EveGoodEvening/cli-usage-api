@@ -119,14 +119,15 @@ async def test_2023_sample_keeps_exact_available_without_paid_row():
     assert str(row.exact_balance.amount) == "17.3715455"
     assert row.exact_balance.rounded_to_cents() == (Decimal("17.37"), True)
     assert row.expires_at is None
-    assert "not derived from granted minus used" in row.detail
+    assert "Reported" not in row.detail and "not derived" not in row.detail
     # Detail text is shown on the dashboards: cents, marked when rounding changed it.
-    assert "total granted 18.00 USD." in row.detail
-    assert "total used 0.63 USD (服务端金额已舍入到分 / rounded to cents)." in row.detail
+    assert row.detail == (
+        "已授予 18.00 USD · 已用 0.63 USD (服务端金额已舍入到分 / rounded to cents)"
+        " · 1 笔授予，1 笔已过期"
+    )
     assert "0.6284545" not in row.detail
     assert "≈" not in row.detail
-    assert "Grants: 1 reported, 1 already expired." in row.detail
-    assert "not a reset" not in row.detail  # no future grant expiry
+    assert "到期" not in row.detail  # no future grant expiry
 
 
 async def test_2024_sample_keeps_float_noise_exact_and_emits_paid_row():
@@ -149,13 +150,15 @@ async def test_2024_sample_keeps_float_noise_exact_and_emits_paid_row():
     # granted - used (19.93) differs from the reported available: never derived.
     # The float noise stays in structured exact_balance data only; the dashboard
     # detail text rounds every OpenAI amount to cents and marks the change.
-    assert "total used 3.07 USD (服务端金额已舍入到分 / rounded to cents)." in available.detail
-    assert "total granted 23.00 USD." in available.detail
+    assert "已用 3.07 USD (服务端金额已舍入到分 / rounded to cents)" in available.detail
+    assert "已授予 23.00 USD" in available.detail
     assert "3.0700000000000003" not in available.detail
     assert "23.0 USD" not in available.detail
     assert "≈" not in available.detail
-    assert "Grants: 2 reported, 1 already expired" in available.detail
-    assert "nearest grant expiry 2025-04-01T00:00:00Z, not a reset" in available.detail
+    assert "2 笔授予，1 笔已过期，最早 2025-04-01 到期" in available.detail
+    assert "T00:00:00Z" not in available.detail
+    # The paid row carries no explanatory note.
+    assert paid.detail is None
     assert available.reset_at is None and available.expires_at is None
     # The serialized snapshot keeps the exact wire value.
     serialized = snapshot.to_dict()["metrics"][0]["exact_balance"]
@@ -251,7 +254,7 @@ async def test_invalid_paid_is_not_a_row_and_marks_partial(paid):
     assert snapshot.fetch_state == FetchState.PARTIAL
     assert [row.id for row in snapshot.metrics] == [MetricId.OPENAI_AVAILABLE_BALANCE]
     assert snapshot.metrics[0].exact_balance.amount == Decimal("4.9")
-    assert "unsupported format" in snapshot.metrics[0].detail
+    assert snapshot.metrics[0].detail == "付费余额格式不受支持"
 
 
 async def test_null_paid_is_absent_not_zero():
@@ -259,6 +262,8 @@ async def test_null_paid_is_absent_not_zero():
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.fetch_state == FetchState.OK
     assert [row.id for row in snapshot.metrics] == [MetricId.OPENAI_AVAILABLE_BALANCE]
+    # Nothing beyond the balance itself was reported, so no detail is shown.
+    assert snapshot.metrics[0].detail is None
 
 
 @pytest.mark.parametrize(
@@ -282,7 +287,7 @@ async def test_invalid_grants_make_summary_partial_never_zero(grants):
     row = snapshot.metrics[0]
     assert row.state == MetricState.READY
     assert row.exact_balance.amount == Decimal(4)
-    assert "partial" in row.detail or "unavailable" in row.detail
+    assert "笔无效" in row.detail or "unavailable" in row.detail
 
 
 async def test_hostile_grant_exponent_is_invalid_not_expanded():
@@ -293,7 +298,7 @@ async def test_hostile_grant_exponent_is_invalid_not_expanded():
     provider, _ = provider_for(body)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.fetch_state == FetchState.PARTIAL
-    assert "1 grant entries invalid" in snapshot.metrics[0].detail
+    assert snapshot.metrics[0].detail == "0 笔授予，1 笔无效"
 
 
 async def test_future_grant_expiry_is_detail_only_not_a_reset():
@@ -307,7 +312,7 @@ async def test_future_grant_expiry_is_detail_only_not_a_reset():
     row = snapshot.metrics[0]
     assert snapshot.fetch_state == FetchState.OK
     assert row.reset_at is None and row.expires_at is None
-    assert "nearest grant expiry 2026-11-27T12:00:00Z, not a reset" in row.detail
+    assert row.detail == "1 笔授予，最早 2026-11-27 到期"
 
 
 @pytest.mark.parametrize(

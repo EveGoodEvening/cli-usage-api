@@ -417,3 +417,8 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   `anthropic-beta`. Round money only at display; label width drives TUI reset tiers.
 - Live-mode `UsageApp.now()` is the real clock. Tests asserting countdown/relative text
   must pin `app.now` (and derive expected days from it), or they rot as dates pass.
+- Dashboard notes should state facts the value doesn't already show, not defend
+  semantics ("not a reset", "not derived from…", raw `key=value`). Codex's
+  response-level `rate_limit_reached_type` names no window, so a concise
+  "已达限额" on every row would falsely claim a 20%-used weekly limit is reached;
+  it is not shown at all.

@@ -237,7 +237,7 @@ async def test_authoritative_total_disagreement_is_a_warning_without_overwriting
     assert snapshot.fetch_state == FetchState.OK
     assert snapshot.fetched_at == NOW
     assert snapshot.diagnostic.code == "balance_mismatch"
-    assert difference in snapshot.metrics[2].detail
+    assert snapshot.metrics[2].detail == f"总额 − 明细合计 = {difference}"
 
 
 async def test_unknown_expiry_with_total_disagreement_remains_partial(payload):

@@ -834,9 +834,10 @@ async def test_organization_makes_usage_then_credits_with_exact_headers(payload)
     assert row.quota is None and row.reset_at is None and row.spent is None
     assert row.source.contract == "claude.oauth.prepaid.credits"
     assert row.source.version_sensitive is True
-    assert "Auto-reload off." in row.detail
-    assert "valid for 12 months" in row.detail
-    assert "not a subscription allowance" in row.detail
+    assert "自动充值关。" in row.detail
+    assert "有效期 12 个月。" in row.detail
+    assert "subscription allowance" not in row.detail and "no reset" not in row.detail
+    assert "promotional" not in row.detail and "促销" not in row.detail
     assert snapshot.grants == ()
 
 
@@ -1048,8 +1049,7 @@ async def test_invalid_or_absent_optional_settings_are_omitted(payload, months):
     )
     row = credit_row(snapshot)
     assert row.state == MetricState.READY
-    assert "Auto-reload" not in row.detail
-    assert "valid for" not in row.detail
+    assert row.detail is None
     assert snapshot.fetch_state == FetchState.OK
 
 
@@ -1079,12 +1079,10 @@ async def test_promo_summary_is_detail_only_and_excludes_expired(payload):
     assert row.balance == Money(13750, "USD", 2)
     assert row.expires_at is None and row.reset_at is None
     assert snapshot.grants == ()
-    assert "2 active promotional tranche(s) with 7.50 USD remaining" in row.detail
-    assert "included in the balance" in row.detail
-    assert "2026-11-15T00:00:00Z" in row.detail
-    assert "not a reset" in row.detail
-    assert "1 promotional tranche(s) already expired" in row.detail
-    assert "partial" not in row.detail
+    assert "含促销 7.50 USD（2 笔），最早 2026-11-15 到期。" in row.detail
+    assert "T00:00:00Z" not in row.detail
+    assert "1 笔促销已过期。" in row.detail
+    assert "无效" not in row.detail
     assert snapshot.fetch_state == FetchState.OK
 
 
@@ -1107,16 +1105,16 @@ async def test_invalid_promo_entries_make_summary_partial_never_zero(payload, ba
     row = credit_row(snapshot)
     assert row.state == MetricState.READY
     assert row.balance == Money(13750, "USD", 2)
-    assert "1 active promotional tranche(s) with 3.00 USD remaining" in row.detail
-    assert "promotional summary is partial" in row.detail
+    assert "含促销 3.00 USD（1 笔）" in row.detail
+    assert "部分促销条目无效。" in row.detail
 
 
 async def test_only_invalid_promo_entries_do_not_claim_none_active(payload):
     snapshot, _ = await fetch_credits(payload, {**CREDITS, "promo_tranches": [tranche("x")]})
     row = credit_row(snapshot)
-    assert "No active promotional" not in row.detail
+    assert "含促销" not in row.detail
     assert "0.00" not in row.detail
-    assert "promotional summary is partial" in row.detail
+    assert "部分促销条目无效。" in row.detail
 
 
 @pytest.mark.parametrize("raw", [{}, "x", 1])
@@ -1124,12 +1122,14 @@ async def test_malformed_promo_array_is_unknown_summary(payload, raw):
     snapshot, _ = await fetch_credits(payload, {**CREDITS, "promo_tranches": raw})
     row = credit_row(snapshot)
     assert row.balance == Money(13750, "USD", 2)
-    assert "promotional summary unknown" in row.detail
+    assert "促销信息格式无效。" in row.detail
 
 
-async def test_empty_promo_array_reports_none_active(payload):
+async def test_empty_promo_array_adds_no_promo_note(payload):
     snapshot, _ = await fetch_credits(payload, {**CREDITS, "promo_tranches": []})
-    assert "No active promotional credits reported." in credit_row(snapshot).detail
+    row = credit_row(snapshot)
+    assert row.balance == Money(13750, "USD", 2)
+    assert "promotional" not in row.detail and "促销" not in row.detail
 
 
 @pytest.mark.parametrize(

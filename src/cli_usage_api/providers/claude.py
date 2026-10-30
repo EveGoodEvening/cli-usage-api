@@ -249,10 +249,6 @@ _CREDITS_SOURCE = SourceRef(
     SourceKind.PRIVATE_HTTP, "claude.oauth.prepaid.credits", version_sensitive=True
 )
 _CREDITS_LABEL = "Claude 已购 credits 余额"
-_CREDITS_NOTE = (
-    "Prepaid usage credits balance for the selected organization;"
-    " a balance, not a subscription allowance, and it has no reset."
-)
 _CREDITS_RATE_LIMIT_COOLDOWN = timedelta(seconds=180)
 _CREDITS_FAILURES = MappingProxyType(
     {
@@ -290,7 +286,7 @@ def _promo_summary(raw: object, currency: str, exponent: int, now: datetime) -> 
     if raw is None:
         return None
     if not isinstance(raw, list):
-        return "Promotional credit format is invalid; promotional summary unknown."
+        return "促销信息格式无效。"
     active = 0
     total = 0
     expired = 0
@@ -320,17 +316,13 @@ def _promo_summary(raw: object, currency: str, exponent: int, now: datetime) -> 
     notes = []
     if active:
         notes.append(
-            f"{active} active promotional tranche(s) with"
-            f" {Money(total, currency, exponent).format()} remaining, included in the balance"
-            f" (not additional); nearest credit expiry {format_timestamp(nearest)}"
-            " (expiry, not a reset or renewal)."
+            f"含促销 {Money(total, currency, exponent).format()}（{active} 笔），"
+            f"最早 {format_timestamp(nearest)[:10]} 到期。"
         )
-    elif not invalid:
-        notes.append("No active promotional credits reported.")
     if expired:
-        notes.append(f"{expired} promotional tranche(s) already expired.")
+        notes.append(f"{expired} 笔促销已过期。")
     if invalid:
-        notes.append("Some promotional entries are invalid; the promotional summary is partial.")
+        notes.append("部分促销条目无效。")
     return " ".join(notes)
 
 
@@ -352,16 +344,15 @@ def _credit_balance(payload: object, now: datetime) -> Metric:
         notes.append("Currency is missing or unsupported; balance unknown.")
     if amount is None or currency is None:
         return _credits_unknown(" ".join(notes))
-    notes.append(_CREDITS_NOTE)
     reload = payload.get("auto_reload_settings")
     enabled = reload.get("enabled") if isinstance(reload, dict) else None
     if type(enabled) is bool:
-        notes.append(f"Auto-reload {'on' if enabled else 'off'}.")
+        notes.append(f"自动充值{'开' if enabled else '关'}。")
     months = payload.get("expiry_policy_months")
     if type(months) is int and 0 < months <= 1200:
-        notes.append(f"Usage credits are valid for {months} months.")
+        notes.append(f"有效期 {months} 个月。")
     promo = _promo_summary(payload.get("promo_tranches"), currency, exponent, now)
-    if promo is not None:
+    if promo:
         notes.append(promo)
     return Metric(
         MetricId.CLAUDE_CREDIT_BALANCE,
@@ -369,7 +360,7 @@ def _credit_balance(payload: object, now: datetime) -> Metric:
         MetricState.READY,
         _CREDITS_SOURCE,
         balance=Money(amount, currency, exponent),
-        detail=" ".join(notes),
+        detail=" ".join(notes) or None,
     )
 
 

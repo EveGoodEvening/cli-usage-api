@@ -45,9 +45,7 @@ _SOURCE = SourceRef(
 _CURRENCY = "USD"
 _AVAILABLE_LABEL = "OpenAI 可用余额"
 _PAID_LABEL = "OpenAI 付费余额"
-_AVAILABLE_NOTE = "Reported available prepaid credit; not derived from granted minus used."
-_PAID_NOTE = "Reported paid (purchased) available credit; promotional credit excluded."
-_MISSING = "Available balance is missing or invalid; missing does not mean zero."
+_MISSING = "Available balance is missing or invalid; missing does not mean zero"
 _MAX_EPOCH = Decimal(253402300799)  # 9999-12-31T23:59:59Z
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _FAILURE_DETAILS = {
@@ -134,14 +132,14 @@ def _grants_summary(raw: object, now: datetime) -> tuple[str | None, bool]:
             expired += 1
         else:
             expiries.append(expires)
-    parts = [f"Grants: {valid} reported"]
+    parts = [f"{valid} 笔授予"]
     if expired:
-        parts.append(f"{expired} already expired")
+        parts.append(f"{expired} 笔已过期")
     if expiries:
-        parts.append(f"nearest grant expiry {format_timestamp(min(expiries))}, not a reset")
-    text = ", ".join(parts) + "."
+        parts.append(f"最早 {format_timestamp(min(expiries))[:10]} 到期")
+    text = "，".join(parts)
     if invalid:
-        text += f" {invalid} grant entries invalid; summary is partial."
+        text += f"，{invalid} 笔无效"
     return text, bool(invalid)
 
 
@@ -203,9 +201,9 @@ class OpenAIPlatformProvider:
         granted = _amount(payload.get("total_granted"))
         used = _amount(payload.get("total_used"))
         if granted is not None:
-            notes.append(f"Reported total granted {_money_text(granted)}.")
+            notes.append(f"已授予 {_money_text(granted)}")
         if used is not None:
-            notes.append(f"Reported total used {_money_text(used)}.")
+            notes.append(f"已用 {_money_text(used)}")
         grants, grants_partial = _grants_summary(payload.get("grants"), now)
         if grants is not None:
             notes.append(grants)
@@ -214,8 +212,10 @@ class OpenAIPlatformProvider:
         paid = _amount(paid_raw)
         if paid_raw is not None and paid is None:
             partial = True
-            notes.append("Paid available balance was reported in an unsupported format.")
-        detail = " ".join([_AVAILABLE_NOTE if available is not None else _MISSING, *notes])
+            notes.append("付费余额格式不受支持")
+        if available is None:
+            notes.insert(0, _MISSING)
+        detail = " · ".join(notes) or None
         metrics = [
             Metric(
                 MetricId.OPENAI_AVAILABLE_BALANCE,
@@ -233,7 +233,6 @@ class OpenAIPlatformProvider:
                     _PAID_LABEL,
                     MetricState.READY,
                     _SOURCE,
-                    detail=_PAID_NOTE,
                     exact_balance=ExactMoney(paid, _CURRENCY),
                 )
             )

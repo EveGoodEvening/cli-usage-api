@@ -34,14 +34,12 @@ _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "codex.wham.usage.v1", version_sens
 _WEEKLY_LABEL = "Codex weekly (7d)"
 _MISSING = "Usage is unavailable; missing does not mean zero or establish eligibility."
 _CREDITS_LABEL = "Codex credits"
-_CREDITS_NOTE = "Codex credits 余额；不是货币，不推断有效期。"
 
 
 @dataclass(frozen=True, slots=True)
 class _Window:
     used: Decimal | None
     reset: datetime | None
-    detail: str
 
 
 def _reset(value: object) -> datetime | None:
@@ -60,23 +58,13 @@ def _reset(value: object) -> datetime | None:
         return None
 
 
-def _window(value: dict, detail: str) -> _Window:
+def _window(value: dict) -> _Window:
     try:
         raw = value.get("used_percent")
         used = percent(str(raw) if type(raw) is float else raw)
     except DomainError:
         used = None
-    return _Window(used, _reset(value.get("reset_at")), detail)
-
-
-def _enforcement(value: dict) -> str:
-    parts = []
-    reached_type = value.get("rate_limit_reached_type")
-    if isinstance(reached_type, dict):
-        reached_type = reached_type.get("type")
-    if isinstance(reached_type, str):
-        parts.append("rate_limit_reached_type=" + sanitize_text(reached_type, max_length=128))
-    return "; ".join(parts)
+    return _Window(used, _reset(value.get("reset_at")))
 
 
 def _identity(seconds: int, feature: str | None) -> tuple[str, str] | None:
@@ -103,7 +91,7 @@ def _identity(seconds: int, feature: str | None) -> tuple[str, str] | None:
 
 
 def _metric(metric_id: str, label: str, windows: list[_Window]) -> tuple[Metric, bool]:
-    details = list(dict.fromkeys(window.detail for window in windows if window.detail))
+    details = []
     usages = {window.used for window in windows if window.used is not None}
     resets = {window.reset for window in windows if window.reset is not None}
     used = next(iter(usages)) if len(usages) == 1 else None
@@ -160,7 +148,6 @@ def _credits(value: object) -> Metric | None:
             MetricState.READY,
             _SOURCE,
             unlimited=True,
-            detail="Codex credits 不限量（服务端报告 unlimited）。",
         )
     has_credits = value.get("has_credits")
     if has_credits is False:
@@ -180,7 +167,6 @@ def _credits(value: object) -> Metric | None:
                 MetricState.READY,
                 _SOURCE,
                 credits=amount,
-                detail=_CREDITS_NOTE,
             )
     return unknown("有可用 credits，但数量未知")
 
@@ -228,23 +214,12 @@ class CodexProvider:
         grouped: dict[str, tuple[str, list[_Window]]] = {MetricId.CODEX_WEEKLY: (_WEEKLY_LABEL, [])}
         partial = False
         recognized = False
-        response_detail = _enforcement(payload)
 
         def collect(limit: object, feature: str | None = None, name: str = "") -> None:
             nonlocal partial, recognized
             if not isinstance(limit, dict):
                 partial = True
                 return
-            feature_detail = (
-                "metered_feature=" + sanitize_text(feature, max_length=128)
-                if feature is not None
-                else ""
-            )
-            detail = "; ".join(
-                part
-                for part in (response_detail, name, feature_detail, _enforcement(limit))
-                if part
-            )
             for slot in ("primary_window", "secondary_window"):
                 value = limit.get(slot)
                 if value is None:
@@ -266,17 +241,11 @@ class CodexProvider:
                     label = f"{label}: {name}" if name else label
                 if metric_id not in grouped:
                     grouped[metric_id] = (label, [])
-                grouped[metric_id][1].append(_window(value, detail))
+                grouped[metric_id][1].append(_window(value))
 
         collect(payload.get("rate_limit"))
         if not grouped[MetricId.CODEX_WEEKLY][1]:
-            main = payload.get("rate_limit")
-            detail = "; ".join(
-                part
-                for part in (response_detail, _enforcement(main) if isinstance(main, dict) else "")
-                if part
-            )
-            grouped[MetricId.CODEX_WEEKLY][1].append(_Window(None, None, detail))
+            grouped[MetricId.CODEX_WEEKLY][1].append(_Window(None, None))
         additional = payload.get("additional_rate_limits")
         if additional is not None:
             if not isinstance(additional, list):

@@ -74,6 +74,26 @@ describe("Board", () => {
     expect(text(renderToStaticMarkup(createElement(DemoStrip)))).toContain("离线合成演示");
   });
 
+  it("states a diagnostic message that already starts with its label only once", () => {
+    const money = { minor: 1451, currency: "USD", exponent: 2 };
+    const source = { kind: "private_http", contract: "c", version_sensitive: false } as const;
+    const view = single("claude_platform", [
+      metric("claude.platform.total_balance", { source, balance: money, detail: "总额 − 明细合计 = 0.01 USD" }),
+    ]);
+    view.snapshot!.diagnostic = { code: "balance_mismatch", message: "余额明细与总额不一致；差额见总余额详情。" };
+    const html = board([view]);
+    expect(html).toContain('<p class="group__diag"><span class="is-warn">余额明细与总额不一致；差额见总余额详情。</span></p>');
+    const plain = text(html);
+    expect(plain.split("余额明细与总额不一致").length - 1).toBe(1);
+    expect(plain.split("总额 − 明细合计 = 0.01 USD").length - 1).toBe(1);
+  });
+
+  it("keeps the label for a diagnostic message that does not repeat it", () => {
+    const view = single("claude_platform", [metric("claude.platform.total_balance", {})], "partial");
+    view.snapshot!.diagnostic = { code: "partial_data", message: "Some values are unavailable." };
+    expect(board([view])).toMatch(/<b class="is-[a-z]+">部分数据缺失<\/b> — <span>Some values are unavailable\.<\/span>/);
+  });
+
   it("states a note repeated across accounts once, above the groups", () => {
     for (const data of [healthy, errors]) {
       const html = board(data.accounts);

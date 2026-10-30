@@ -169,7 +169,10 @@ export function AccountGroup({
   const diag = snapshot?.diagnostic ?? null;
   const diagLabel = diag ? diagnosticLabel(diag.code) : null;
   const diagRepeatsState = !!diag && !!snapshot && diagLabel === stateLabel(snapshot.fetch_state) && snapshot.fetch_state !== "ok";
+  // A message that already opens with its label carries the label's tone instead.
+  const labelInMessage = !!diag && !!diagLabel && diag.message.startsWith(diagLabel);
   const mismatch = diag?.code === "balance_mismatch";
+  const diagTone = `is-${mismatch ? "warn" : health === "error" ? "error" : "warn"}`;
   const factsId = `facts-${account.id}`;
   const grantsKey = rowKey(account.id, GRANTS_KEY);
 
@@ -198,11 +201,9 @@ export function AccountGroup({
       </p>
       {diag ? (
         <p className="group__diag">
-          {diagRepeatsState ? null : (
-            <b className={`is-${mismatch ? "warn" : health === "error" ? "error" : "warn"}`}>{diagLabel}</b>
-          )}
-          {diagRepeatsState ? null : " — "}
-          <span>{diag.message}</span>
+          {diagRepeatsState || labelInMessage ? null : <b className={diagTone}>{diagLabel}</b>}
+          {diagRepeatsState || labelInMessage ? null : " — "}
+          <span className={labelInMessage ? diagTone : undefined}>{diag.message}</span>
         </p>
       ) : null}
       {groupNote ? <p className="group__note">{groupNote}</p> : null}
