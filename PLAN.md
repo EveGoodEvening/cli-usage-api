@@ -1805,9 +1805,132 @@ last).
 - [ ] Embedded smoke: a web edit appears in the `usage --api` TUI; installed-entry PTY
   evidence per the harness lesson — pending.
 - [ ] Browser check of the accounts view (one browser through the heavy gate) — pending.
-- [ ] Independent review — pending.
+- [x] Independent review: three-lens review with adversarial verification. Round 1
+  confirmed one web defect (an unlimited credits row showed `Credits —` in details),
+  which was fixed with regression tests; round 2 found nothing.
 
 Boundary: green synthetic tests do not establish live Console organization discovery,
 real Secret Service persistence, Railway custom start-command behaviour (the documented
 form follows Railway's docs, see `docs/deploy-railway.md`), Railway healthchecks or any
 authenticated provider read. Those remain under §9/§11/§15 prerequisites.
+
+## 19. User-approved Codex credits and Claude extra usage — 2026-10-30
+
+### 19.1 Scope change and remaining non-goals
+
+The user approved items "1" (Claude extra usage) and "2" (Codex credits) of the
+2026-10-30 proposal, then narrowed item 1 to **parse only** ("btw Claude extra usage
+花费行 先只用解析，不需要在 TUI 和 web 展示"). This section supersedes:
+
+- §1 line "Historical out of scope … Claude subscription extra-usage billing" **only**
+  for read-only parsing of `extra_usage` from the existing Claude OAuth usage
+  response. No new request, header or credential.
+- §11.2 "Credits/unlimited-credit flags … do not mandate new metrics" **only** for a
+  read-only optional Codex credits row from the existing WHAM usage response.
+
+Still out of scope: purchases/top-ups; the Claude prepaid usage-credits balance
+endpoint `/api/oauth/organizations/{org}/prepaid/credits` (deferred proposal item 3);
+OpenAI Platform credits (deferred proposal item 4); converting Codex credits to USD or
+any currency; inferring credit expiry or a spend reset; `wattle_ember`,
+`iguana_necktie`, `cinder_cove`, `cedar_ember`, `approx_local_messages`,
+`approx_cloud_messages`, `spend_control`, `rate_limit_reset_credits` and
+additional-rate-limit credits.
+
+**Deliberate exception to the "provider extras must remain visible" lesson.** At the
+user's request, `claude.subscription.extra_usage` is emitted by the provider and kept
+in snapshots, the debug log and the HTTP API JSON, but both consumers exclude it
+through one named, documented constant (`PARSE_ONLY_METRIC_IDS` in `app.py`, mirrored
+in `web/src/semantics.ts`): no dashboard row, details entry, header or count effect.
+Exclusion is consumer-side, never by dropping the metric in the provider. Spend
+(`spent`/`spend_limit`) formatting is not implemented in the TUI or web, and the demo
+and web mocks carry no extra-usage rows. Lifting the exclusion is a future,
+separately requested change.
+
+### 19.2 Frozen contract
+
+Domain: optional IDs `CLAUDE_EXTRA_USAGE = "claude.subscription.extra_usage"` and
+`CODEX_CREDITS = "codex.subscription.credits"`, not in `REQUIRED_METRIC_IDS`. New
+`Metric` fields after `share_percent`: `spent: Money | None` (consumption against a
+cap, not a balance), `spend_limit: Money | None` (same currency/exponent as
+`spent`), `credits: Decimal | None` (non-currency unit, never money), `unlimited:
+bool` (strict bool; source positively reported no cap). `spent`/`spend_limit` exclude
+`balance`, `share_percent` and `credits` but may coexist with `quota` (cap
+utilization). `credits` excludes `quota`, `balance`, `share_percent` and spend.
+`unlimited=True` excludes `spend_limit` and `credits`. `credit_amount()` accepts
+`Decimal`/`int`/`str` (not bool/float), string length ≤ 64 before parsing, finite,
+≤ 40 coefficient digits, exponent −40…+40; zero and negative allowed. Old snapshots
+without the keys load with defaults; `SCHEMA_VERSION` stays 1. Scheduler unknown rows
+clear all four fields; the debug log summarizes them.
+
+Claude (`payload["extra_usage"]`, same `GET /api/oauth/usage`): absent/null → no row;
+non-dict or non-bool `is_enabled` → UNKNOWN row. `currency` must match `^[A-Za-z]{3}$`
+(uppercased) with exponent from an explicit map (USD/EUR/GBP/CAD/AUD/NZD/SGD/HKD/CHF/
+SEK/NOK/DKK/MXN/BRL/INR/CNY = 2, JPY/KRW = 0); absent/unknown currency leaves money
+unknown (no USD default). `used_credits`/`monthly_limit` are nonnegative integral
+minor units ≤ 10^15 (bool, negative, non-integral rejected with a detail note); null →
+None. `unlimited = is_enabled is True and monthly_limit is null`. Quota (cap
+utilization via `percent()`) only with a non-null cap and valid `utilization`; never
+derived from used/limit, never with unlimited. READY with valid `is_enabled`; detail
+states current-billing-period spend, no server reset time (`reset_at` None), and when
+disabled, unavailability plus `disabled_reason` only if `^[a-z0-9_]{1,64}$`. Label
+"Claude 额外用量". It never changes `fetch_state`, diagnostic or usability, and failure
+snapshots carry no extra row.
+
+Codex (`payload["credits"]`, same `GET chatgpt.com/backend-api/wham/usage`):
+absent/null → no row; non-dict → UNKNOWN. `unlimited is True` → READY,
+`unlimited=True`, no amount (checked first, as in the official TUI). Else
+`has_credits is False` → no row. Else `has_credits is True` → `balance` (string
+preferred, int/Decimal tolerated, bool rejected) through `credit_amount()`; valid →
+READY `credits`; missing/null/invalid → UNKNOWN "credits available, amount unknown".
+Non-bool `has_credits` → UNKNOWN. Label "Codex credits". Never converted to currency;
+no expiry; never changes `fetch_state`/diagnostic; failure snapshots carry no row.
+
+Display (TUI and web): credits as `<amount> credits` in plain fixed-point text
+(`format(value, "f")`, no exponent, no rounding); unlimited as `不限量` / Unlimited;
+unknown amount `—`. Rows holding only the new fields are not empty placeholders;
+details show every value; numbers are never ellipsized; extras follow required rows.
+Claude extra usage is excluded per §19.1. Demo: one synthetic `Codex credits ·
+SYNTHETIC` row of `137.5` credits with `offline_demo` provenance and the fixed demo
+clock; the demo loader accepts `credits` (decimal string) and `unlimited`.
+
+### 19.3 Sources and revisions
+
+- Claude: official Claude Code npm `@anthropic-ai/claude-code-linux-x64@2.1.312`,
+  tarball sha256 `f1c3d923ff3ac7e7080b8b9c638833dde72feab15e46940a65a0122d728c6bfd`.
+  Its bundled zod schema: `{is_enabled: bool, monthly_limit: number|null,
+  used_credits: number|null, utilization: number|null, currency: string|null|absent,
+  disabled_reason: string|null|absent}`; SDK describe text: "Amounts are in minor
+  units of currency (cents for USD); is_enabled is false while extra usage cannot
+  cover sends". Null `monthly_limit` means no monthly cap; the server sends no reset.
+  Community corroboration: `steipete/CodexBar` at
+  `5f93dc3068b3bee3f8753f3772614cc2949c335d`.
+- Codex: `openai/codex` at `708e3e2c70142c75682a375669ca60754f76976d` —
+  `codex-rs` `credit_status_details.rs` (`CreditStatusDetails {has_credits: bool,
+  unlimited: bool, balance: Option<String>}`), backend-client `client.rs`
+  `map_credits`, and `tui/src/status/rate_limits.rs` (unlimited → "Unlimited" first;
+  `has_credits=false` hidden; otherwise "N credits").
+- These are private, version-sensitive contracts read from official client artifacts
+  and a community parser. They establish a research contract, not that a live
+  account request returns these fields.
+
+### 19.4 Acceptance ledger
+
+- [x] Offline implementation: domain, providers, scheduler/debug log, TUI and web
+  consumers, demo row and documentation, by separate units.
+- [x] Merged offline gate: `uv run --locked pytest -q` **1,831 passed, 2 failed in
+  79.35s**; `ruff check .` passed; `ruff format --check .` 57 files formatted; web
+  typecheck and lint passed, vitest **150 passed** (12 files). The two failures are
+  `tests/test_rendering.py::test_saturated_retry_response_renders_without_local_overflow`,
+  which predate this work (hard-coded day count against the real clock). Throwaway
+  synthetic end-to-end check (real providers + Transport over `httpx.MockTransport`,
+  API JSON, headless `UsageApp`) and the installed-entry demo PTY smoke (4/4) passed.
+- [ ] Live acceptance — pending: compare a real Claude account's parsed
+  `extra_usage` (API JSON/debug log) with Claude Code `/usage` "Usage credits", and a
+  real Codex account's credits row with Codex `/status` credits.
+- [x] Independent review: three-lens review with adversarial verification. Round 1
+  confirmed one web defect (an unlimited credits row showed `Credits —` in details),
+  which was fixed with regression tests; round 2 found nothing.
+
+Open question: Codex `balance` wire type. The official model is `Option<String>`;
+numeric values are tolerated through the same bounded parser until a live response
+settles it.

@@ -27,6 +27,7 @@ from cli_usage_api.domain import (
     SourceKind,
     SourceRef,
     TransportError,
+    credit_amount,
     dumps,
     format_timestamp,
     loads,
@@ -561,3 +562,248 @@ def test_schema_and_nested_unknown_fields_are_rejected():
         Snapshot.from_dict(data)
     with pytest.raises(DomainError):
         Account.from_dict({"id": ACCOUNT_ID})
+
+
+def test_optional_extra_metric_ids_are_not_required_rows():
+    assert MetricId.CLAUDE_EXTRA_USAGE == "claude.subscription.extra_usage"
+    assert MetricId.CODEX_CREDITS == "codex.subscription.credits"
+    required = {item for items in REQUIRED_METRIC_IDS.values() for item in items}
+    assert MetricId.CLAUDE_EXTRA_USAGE not in required
+    assert MetricId.CODEX_CREDITS not in required
+
+
+def extra(**changes):
+    return Metric(
+        MetricId.CLAUDE_EXTRA_USAGE, "Claude 额外用量", MetricState.READY, SOURCE, **changes
+    )
+
+
+def credits_row(**changes):
+    return Metric(MetricId.CODEX_CREDITS, "Codex credits", MetricState.READY, SOURCE, **changes)
+
+
+def test_new_metric_fields_default_to_absent():
+    row = Metric(MetricId.CODEX_WEEKLY, "Weekly", MetricState.UNKNOWN, SOURCE)
+    assert (row.spent, row.spend_limit, row.credits, row.unlimited) == (None, None, None, False)
+
+
+def test_spend_against_cap_may_carry_cap_utilization_quota():
+    row = extra(
+        spent=Money(1250, "USD", 2),
+        spend_limit=Money(5000, "USD", 2),
+        quota=QuotaValue(used_percent=Decimal("25.0")),
+    )
+    assert row.spent.format() == "12.50 USD"
+    assert row.spend_limit.format() == "50.00 USD"
+    assert row.quota.used_percent == Decimal("25.0")
+    assert row.balance is None and row.reset_at is None
+    assert extra(spent=Money(0, "JPY", 0)).spend_limit is None
+    assert extra(spend_limit=Money(0, "USD", 2)).spent is None
+    assert extra(spent=Money(1, "USD", 2), unlimited=True).unlimited is True
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"spent": 1250},
+        {"spent": Decimal(1)},
+        {"spend_limit": {"minor": 1, "currency": "USD", "exponent": 2}},
+        {"spent": Money(1, "USD", 2), "spend_limit": Money(1, "EUR", 2)},
+        {"spent": Money(1, "USD", 2), "spend_limit": Money(1, "USD", 0)},
+        {"spent": Money(1, "USD", 2), "balance": Money(1, "USD", 2)},
+        {"spend_limit": Money(1, "USD", 2), "balance": Money(1, "USD", 2)},
+        {"spent": Money(1, "USD", 2), "share_percent": Decimal(1)},
+        {"spend_limit": Money(1, "USD", 2), "share_percent": Decimal(1)},
+        {"spent": Money(1, "USD", 2), "credits": Decimal(1)},
+        {"spend_limit": Money(1, "USD", 2), "credits": Decimal(1)},
+        {"credits": Decimal(1), "quota": QuotaValue(used_percent=1)},
+        {"credits": Decimal(1), "balance": Money(1, "USD", 2)},
+        {"credits": Decimal(1), "share_percent": Decimal(1)},
+        {"unlimited": True, "spend_limit": Money(1, "USD", 2)},
+        {"unlimited": True, "credits": Decimal(1)},
+        {"unlimited": 1},
+        {"unlimited": 0},
+        {"unlimited": "true"},
+        {"unlimited": None},
+    ],
+)
+def test_spend_credit_and_unlimited_invariants(changes):
+    with pytest.raises(DomainError):
+        extra(**changes)
+
+
+def test_unlimited_alone_and_credits_alone_are_valid():
+    assert extra(unlimited=True).unlimited is True
+    assert credits_row(unlimited=True).credits is None
+    row = credits_row(credits="1234.5")
+    assert row.credits == Decimal("1234.5") and type(row.credits) is Decimal
+    assert row.quota is None and row.balance is None and row.unlimited is False
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("0", Decimal(0)),
+        ("-5", Decimal(-5)),
+        ("-0.25", Decimal("-0.25")),
+        (0, Decimal(0)),
+        (-3, Decimal(-3)),
+        (Decimal("12.3400"), Decimal("12.3400")),
+        ("1e40", Decimal("1e40")),
+        ("1e-40", Decimal("1e-40")),
+        ("9" * 40, Decimal("9" * 40)),
+        (10**40 - 1, Decimal(10**40 - 1)),
+        ("1" * 64, None),
+    ],
+)
+def test_credit_amount_accepts_bounded_exact_values(raw, expected):
+    if expected is None:
+        with pytest.raises(DomainError):
+            credit_amount(raw)
+        return
+    value = credit_amount(raw)
+    assert value == expected and type(value) is Decimal
+    assert str(value) == str(expected)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        1.5,
+        0.0,
+        True,
+        False,
+        None,
+        [],
+        {"balance": "1"},
+        b"1",
+        "",
+        " ",
+        "abc",
+        "nan",
+        "NaN",
+        "-sNaN",
+        "inf",
+        "-Infinity",
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+        "1e41",
+        "1e-41",
+        "1e999999999",
+        "1E-999999999",
+        Decimal("1e1000000"),
+        "1" * 41,
+        "0." + "1" * 41,
+        "1" * 65,
+        " " * 30 + "1" * 35,
+        10**40,
+        -(10**40),
+        pytest.param(10**5000, id="huge-int"),
+        Decimal("1" * 41),
+    ],
+)
+def test_credit_amount_rejects_hostile_or_unsupported_values(raw):
+    with pytest.raises(DomainError):
+        credit_amount(raw)
+    if type(raw) in (Decimal, int, str):
+        with pytest.raises(DomainError):
+            credits_row(credits=raw)
+
+
+def test_credit_amount_rejects_long_strings_before_parsing(monkeypatch):
+    from cli_usage_api import domain
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Oversized text must be rejected before Decimal parsing")
+
+    monkeypatch.setattr(domain, "Decimal", forbidden)
+    with pytest.raises(DomainError):
+        credit_amount("1" * 65)
+
+
+def test_credit_amount_is_independent_of_ambient_decimal_precision():
+    with localcontext() as context:
+        context.prec = 3
+        assert credit_amount("1234567.891") == Decimal("1234567.891")
+
+
+def test_spend_credits_and_unlimited_round_trip_through_json():
+    rows = (
+        extra(
+            spent=Money(1250, "USD", 2),
+            spend_limit=Money(5000, "USD", 2),
+            quota=QuotaValue(used_percent=Decimal("25.00")),
+            detail="Synthetic billing-period spend.",
+        ),
+        replace(
+            extra(),
+            id="claude.subscription.extra_usage_b",
+            spent=Money(7, "JPY", 0),
+            unlimited=True,
+        ),
+        credits_row(credits=Decimal("-0.5000")),
+        replace(credits_row(), id="codex.subscription.credits_b", unlimited=True),
+    )
+    value = replace(snapshot(), metrics=rows)
+    serialized = dumps(value)
+    restored = loads(serialized)
+    assert restored == value
+    assert Snapshot.from_dict(value.to_dict()) == value
+    payload = json.loads(serialized)["value"]["metrics"]
+    assert payload[0]["spent"] == {"minor": 1250, "currency": "USD", "exponent": 2}
+    assert payload[0]["spend_limit"] == {"minor": 5000, "currency": "USD", "exponent": 2}
+    assert payload[0]["unlimited"] is False and payload[0]["credits"] is None
+    assert payload[1]["unlimited"] is True and payload[1]["spend_limit"] is None
+    assert payload[2]["credits"] == "-0.5000"
+    assert str(restored.metrics[2].credits) == "-0.5000"
+    assert json.loads(serialized)["schema_version"] == 1
+
+
+def test_old_snapshots_without_new_metric_keys_still_load():
+    payload = json.loads(dumps(snapshot()))
+    for metric in payload["value"]["metrics"]:
+        for name in ("spent", "spend_limit", "credits", "unlimited"):
+            del metric[name]
+    restored = loads(json.dumps(payload))
+    assert restored == snapshot()
+    assert all(
+        (m.spent, m.spend_limit, m.credits, m.unlimited) == (None, None, None, False)
+        for m in restored.metrics
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("credits", "1e999999999"),
+        ("credits", "1" * 65),
+        ("credits", "NaN"),
+        ("credits", [1]),
+        ("credits", True),
+        ("unlimited", "true"),
+        ("unlimited", 1),
+        ("spent", {"minor": 1, "currency": "usd", "exponent": 2}),
+        ("spent", {"minor": 1, "currency": "USD", "exponent": 2, "extra": 1}),
+        ("spent", "12.50"),
+        ("spend_limit", {"minor": True, "currency": "USD", "exponent": 2}),
+    ],
+)
+def test_serialized_new_metric_fields_are_validated(name, value):
+    payload = json.loads(dumps(replace(snapshot(), metrics=(credits_row(),))))
+    payload["value"]["metrics"][0][name] = value
+    with pytest.raises(DomainError):
+        loads(json.dumps(payload))
+
+
+def test_serialized_unit_mismatch_and_exclusivity_are_rejected():
+    payload = json.loads(dumps(replace(snapshot(), metrics=(extra(),))))
+    metric = payload["value"]["metrics"][0]
+    metric["spent"] = {"minor": 1, "currency": "USD", "exponent": 2}
+    metric["spend_limit"] = {"minor": 1, "currency": "EUR", "exponent": 2}
+    with pytest.raises(DomainError):
+        loads(json.dumps(payload))
+    metric["spend_limit"] = None
+    metric["credits"] = "1"
+    with pytest.raises(DomainError):
+        loads(json.dumps(payload))

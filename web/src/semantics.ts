@@ -1,7 +1,7 @@
 // Domain meaning shared by every view. Mirrors src/cli_usage_api/app.py where the
 // TUI already settled a rule (labels, Grok aggregate naming, nesting, hoisting).
 
-import type { AccountView, FetchState, Metric, ProviderId, Snapshot } from "./types";
+import type { AccountView, Dashboard, FetchState, Metric, ProviderId, Snapshot } from "./types";
 import { overagePercent, parseTime } from "./format";
 
 export const METRIC_LABELS: Record<string, string> = {
@@ -13,10 +13,37 @@ export const METRIC_LABELS: Record<string, string> = {
   "claude.platform.total_balance": "总余额",
   "codex.subscription.weekly": "Codex weekly (7d)",
   "codex.subscription.five_hour": "Codex 5h",
+  "codex.subscription.credits": "Codex credits",
   "grok.subscription.shared_pool": "Grok 共享池",
   "grok.product.build": "GrokBuild",
   "grok.product.chat": "GrokChat",
 };
+
+/**
+ * Metrics the server parses and publishes (snapshots, debug log, API JSON) that
+ * this dashboard deliberately never displays: no row, no details, no raw JSON,
+ * no header, hoisting or count effect. A user-requested exception to keeping
+ * every provider extra visible (PLAN.md); mirrors app.PARSE_ONLY_METRIC_IDS.
+ * The provider still emits them; only this consumer leaves them out.
+ */
+export const PARSE_ONLY_METRIC_IDS: ReadonlySet<string> = new Set(["claude.subscription.extra_usage"]);
+
+/** A snapshot's metrics minus the parse-only ones. */
+export function displayedMetrics(snapshot: Snapshot | null | undefined): Metric[] {
+  return (snapshot?.metrics ?? []).filter((m) => !PARSE_ONLY_METRIC_IDS.has(m.id));
+}
+
+/** The dashboard as the UI consumes it: parse-only metrics removed everywhere. */
+export function displayDashboard(dashboard: Dashboard): Dashboard {
+  return {
+    ...dashboard,
+    accounts: dashboard.accounts.map((view) =>
+      view.snapshot && view.snapshot.metrics.some((m) => PARSE_ONLY_METRIC_IDS.has(m.id))
+        ? { ...view, snapshot: { ...view.snapshot, metrics: displayedMetrics(view.snapshot) } }
+        : view,
+    ),
+  };
+}
 
 /** Required rows per provider, in display order (domain.REQUIRED_METRIC_IDS). */
 export const REQUIRED_METRICS: Record<ProviderId, string[]> = {
@@ -123,6 +150,8 @@ export type MetricValue =
   | { kind: "missing"; text: string }
   | { kind: "balance" }
   | { kind: "share"; used: string }
+  | { kind: "credits"; amount: string }
+  | { kind: "unlimited" }
   | { kind: "quota"; used: string | null; remaining: string | null; overage: string | null; counts: boolean };
 
 const STATE_TEXT: Record<string, string> = {
@@ -138,6 +167,8 @@ export function metricValue(metric: Metric): MetricValue {
   }
   if (metric.balance) return { kind: "balance" };
   if (metric.share_percent !== null) return { kind: "share", used: metric.share_percent };
+  // Credits are a non-currency balance: shown as "<n> credits", never as money.
+  if (metric.credits != null) return { kind: "credits", amount: metric.credits };
   const quota = metric.quota;
   if (quota) {
     const counts =
@@ -152,6 +183,8 @@ export function metricValue(metric: Metric): MetricValue {
       };
     }
   }
+  // A positive "no cap" report is a value, not an empty placeholder.
+  if (metric.unlimited === true && metric.spent == null) return { kind: "unlimited" };
   return { kind: "missing", text: "未知" };
 }
 
@@ -172,7 +205,7 @@ export function nestedMetricIds(metrics: Metric[]): Set<string> {
 
 /** Rows to show: required ids first (unknown if absent), then provider extras. */
 export function orderedMetrics(view: AccountView): Array<{ id: string; metric: Metric | null }> {
-  const metrics = view.snapshot?.metrics ?? [];
+  const metrics = displayedMetrics(view.snapshot);
   const byId = new Map(metrics.map((m) => [m.id, m]));
   const required = REQUIRED_METRICS[view.account.provider] ?? [];
   const rows = required.map((id) => ({ id, metric: byId.get(id) ?? null }));
@@ -185,14 +218,15 @@ export function orderedMetrics(view: AccountView): Array<{ id: string; metric: M
 /** One shared explanation for every metric is shown once, at the account level. */
 export function hoistedDetail(view: AccountView): string | null {
   const snapshot = view.snapshot;
-  if (!snapshot || snapshot.metrics.length === 0) return null;
+  const metrics = displayedMetrics(snapshot);
+  if (metrics.length === 0) return null;
   if (
     view.account.provider === "claude_platform" &&
-    snapshot.metrics.some((m) => m.state === "ready" && m.balance)
+    metrics.some((m) => m.state === "ready" && m.balance)
   ) {
     return null;
   }
-  const details = new Set(snapshot.metrics.map((m) => m.detail));
+  const details = new Set(metrics.map((m) => m.detail));
   if (details.size !== 1) return null;
   const [only] = details;
   return only ?? null;
@@ -240,7 +274,7 @@ export function tightestQuota(views: AccountView[]): Tightest | null {
   let best: Tightest | null = null;
   let bestValue = -1;
   for (const view of views) {
-    for (const metric of view.snapshot?.metrics ?? []) {
+    for (const metric of displayedMetrics(view.snapshot)) {
       const used = metric.state === "ready" ? metric.quota?.used_percent : null;
       if (!used) continue;
       const n = Number(used);
@@ -262,7 +296,7 @@ export interface NextReset {
 export function nextReset(views: AccountView[], now: number): NextReset | null {
   let best: NextReset | null = null;
   for (const view of views) {
-    for (const metric of view.snapshot?.metrics ?? []) {
+    for (const metric of displayedMetrics(view.snapshot)) {
       const at = metric.state === "ready" ? parseTime(metric.reset_at) : null;
       if (at === null || at <= now) continue;
       if (!best || at < best.at) best = { view, metric, at };

@@ -21,6 +21,7 @@ from cli_usage_api.domain import (
     SourceKind,
     SourceRef,
     TransportError,
+    credit_amount,
     percent,
     sanitize_text,
     utc_datetime,
@@ -32,6 +33,8 @@ _PROVIDER = ProviderId.CODEX_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "codex.wham.usage.v1", version_sensitive=True)
 _WEEKLY_LABEL = "Codex weekly (7d)"
 _MISSING = "Usage is unavailable; missing does not mean zero or establish eligibility."
+_CREDITS_LABEL = "Codex credits"
+_CREDITS_NOTE = "Codex credits 余额；不是货币，不推断有效期。"
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +130,59 @@ def _metric(metric_id: str, label: str, windows: list[_Window]) -> tuple[Metric,
         ),
         partial,
     )
+
+
+def _credits(value: object) -> Metric | None:
+    """Optional credit-balance row from the same response's ``credits`` object.
+
+    Mirrors the official client's CreditStatusDetails handling: ``unlimited``
+    is checked first, ``has_credits == false`` shows nothing, otherwise the
+    balance amount is exact text. Absence is no row, never a zero balance.
+    """
+    if value is None:
+        return None
+
+    def unknown(detail: str) -> Metric:
+        return Metric(
+            MetricId.CODEX_CREDITS,
+            _CREDITS_LABEL,
+            MetricState.UNKNOWN,
+            _SOURCE,
+            detail=detail + "；缺失不代表为零。",
+        )
+
+    if not isinstance(value, dict):
+        return unknown("credits 格式无效")
+    if value.get("unlimited") is True:
+        return Metric(
+            MetricId.CODEX_CREDITS,
+            _CREDITS_LABEL,
+            MetricState.READY,
+            _SOURCE,
+            unlimited=True,
+            detail="Codex credits 不限量（服务端报告 unlimited）。",
+        )
+    has_credits = value.get("has_credits")
+    if has_credits is False:
+        return None
+    if has_credits is not True:
+        return unknown("credits 格式无效")
+    balance = value.get("balance")
+    if type(balance) in (str, int, Decimal):
+        try:
+            amount = credit_amount(balance)
+        except DomainError:
+            amount = None
+        if amount is not None:
+            return Metric(
+                MetricId.CODEX_CREDITS,
+                _CREDITS_LABEL,
+                MetricState.READY,
+                _SOURCE,
+                credits=amount,
+                detail=_CREDITS_NOTE,
+            )
+    return unknown("有可用 credits，但数量未知")
 
 
 class CodexProvider:
@@ -266,6 +322,12 @@ class CodexProvider:
         state = FetchState.PARTIAL if partial else FetchState.OK
         if not recognized:
             state = FetchState.SCHEMA_ERROR
+        else:
+            # Optional extra: never affects fetch state, diagnostic or partiality,
+            # and an unrecognized (schema-error) response is not an observation.
+            credits = _credits(payload.get("credits"))
+            if credits is not None:
+                metrics.append(credits)
         return Snapshot(
             account_id=account.id,
             metrics=tuple(metrics),

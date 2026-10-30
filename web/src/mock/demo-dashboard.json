@@ -285,6 +285,27 @@
        "shared_pool_id": null,
        "detail": "Fictional synthetic demonstration; not live account data.",
        "share_percent": null
+      },
+      {
+       "id": "codex.subscription.credits",
+       "label": "Codex credits · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": "42.5",
+       "unlimited": false
       }
      ],
      "grants": [],

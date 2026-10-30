@@ -379,10 +379,14 @@ async def test_enforcement_plan_credits_and_review_limits_do_not_fabricate_usage
     )
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     result = rows(snapshot)
-    assert tuple(result) == (MetricId.CODEX_WEEKLY,)
+    # Credits are a separate optional balance row; they never supply weekly usage.
+    assert tuple(result) == (MetricId.CODEX_WEEKLY, MetricId.CODEX_CREDITS)
     assert result[MetricId.CODEX_WEEKLY].state == MetricState.UNKNOWN
     assert result[MetricId.CODEX_WEEKLY].quota is None
     assert "\x1b" not in (result[MetricId.CODEX_WEEKLY].detail or "")
+    credits = result[MetricId.CODEX_CREDITS]
+    assert credits.unlimited is True
+    assert credits.credits is None and credits.quota is None
 
 
 @pytest.mark.parametrize(
@@ -573,3 +577,199 @@ async def test_malformed_additional_pools_preserve_main_quota(bad):
     assert tuple(result) == (MetricId.CODEX_WEEKLY,)
     assert result[MetricId.CODEX_WEEKLY].quota.used_percent == Decimal("12.5")
     assert snapshot.fetch_state == FetchState.PARTIAL
+
+
+def credit_rows(snapshot):
+    return [row for row in snapshot.metrics if row.id == MetricId.CODEX_CREDITS]
+
+
+@pytest.mark.parametrize("include", [False, True])
+async def test_absent_or_null_credits_emit_no_row(include):
+    payload = {"rate_limit": {"primary_window": window()}}
+    if include:
+        payload["credits"] = None
+    provider, _ = provider_for(payload)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert tuple(rows(snapshot)) == (MetricId.CODEX_WEEKLY,)
+    assert snapshot.fetch_state == FetchState.OK
+
+
+@pytest.mark.parametrize("has_credits", [True, False, None, "yes"])
+@pytest.mark.parametrize("balance", [None, "0", "bad"])
+async def test_unlimited_credits_win_over_other_fields(has_credits, balance):
+    provider, _ = provider_for(
+        {
+            "rate_limit": {"primary_window": window()},
+            "credits": {"has_credits": has_credits, "unlimited": True, "balance": balance},
+        }
+    )
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    (row,) = credit_rows(snapshot)
+    assert row.state == MetricState.READY
+    assert row.unlimited is True
+    assert row.credits is None and row.quota is None and row.balance is None
+    assert row.label == "Codex credits"
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.diagnostic is None
+    rows(snapshot)
+
+
+@pytest.mark.parametrize("unlimited", [False, None, "true"])
+async def test_no_credits_emit_no_row_like_official_client(unlimited):
+    credits = {"has_credits": False, "balance": "50"}
+    if unlimited is not None:
+        credits["unlimited"] = unlimited
+    provider, _ = provider_for({"rate_limit": {"primary_window": window()}, "credits": credits})
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert tuple(rows(snapshot)) == (MetricId.CODEX_WEEKLY,)
+    assert snapshot.fetch_state == FetchState.OK
+
+
+@pytest.mark.parametrize(
+    ("balance", "expected"),
+    [("9.99", "9.99"), ("25", "25"), ("0", "0"), ("-3", "-3"), ("0.50", "0.50")],
+)
+async def test_credit_balance_text_is_exact_and_not_money(balance, expected):
+    provider, _ = provider_for(
+        {
+            "rate_limit": {"primary_window": window()},
+            "credits": {"has_credits": True, "unlimited": False, "balance": balance},
+        }
+    )
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    result = rows(snapshot)
+    assert tuple(result) == (MetricId.CODEX_WEEKLY, MetricId.CODEX_CREDITS)
+    row = result[MetricId.CODEX_CREDITS]
+    assert row.state == MetricState.READY
+    assert str(row.credits) == expected
+    assert row.unlimited is False
+    assert row.balance is None and row.quota is None and row.spent is None
+    assert row.reset_at is None and row.expires_at is None
+    assert result[MetricId.CODEX_WEEKLY].quota.used_percent == Decimal("12.5")
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.diagnostic is None
+
+
+@pytest.mark.parametrize(("literal", "expected"), [("150.0", "150.0"), ("42", "42")])
+async def test_raw_numeric_credit_balance_is_tolerated_exactly(literal, expected):
+    body = (
+        '{"rate_limit":{"primary_window":{"limit_window_seconds":604800,'
+        f'"used_percent":12.5,"reset_at":{RESET}}}}},'
+        f'"credits":{{"has_credits":true,"unlimited":false,"balance":{literal}}}}}'
+    ).encode()
+    provider, _ = provider_for(body)
+    (row,) = credit_rows(await provider.fetch(ACCOUNT, CREDENTIAL, NOW))
+    assert row.state == MetricState.READY
+    assert str(row.credits) == expected
+
+
+@pytest.mark.parametrize(
+    "balance", [None, "1e999999", "1" * 65, "NaN", "Infinity", "", "abc", True, False, [], {}]
+)
+@pytest.mark.parametrize("present", [True, False])
+async def test_invalid_or_missing_credit_amount_is_unknown_not_zero(balance, present):
+    credits = {"has_credits": True, "unlimited": False}
+    if present:
+        credits["balance"] = balance
+    provider, _ = provider_for({"rate_limit": {"primary_window": window()}, "credits": credits})
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    (row,) = credit_rows(snapshot)
+    assert row.state == MetricState.UNKNOWN
+    assert row.credits is None and row.unlimited is False
+    assert "数量未知" in row.detail
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.diagnostic is None
+    rows(snapshot)
+
+
+@pytest.mark.parametrize("literal", ["1e999999", "true", "1e-41"])
+async def test_raw_hostile_numeric_credit_balance_is_unknown(literal):
+    body = (
+        '{"rate_limit":{"primary_window":{"limit_window_seconds":604800,'
+        f'"used_percent":12.5,"reset_at":{RESET}}}}},'
+        f'"credits":{{"has_credits":true,"unlimited":false,"balance":{literal}}}}}'
+    ).encode()
+    provider, _ = provider_for(body)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    (row,) = credit_rows(snapshot)
+    assert row.state == MetricState.UNKNOWN
+    assert row.credits is None
+    assert snapshot.fetch_state == FetchState.OK
+
+
+@pytest.mark.parametrize(
+    "credits",
+    [
+        True,
+        "100",
+        [],
+        42,
+        {},
+        {"has_credits": None, "balance": "5"},
+        {"has_credits": "true", "balance": "5"},
+        {"has_credits": 1, "balance": "5"},
+        {"unlimited": False, "balance": "5"},
+    ],
+)
+async def test_malformed_credits_object_is_unknown_without_changing_fetch_state(credits):
+    provider, _ = provider_for({"rate_limit": {"primary_window": window()}, "credits": credits})
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    result = rows(snapshot)
+    assert tuple(result) == (MetricId.CODEX_WEEKLY, MetricId.CODEX_CREDITS)
+    row = result[MetricId.CODEX_CREDITS]
+    assert row.state == MetricState.UNKNOWN
+    assert row.credits is None and row.unlimited is False
+    assert result[MetricId.CODEX_WEEKLY].quota.used_percent == Decimal("12.5")
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.diagnostic is None
+
+
+async def test_credits_do_not_mask_partial_or_schema_error_state():
+    credits = {"has_credits": True, "unlimited": False, "balance": "5"}
+    provider, _ = provider_for(
+        {"rate_limit": {"primary_window": window(), "secondary_window": []}, "credits": credits}
+    )
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.diagnostic.code == "partial_data"
+    assert credit_rows(snapshot)[0].credits == 5
+
+    # A response with no recognizable quota is a schema error, not an observation:
+    # credits alone neither rescue it nor add a row.
+    provider, _ = provider_for({"credits": credits})
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
+    assert snapshot.diagnostic.code == "schema_error"
+    assert tuple(rows(snapshot)) == (MetricId.CODEX_WEEKLY,)
+
+
+@pytest.mark.parametrize("status", [401, 429, 500])
+async def test_failure_snapshot_emits_no_credits_row(status):
+    provider, _ = provider_for(
+        json.dumps({"credits": {"has_credits": True, "balance": "5"}}).encode(), status=status
+    )
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert tuple(rows(snapshot)) == (MetricId.CODEX_WEEKLY,)
+    assert credit_rows(snapshot) == []
+
+
+async def test_ignored_credit_siblings_never_become_rows_or_money():
+    provider, _ = provider_for(
+        {
+            "rate_limit": {"primary_window": window()},
+            "credits": {
+                "has_credits": True,
+                "unlimited": False,
+                "balance": "7",
+                "approx_local_messages": [1, 2],
+                "approx_cloud_messages": [3, 4],
+            },
+            "spend_control": {"reached": True},
+            "rate_limit_reset_credits": {"available": 3},
+        }
+    )
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    result = rows(snapshot)
+    assert tuple(result) == (MetricId.CODEX_WEEKLY, MetricId.CODEX_CREDITS)
+    assert result[MetricId.CODEX_CREDITS].credits == 7
+    assert result[MetricId.CODEX_CREDITS].balance is None

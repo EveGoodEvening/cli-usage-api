@@ -8,6 +8,7 @@ import os
 import stat
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -21,6 +22,7 @@ from cli_usage_api.domain import (
     Metric,
     MetricId,
     MetricState,
+    Money,
     ProviderId,
     QuotaValue,
     Snapshot,
@@ -657,6 +659,105 @@ async def test_account_without_snapshot_yet(token_store, token):
         data = (await client.get(f"/api/v1/accounts/{CLAUDE_ID}", headers=auth(token))).json()
     assert data["snapshot"] is None
     assert data["freshness"] is None
+
+
+async def test_dashboard_publishes_optional_spend_and_credit_extras(token_store, token):
+    # The API carries every emitted metric, parse-only ones included: hiding
+    # Claude extra usage is a web/TUI consumer choice, never an API filter.
+    codex_id = "55555555-5555-4555-8555-555555555555"
+    source = SourceRef(SourceKind.PRIVATE_HTTP, "test")
+    extra = Metric(
+        id=MetricId.CLAUDE_EXTRA_USAGE,
+        label="Claude 额外用量",
+        state=MetricState.READY,
+        source=source,
+        quota=QuotaValue(used_percent="24.68"),
+        spent=Money(1234, "USD", 2),
+        spend_limit=Money(5000, "USD", 2),
+    )
+    uncapped = Metric(
+        id=MetricId.CLAUDE_EXTRA_USAGE,
+        label="Claude 额外用量",
+        state=MetricState.READY,
+        source=source,
+        spent=Money(700, "JPY", 0),
+        unlimited=True,
+    )
+    credits = Metric(
+        id=MetricId.CODEX_CREDITS,
+        label="Codex credits",
+        state=MetricState.READY,
+        source=source,
+        credits=Decimal("1.5E-7"),
+    )
+    codex = Account(
+        id=codex_id,
+        provider=ProviderId.CODEX_SUBSCRIPTION,
+        label="Codex",
+        credential_kind=CredentialKind.CODEX_AUTH_FILE,
+        credential_ref="default",
+    )
+    hub = api.SnapshotHub(
+        mode="live",
+        accounts=(*live_accounts(), codex),
+        source_factory=lambda publish: StaticSource(
+            publish,
+            (
+                snapshot(CLAUDE_ID, metrics=(snapshot(CLAUDE_ID).metrics[0], extra)),
+                snapshot(codex_id, metrics=(credits,)),
+            ),
+        ),
+        now=lambda: NOW,
+    )
+    app = api.create_app(hub, token_store)
+    await hub.start()
+    async with client_for(app) as client:
+        data = (await client.get("/api/v1/dashboard", headers=auth(token))).json()
+        claude = (await client.get(f"/api/v1/accounts/{CLAUDE_ID}", headers=auth(token))).json()
+    views = {item["account"]["id"]: item for item in data["accounts"]}
+    assert claude == views[CLAUDE_ID]
+    rows = {m["id"]: m for m in views[CLAUDE_ID]["snapshot"]["metrics"]}
+    spend = rows["claude.subscription.extra_usage"]
+    assert spend["spent"] == {"minor": 1234, "currency": "USD", "exponent": 2}
+    assert spend["spend_limit"] == {"minor": 5000, "currency": "USD", "exponent": 2}
+    assert spend["quota"]["used_percent"] == "24.68"
+    assert spend["credits"] is None
+    assert spend["unlimited"] is False
+    assert spend["balance"] is None
+    # Older required rows carry the new keys at their defaults.
+    five = rows["claude.subscription.five_hour"]
+    assert (five["spent"], five["spend_limit"], five["credits"], five["unlimited"]) == (
+        None,
+        None,
+        None,
+        False,
+    )
+    (row,) = views[codex_id]["snapshot"]["metrics"]
+    assert row["id"] == "codex.subscription.credits"
+    # Exact decimal text, never a float and never money.
+    assert row["credits"] == "1.5E-7"
+    assert row["balance"] is None
+    assert row["unlimited"] is False
+    # A served view round-trips through the domain's own decoder.
+    assert Snapshot.from_dict(views[codex_id]["snapshot"]).metrics[0].credits == Decimal("1.5E-7")
+
+    hub2 = api.SnapshotHub(
+        mode="live",
+        accounts=live_accounts(),
+        source_factory=lambda publish: StaticSource(
+            publish, (snapshot(CLAUDE_ID, metrics=(snapshot(CLAUDE_ID).metrics[0], uncapped)),)
+        ),
+        now=lambda: NOW,
+    )
+    app2 = api.create_app(hub2, token_store)
+    await hub2.start()
+    async with client_for(app2) as client:
+        view = (await client.get(f"/api/v1/accounts/{CLAUDE_ID}", headers=auth(token))).json()
+    open_ended = view["snapshot"]["metrics"][1]
+    assert open_ended["unlimited"] is True
+    assert open_ended["spend_limit"] is None
+    assert open_ended["quota"] is None
+    assert open_ended["spent"] == {"minor": 700, "currency": "JPY", "exponent": 0}
 
 
 async def test_internal_errors_are_curated(token_store, token):

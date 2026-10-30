@@ -297,13 +297,13 @@ button:disabled { cursor: default; }
 .board__notes li + li { margin-top: 4px; }
 .board__count { color: var(--ink-3); white-space: nowrap; }
 
-/* Balances and grant counts have no meter: their figure takes the meter's place. */
+/* Balances, credits and grant counts have no meter: their figure takes the meter's place. */
 @media (min-width: 640px) {
-  .row--money .row__meter, .row--grants .row__meter { display: none; }
-  .row--money .row__label, .row--grants .row__label { grid-column: label; }
-  .row--money .row__used, .row--grants .row__used { grid-column: meter / rest; justify-self: start; }
-  .row--money .row__rest, .row--grants .row__rest { grid-column: rest; }
-  .row--money .row__reset, .row--grants .row__reset { grid-column: reset; }
+  .row--money .row__meter, .row--figure .row__meter, .row--grants .row__meter { display: none; }
+  .row--money .row__label, .row--figure .row__label, .row--grants .row__label { grid-column: label; }
+  .row--money .row__used, .row--figure .row__used, .row--grants .row__used { grid-column: meter / rest; justify-self: start; }
+  .row--money .row__rest, .row--figure .row__rest, .row--grants .row__rest { grid-column: rest; }
+  .row--money .row__reset, .row--figure .row__reset, .row--grants .row__reset { grid-column: reset; }
 }
 
 /* ------------------------------------------------------------------- row */
@@ -686,7 +686,7 @@ legend { padding: 0; }
   }
   .row__label { grid-area: label; }
   .row__meter { grid-area: meter; margin-top: 6px; }
-  .row--money .row__meter, .row--grants .row__meter { display: none; }
+  .row--money .row__meter, .row--figure .row__meter, .row--grants .row__meter { display: none; }
   .row--nested .row__meter, .row--nested .row__sub { margin-left: 16px; }
   .row__used { grid-area: figs; }
   .row__sub { display: block; grid-area: sub; margin-top: 6px; }

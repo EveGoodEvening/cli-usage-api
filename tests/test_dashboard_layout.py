@@ -1,5 +1,6 @@
 """Grouped dashboard prompts: observable text of the actual headless OptionList."""
 
+import re
 import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -13,6 +14,7 @@ from cli_usage_api.domain import (
     Account,
     Diagnostic,
     FetchState,
+    MetricId,
     MetricState,
     Money,
     ProviderId,
@@ -702,4 +704,109 @@ async def test_reorder_moves_headers_and_keeps_selection_state(size):
         assert app.highlighted_row() == target
         assert [account for account, _ in app._groups()] == list(reversed(reordered))
         assert header_heights(app) == heights
+        await pilot.press("q")
+
+
+def codex_extra(app, **fields):
+    """Append a Codex credits row built from the demo weekly row (same provenance)."""
+    weekly = row(app, "codex.subscription.weekly")
+    snapshot = app.snapshots[weekly[0].id]
+    metric = replace(
+        app._metric(*weekly),
+        id=MetricId.CODEX_CREDITS,
+        label="Codex credits",
+        quota=None,
+        reset_at=None,
+        **fields,
+    )
+    kept = tuple(m for m in snapshot.metrics if m.id != MetricId.CODEX_CREDITS)
+    app.publish_snapshot(replace(snapshot, metrics=(*kept, metric)))
+    return weekly[0], MetricId.CODEX_CREDITS
+
+
+@pytest.mark.parametrize("size", [(120, 40), (80, 24), (56, 40)])
+async def test_codex_credits_and_unlimited_are_whole_values_not_unknown(size):
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        for value, shown in (
+            (Decimal("1234567.0000001"), "1234567.0000001 credits"),
+            (Decimal("1E+5"), "100000 credits"),
+            (Decimal(0), "0 credits"),
+            (Decimal("-2.50"), "-2.50 credits"),
+        ):
+            target = codex_extra(app, credits=value)
+            # Extras follow the required rows of their account.
+            account_rows = [r for r in app.rows if r[0] == target[0]]
+            assert account_rows[-1] == target and len(account_rows) == 3
+            text = prompt(app, target)
+            assert "Codex credits" in text and shown in text
+            assert "未知" not in text and "no data" not in text
+            assert "%" not in text and "USD" not in text and "重置" not in text
+            assert "E+" not in text and lines_fit(app, text)
+            assert shown in app.details(*target)
+            if size[0] < 72:
+                # Narrow: the bare amount sits on the label line.
+                first, second = text.split("\n")[:2]
+                assert first.rstrip().endswith(shown) and second.startswith("  余额")
+
+        target = codex_extra(app, unlimited=True)
+        text = prompt(app, target)
+        assert "不限量 / Unlimited" in text and "未知" not in text and "credits" in text
+        assert "不限量 / Unlimited" in app.details(*target)
+        assert lines_fit(app, text)
+
+        target = codex_extra(app, state=MetricState.UNKNOWN, detail="有可用 credits，但数量未知")
+        text = prompt(app, target)
+        assert "未知 / no data" in text and "数量未知" in text and "Unlimited" not in text
+        assert not re.search(r"\d credits", text)
+        assert "— 未知 / no data" in app.details(*target)
+        await pilot.press("q")
+
+
+@pytest.mark.parametrize("size", [(120, 40), (80, 24), (56, 40)])
+async def test_claude_extra_usage_is_parse_only_and_never_displayed(size):
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        weekly = row(app, "claude.subscription.weekly")
+        account = weekly[0]
+        snapshot = app.snapshots[account.id]
+        before_rows = list(app.rows)
+        before_header = header(app, account)
+        before_prompts = [prompt(app, r) for r in app.rows]
+        assert "ⓘ" in before_header
+        extra = replace(
+            app._metric(*weekly),
+            id=MetricId.CLAUDE_EXTRA_USAGE,
+            label="Claude 额外用量",
+            quota=QuotaValue(used_percent=Decimal("24.68")),
+            reset_at=None,
+            spent=Money(1234, "USD", 2),
+            spend_limit=Money(5000, "USD", 2),
+            detail="Extra usage spend this billing period; no reset time.",
+        )
+        app.publish_snapshot(replace(snapshot, metrics=(*snapshot.metrics, extra)))
+        # The snapshot carries the parsed metric, but no consumer surface shows it.
+        assert extra in app.snapshots[account.id].metrics
+        assert app.rows == before_rows
+        assert all(metric_id != MetricId.CLAUDE_EXTRA_USAGE for _, metric_id in app.rows)
+        # Its distinct detail does not break the hoisted card note or stale count.
+        assert header(app, account) == before_header
+        assert [prompt(app, r) for r in app.rows] == before_prompts
+        everything = "\n".join(
+            [str(o.prompt) for o in app.listing._options]
+            + [app.details(*r) for r in app.rows if r[0] == account]
+        )
+        for hidden in ("额外用量", "12.34", "50.00", "24.68", "no reset time"):
+            assert hidden not in everything
+        assert app._metric(account, MetricId.CLAUDE_EXTRA_USAGE) is None
+        # A stale-only extra must not add a stale count either.
+        app.publish_snapshot(
+            replace(
+                app.snapshots[account.id],
+                metrics=(*snapshot.metrics, replace(extra, state=MetricState.UNKNOWN)),
+            )
+        )
+        assert header(app, account) == before_header
         await pilot.press("q")

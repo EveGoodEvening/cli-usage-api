@@ -402,3 +402,10 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   in-flight prepare whenever its inputs change. Password managers ignore
   `autocomplete="off"`: use `new-password`, manager opt-outs and no native submit.
   TUI drags must report their end (drop/Esc/reload) and block row shortcuts mid-drag.
+- Claude `oauth/usage` carries `extra_usage` (monthly overage spend vs cap, minor units
+  of an optional currency; null cap = no cap), and Codex `wham/usage` carries `credits`
+  (`has_credits`/`unlimited`/string `balance`, a credit count, not money). Both are
+  optional rows from the existing read. By user request the Claude row is parse-only:
+  consumers exclude it via `PARSE_ONLY_METRIC_IDS`, a deliberate exception to the
+  "extras stay visible" rule; do not drop it in the provider. The prepaid balance is
+  a separate endpoint, so never derive it from cap minus spend.

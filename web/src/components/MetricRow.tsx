@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Metric } from "../types";
 import {
   UNKNOWN,
+  creditsText,
   formatMoney,
   fullLocalZoned,
   parseTime,
@@ -11,7 +12,7 @@ import {
   timeTitle,
 } from "../format";
 import { METRIC_LABELS, metricLabel, metricValue } from "../semantics";
-import { TOTAL_BALANCE_ID, isBalanceRowId, isQuotaRowId } from "../view";
+import { TOTAL_BALANCE_ID, isBalanceRowId, isCreditsRowId, isQuotaRowId } from "../view";
 import { Facts, type Fact } from "./Facts";
 import { Meter } from "./Meter";
 
@@ -101,6 +102,8 @@ function sourceText(metric: Metric): string {
   return `${kind}，契约 ${metric.source.contract}${metric.source.version_sensitive ? "（版本敏感）" : ""}`;
 }
 
+const UNLIMITED_TEXT = "不限量 / Unlimited";
+
 function rowFacts(metric: Metric): Fact[] {
   const value = metricValue(metric);
   const q = metric.quota;
@@ -109,10 +112,18 @@ function rowFacts(metric: Metric): Fact[] {
   const items: Fact[] = [];
   if (value.kind === "share") {
     items.push({ label: "已用", value: percentText(value.used) });
+  } else if (value.kind === "credits" || value.kind === "unlimited" || (isCreditsRowId(metric.id) && !q)) {
+    // A positive unlimited report is a value, not an unknown amount: never "—" beside it.
+    const credits =
+      metric.credits != null ? creditsText(metric.credits) : metric.unlimited === true ? UNLIMITED_TEXT : UNKNOWN;
+    items.push({ label: "Credits", value: credits });
   } else if (value.kind === "balance" || (isBalanceRowId(metric.id) && !q)) {
     items.push({ label: "余额", value: value.kind === "balance" ? formatMoney(metric.balance) : UNKNOWN });
   } else {
     items.push({ label: "已用 / 剩余", value: `${percentText(q?.used_percent)} / ${percentText(q?.remaining_percent)}` });
+  }
+  if (metric.unlimited === true && !items.some((f) => f.value === UNLIMITED_TEXT)) {
+    items.push({ label: "上限", value: UNLIMITED_TEXT });
   }
   if (q && (q.used_count !== null || q.limit_count !== null || q.remaining_count !== null)) {
     items.push({
@@ -151,8 +162,12 @@ export function MetricRow({
   const label = metric ? metricLabel(metric) : (METRIC_LABELS[id] ?? id);
   const value = metric ? metricValue(metric) : ({ kind: "missing", text: "未知" } as const);
   const money = isBalanceRowId(id) && value.kind !== "share" && !metric?.quota;
+  // Credits and "unlimited" are figures, not utilization: no meter, no reset.
+  const credits =
+    value.kind === "credits" || value.kind === "unlimited" || (isCreditsRowId(id) && !metric?.quota);
   const classes = ["row", `row--${value.kind}`];
   if (money) classes.push("row--money");
+  if (credits) classes.push("row--figure");
   if (branch) classes.push("row--nested", `row--${branch}`);
   if (muted) classes.push("row--muted");
   if (id === TOTAL_BALANCE_ID && money) classes.push("row--total");
@@ -166,7 +181,7 @@ export function MetricRow({
 
   if (value.kind === "missing" || !metric) {
     // A balance has no meter, known or not: an empty track would read as a quota.
-    if (!money) meter = <Meter value={null} label={label} />;
+    if (!money && !credits) meter = <Meter value={null} label={label} />;
     used = (
       <>
         <Fig text={UNKNOWN} className="fig--unknown" />
@@ -178,6 +193,16 @@ export function MetricRow({
   } else if (value.kind === "balance") {
     const negative = !!metric.balance && metric.balance.minor < 0;
     used = <Fig text={formatMoney(metric.balance)} className={negative ? "is-error" : undefined} />;
+    time = timing(metric, now, false);
+    if (time.phone) sub = [time.phone];
+  } else if (value.kind === "credits") {
+    const text = creditsText(value.amount);
+    const negative = text !== UNKNOWN && value.amount.startsWith("-");
+    used = <Fig text={text} className={negative ? "is-error" : text === UNKNOWN ? "fig--unknown" : undefined} />;
+    time = timing(metric, now, false);
+    if (time.phone) sub = [time.phone];
+  } else if (value.kind === "unlimited") {
+    used = <Fig text="不限量" />;
     time = timing(metric, now, false);
     if (time.phone) sub = [time.phone];
   } else if (value.kind === "share") {

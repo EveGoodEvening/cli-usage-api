@@ -48,10 +48,33 @@ METRIC_LABELS = {
     "claude.platform.total_balance": "Claude Platform 总余额",
     "codex.subscription.weekly": "Codex weekly (7d)",
     "codex.subscription.five_hour": "Codex 5h",
+    "codex.subscription.credits": "Codex credits",
+    "claude.subscription.extra_usage": "Claude 额外用量",
     "grok.subscription.shared_pool": "Grok 共享池",
     "grok.product.build": "GrokBuild",
     "grok.product.chat": "GrokChat",
 }
+
+# Metrics a provider parses and publishes (snapshots, debug log, API JSON) that the
+# dashboard deliberately does not display: no row, no details, no header, hoisting
+# or stale-count effect. This is a user-requested exception to keeping every
+# provider extra visible; see PLAN.md. The provider still emits the metric.
+PARSE_ONLY_METRIC_IDS: frozenset[str] = frozenset({MetricId.CLAUDE_EXTRA_USAGE})
+
+
+def displayed_metrics(snapshot: Snapshot) -> tuple[Metric, ...]:
+    """The snapshot's metrics minus the parse-only ones the dashboard never shows."""
+    return tuple(m for m in snapshot.metrics if m.id not in PARSE_ONLY_METRIC_IDS)
+
+
+def credit_text(metric: Metric) -> str | None:
+    """Non-currency credits as exact fixed-point text, or a positive unlimited report."""
+    if metric.credits is not None:
+        # Plain fixed-point: no exponent notation, no rounding, never currency.
+        return f"{format(metric.credits, 'f')} credits"
+    if metric.unlimited and metric.spent is None:
+        return "不限量 / Unlimited"
+    return None
 
 
 def metric_label(metric_id: str, metric: Metric | None) -> str:
@@ -110,6 +133,8 @@ def metric_value(metric: Metric) -> str:
         }[metric.state]
     if metric.balance is not None:
         return metric.balance.format()
+    if (credits := credit_text(metric)) is not None:
+        return credits
     if metric.share_percent is not None:
         # A pool share has no remaining of its own.
         filled = int(min(Decimal(100), metric.share_percent) / 10)
@@ -555,7 +580,7 @@ class UsageApp(App[None]):
             upcoming = [
                 (metric.reset_at, account, metric)
                 for account, snapshot in observed
-                for metric in snapshot.metrics
+                for metric in displayed_metrics(snapshot)
                 if metric.state == MetricState.READY
                 and metric.reset_at is not None
                 and metric.reset_at > self.now()
@@ -576,7 +601,7 @@ class UsageApp(App[None]):
             rows.extend((account, metric_id) for metric_id in REQUIRED_METRIC_IDS[account.provider])
             snapshot = self.snapshots.get(account.id)
             if snapshot is not None:
-                for metric in snapshot.metrics:
+                for metric in displayed_metrics(snapshot):
                     if metric.id not in seen:
                         rows.append((account, metric.id))
                         seen.add(metric.id)
@@ -638,7 +663,7 @@ class UsageApp(App[None]):
     def _metric(self, account: Account, metric_id: str) -> Metric | None:
         snapshot = self.snapshots.get(account.id)
         return (
-            next((metric for metric in snapshot.metrics if metric.id == metric_id), None)
+            next((metric for metric in displayed_metrics(snapshot) if metric.id == metric_id), None)
             if snapshot
             else None
         )
@@ -774,7 +799,7 @@ class UsageApp(App[None]):
                     )
                 )
             if self._hoisted(account):
-                hoisted = sanitize_text(snapshot.metrics[0].detail, max_length=1024)
+                hoisted = sanitize_text(displayed_metrics(snapshot)[0].detail, max_length=1024)
         name = Text(label, style="bold")
         # One chip column across accounts: pad to the longest visible label,
         # capped so every account's chips still fit beside the padded label.
@@ -832,19 +857,20 @@ class UsageApp(App[None]):
         if state.last_known:
             chips.append(" · ")
             chips.append("LAST KNOWN 上次已知", style=f"bold {self._color('warning')}")
+        shown = displayed_metrics(snapshot)
         stale = (
             sum(
                 freshness(
                     snapshot, now, account.effective_poll_interval_seconds, metric=metric
                 ).stale
-                for metric in snapshot.metrics
+                for metric in shown
             )
-            if snapshot.metrics
+            if shown
             else int(state.stale)
         )
         chips.append(" · ")
         if stale:
-            count = f" {stale}/{len(snapshot.metrics)}" if snapshot.metrics else ""
+            count = f" {stale}/{len(shown)}" if shown else ""
             chips.append(f"STALE 过期{count}", style=f"bold {self._color('warning')}")
         else:
             chips.append("fresh 新鲜", style=self._color("success"))
@@ -907,7 +933,12 @@ class UsageApp(App[None]):
         elif (
             metric is None
             or metric.state != MetricState.READY
-            or (metric.quota is None and metric.balance is None and metric.share_percent is None)
+            or (
+                metric.quota is None
+                and metric.balance is None
+                and metric.share_percent is None
+                and credit_text(metric) is None
+            )
             or (
                 metric.quota is not None
                 and all(
@@ -949,6 +980,16 @@ class UsageApp(App[None]):
                 cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
             ]
             reset = Text("无周期重置", style="dim")
+        elif metric.quota is None and (credits := credit_text(metric)) is not None:
+            # Credits are not money and carry no inferred expiry or reset.
+            amount = Text(credits, style="bold")
+            cells = [
+                cell(
+                    Text("余额" if metric.credits is not None else "credits", style="dim"),
+                    bar_w + 1,
+                ),
+                cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
+            ]
         elif metric.share_percent is not None:
             # A pool share draws bar + used only: no derived remaining, no reset.
             share = metric.share_percent
@@ -1110,15 +1151,15 @@ class UsageApp(App[None]):
 
     def _hoisted(self, account: Account) -> bool:
         snapshot = self.snapshots.get(account.id)
-        if snapshot is None or not snapshot.metrics:
+        metrics = displayed_metrics(snapshot) if snapshot is not None else ()
+        if snapshot is None or not metrics:
             return False
         if account.provider == ProviderId.CLAUDE_PLATFORM and any(
-            metric.state == MetricState.READY and metric.balance is not None
-            for metric in snapshot.metrics
+            metric.state == MetricState.READY and metric.balance is not None for metric in metrics
         ):
             # Do not move hidden balance explanations back into the account header.
             return False
-        details = {metric.detail for metric in snapshot.metrics}
+        details = {metric.detail for metric in metrics}
         return len(details) == 1 and bool(details.pop())
 
     def _nesting(self, account: Account) -> dict[str, tuple[str, bool]]:

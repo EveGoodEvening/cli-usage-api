@@ -74,6 +74,29 @@ export function overagePercent(used: string | null): string | null {
   return formatExact({ units: x - y, scale });
 }
 
+const SIGNED_DECIMAL_RE = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
+
+/**
+ * A credit amount (Python str(Decimal), possibly negative or in exponent form)
+ * as plain fixed-point text, like Python's format(value, "f"): never rounded,
+ * never in exponent notation, never converted to money. "—" when unsupported.
+ */
+export function fixedPointText(value: string | null | undefined): string {
+  if (typeof value !== "string") return UNKNOWN;
+  const match = SIGNED_DECIMAL_RE.exec(value);
+  if (!match) return UNKNOWN;
+  const parsed = parseDecimal(value.slice(match[1]!.length));
+  if (!parsed) return UNKNOWN;
+  const text = formatExact(parsed);
+  return match[1] ? `-${text}` : text;
+}
+
+/** "<amount> credits"; an unparseable amount is "—", never zero. */
+export function creditsText(value: string | null | undefined): string {
+  const text = fixedPointText(value);
+  return text === UNKNOWN ? UNKNOWN : `${text} credits`;
+}
+
 /** Display a percentage string verbatim with a % sign; never rounded or truncated. */
 export function percentText(value: string | null | undefined): string {
   return parseDecimal(value) ? `${value}%` : UNKNOWN;

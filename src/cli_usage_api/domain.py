@@ -47,6 +47,9 @@ class MetricId(StrEnum):
     CLAUDE_TOTAL_BALANCE = "claude.platform.total_balance"
     CODEX_WEEKLY = "codex.subscription.weekly"
     CODEX_FIVE_HOUR = "codex.subscription.five_hour"
+    # Optional extras, never required rows.
+    CLAUDE_EXTRA_USAGE = "claude.subscription.extra_usage"
+    CODEX_CREDITS = "codex.subscription.credits"
     GROK_SHARED_POOL = "grok.subscription.shared_pool"
     GROK_BUILD = "grok.product.build"
     GROK_CHAT = "grok.product.chat"
@@ -284,6 +287,32 @@ def percent(value: Decimal | int | str) -> Decimal:
     return result
 
 
+# Credit balances are non-currency counts; bound them tightly before any use.
+_MAX_CREDIT_DIGITS = 40
+_MAX_CREDIT_EXPONENT = 40
+_MAX_CREDIT_TEXT_LENGTH = 64
+
+
+def credit_amount(value: Decimal | int | str) -> Decimal:
+    """Read an exact credit balance (zero/negative allowed) within bounded representation."""
+    if type(value) not in (Decimal, int, str):
+        _fail()
+    if type(value) is str and len(value) > _MAX_CREDIT_TEXT_LENGTH:
+        _fail()
+    if type(value) is int and abs(value) >= 10**_MAX_CREDIT_DIGITS:
+        _fail()
+    try:
+        result = Decimal(value)
+    except (InvalidOperation, ValueError):
+        raise DomainError("Invalid credit amount.") from None
+    if not result.is_finite():
+        _fail()
+    parts = result.as_tuple()
+    if len(parts.digits) > _MAX_CREDIT_DIGITS or abs(parts.exponent) > _MAX_CREDIT_EXPONENT:
+        _fail()
+    return result
+
+
 def remaining_percent(used: Decimal | int | str) -> Decimal:
     used = percent(used)
     if used >= 100:
@@ -459,6 +488,14 @@ class Metric:
     # Reported consumption (a product's pool share, or an aggregate without proven
     # pool semantics); never an allowance or a source for a derived remaining.
     share_percent: Decimal | None = None
+    # Reported consumption against a spending cap; never a balance or allowance.
+    spent: Money | None = None
+    # The spending cap; same currency/exponent as ``spent`` when both are present.
+    spend_limit: Money | None = None
+    # Non-currency credit balance (unit "credits"); never converted to money.
+    credits: Decimal | None = None
+    # The source positively reported "no cap / unlimited".
+    unlimited: bool = False
 
     def __post_init__(self) -> None:
         _identifier(self.id)
@@ -476,6 +513,42 @@ class Metric:
             if self.quota is not None or self.balance is not None:
                 _fail()
             object.__setattr__(self, "share_percent", percent(self.share_percent))
+        for name in ("spent", "spend_limit"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if not isinstance(value, Money):
+                _fail()
+            if (
+                self.balance is not None
+                or self.share_percent is not None
+                or self.credits is not None
+            ):
+                _fail()
+        if (
+            self.spent is not None
+            and self.spend_limit is not None
+            and (self.spent.currency, self.spent.exponent)
+            != (self.spend_limit.currency, self.spend_limit.exponent)
+        ):
+            _fail()
+        if self.credits is not None:
+            if any(
+                item is not None
+                for item in (
+                    self.quota,
+                    self.balance,
+                    self.share_percent,
+                    self.spent,
+                    self.spend_limit,
+                )
+            ):
+                _fail()
+            object.__setattr__(self, "credits", credit_amount(self.credits))
+        if type(self.unlimited) is not bool:
+            _fail()
+        if self.unlimited and (self.spend_limit is not None or self.credits is not None):
+            _fail()
         object.__setattr__(self, "reset_at", _optional_time(self.reset_at))
         object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
         if self.shared_pool_id is not None:
@@ -668,7 +741,12 @@ def _metric_from_dict(value: Any) -> Metric:
     data = _mapping(value)
     try:
         data["source"] = _construct(SourceRef, data["source"])
-        for name, cls in (("quota", QuotaValue), ("balance", Money)):
+        for name, cls in (
+            ("quota", QuotaValue),
+            ("balance", Money),
+            ("spent", Money),
+            ("spend_limit", Money),
+        ):
             if data.get(name) is not None:
                 data[name] = _construct(cls, data[name])
         for name in ("reset_at", "expires_at"):

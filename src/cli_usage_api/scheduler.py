@@ -323,6 +323,10 @@ class Scheduler:
                 shared_pool_id=None,
                 detail=None,
                 share_percent=None,
+                spent=None,
+                spend_limit=None,
+                credits=None,
+                unlimited=False,
             )
             if key in previous
             else Metric(key, key, MetricState.UNKNOWN, source)

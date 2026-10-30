@@ -20,6 +20,7 @@ from cli_usage_api.demo import DEMO_NOW, DemoClock, DemoSource
 from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     CredentialKind,
+    DomainError,
     FetchState,
     MetricId,
     MetricState,
@@ -109,9 +110,15 @@ async def test_packaged_fixture_fictional_identity_and_required_rows(scenario):
             assert len(set(metric_ids)) == len(metric_ids)
             if account.provider == ProviderId.CODEX_SUBSCRIPTION:
                 assert required == (MetricId.CODEX_WEEKLY,)
-                assert metric_ids == (MetricId.CODEX_WEEKLY, MetricId.CODEX_FIVE_HOUR)
+                assert metric_ids == (
+                    MetricId.CODEX_WEEKLY,
+                    MetricId.CODEX_FIVE_HOUR,
+                    MetricId.CODEX_CREDITS,
+                )
             else:
                 assert metric_ids == required
+            # Parse-only Claude extra usage never gets a demo row (user request).
+            assert MetricId.CLAUDE_EXTRA_USAGE not in metric_ids
             assert all(row.source.kind == SourceKind.OFFLINE_DEMO for row in snapshot.metrics)
             assert all("SYNTHETIC" in row.label for row in snapshot.metrics)
             assert snapshot.attempted_at == DEMO_NOW
@@ -128,7 +135,7 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
     try:
         assert all(snapshot.fetch_state == FetchState.OK for snapshot in published)
         rows = {row.id: row for snapshot in published for row in snapshot.metrics}
-        assert len(rows) == 11
+        assert len(rows) == 12
         assert all(row.state == MetricState.READY for row in rows.values())
         fable = rows[MetricId.CLAUDE_FABLE_WEEKLY]
         assert fable.quota.used_percent == Decimal("110.25")
@@ -151,6 +158,17 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
         for row in (weekly, five_hour):
             assert row.source.kind == SourceKind.OFFLINE_DEMO
             assert row.detail == "Fictional synthetic demonstration; not live account data."
+        credits = rows[MetricId.CODEX_CREDITS]
+        assert credits.label == "Codex credits · SYNTHETIC"
+        assert credits.credits == Decimal("137.5")
+        assert str(credits.credits) == "137.5"
+        assert credits.source.kind == SourceKind.OFFLINE_DEMO
+        assert credits.detail == "Fictional synthetic demonstration; not live account data."
+        # Credits are a non-currency balance: never a quota, money, spend or reset.
+        assert credits.quota is None and credits.balance is None
+        assert credits.spent is None and credits.spend_limit is None
+        assert credits.unlimited is False
+        assert credits.reset_at is None
         pool = rows[MetricId.GROK_SHARED_POOL]
         assert rows[MetricId.GROK_BUILD].share_percent == Decimal(30)
         assert rows[MetricId.GROK_CHAT].share_percent == Decimal(15)
@@ -180,7 +198,7 @@ async def test_codex_fixture_preserves_required_weekly_and_optional_extras(
     fixture = json.loads(files("cli_usage_api").joinpath("fixtures/demo.json").read_text())
     metrics = fixture["providers"]["codex_subscription"]["metrics"]
     if inventory == "weekly_only":
-        metrics.pop()
+        del metrics[1:]
     elif inventory == "extra_duration":
         metrics.append(
             {
@@ -419,3 +437,102 @@ async def test_update_accounts_accepts_and_ignores_invalidate():
             await source.update_accounts((original[0], original[0]), invalidate=frozenset())
     finally:
         await source.stop()
+
+
+def _codex_fixture(tmp_path, monkeypatch, extra):
+    fixture = json.loads(files("cli_usage_api").joinpath("fixtures/demo.json").read_text())
+    metrics = fixture["providers"]["codex_subscription"]["metrics"]
+    metrics[:] = [item for item in metrics if item["id"] != MetricId.CODEX_CREDITS]
+    metrics.append({"id": MetricId.CODEX_CREDITS.value, "label": "Codex credits · SYNTHETIC"})
+    metrics[-1].update(extra)
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    (fixture_dir / "demo.json").write_text(json.dumps(fixture))
+    monkeypatch.setattr("cli_usage_api.demo.files", lambda package: tmp_path)
+
+
+async def _codex_credits_row(scenario="healthy"):
+    published = []
+    source = DemoSource(scenario=scenario, publish=published.append)
+    try:
+        await source.start()
+        codex = [
+            snapshot
+            for snapshot, account in zip(published, source.accounts, strict=True)
+            if account.provider == ProviderId.CODEX_SUBSCRIPTION
+        ]
+        for snapshot in codex:
+            assert Snapshot.from_dict(snapshot.to_dict()) == snapshot
+        return [
+            row
+            for snapshot in codex
+            for row in snapshot.metrics
+            if row.id == MetricId.CODEX_CREDITS
+        ]
+    finally:
+        await source.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extra", "credits", "unlimited"),
+    [
+        ({"unlimited": True}, None, True),
+        ({"credits": "0"}, Decimal(0), False),
+        ({"credits": "-2.50"}, Decimal("-2.50"), False),
+    ],
+)
+async def test_codex_credit_loader_supports_unlimited_zero_and_negative(
+    tmp_path, monkeypatch, extra, credits, unlimited
+):
+    _codex_fixture(tmp_path, monkeypatch, extra)
+    (row,) = await _codex_credits_row()
+    assert row.state == MetricState.READY
+    assert row.source.kind == SourceKind.OFFLINE_DEMO
+    assert row.unlimited is unlimited
+    assert row.credits == credits
+    if credits is not None:
+        assert str(row.credits) == str(credits)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"credits": 1.5},
+        {"credits": True},
+        {"credits": "1e999999999"},
+        {"credits": "x" * 65},
+        {"unlimited": "yes"},
+        {"unlimited": True, "credits": "5"},
+    ],
+)
+async def test_codex_credit_loader_rejects_unbounded_or_inconsistent_fixture(
+    tmp_path, monkeypatch, extra
+):
+    _codex_fixture(tmp_path, monkeypatch, extra)
+    with pytest.raises(DomainError):
+        await _codex_credits_row()
+
+
+@pytest.mark.asyncio
+async def test_unknown_codex_credits_clear_amount_and_unlimited(tmp_path, monkeypatch):
+    fixture = json.loads(files("cli_usage_api").joinpath("fixtures/demo.json").read_text())
+    metrics = fixture["providers"]["codex_subscription"]["metrics"]
+    next(item for item in metrics if item["id"] == MetricId.CODEX_CREDITS)["unlimited"] = False
+    profile = next(
+        item for item in fixture["scenarios"]["errors"] if item["provider"] == "codex_subscription"
+    )
+    profile.update(
+        fetch_state="partial",
+        diagnostic="partial_data",
+        unknown_metrics=[MetricId.CODEX_CREDITS.value],
+    )
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    (fixture_dir / "demo.json").write_text(json.dumps(fixture))
+    monkeypatch.setattr("cli_usage_api.demo.files", lambda package: tmp_path)
+    (row,) = await _codex_credits_row("errors")
+    assert row.state == MetricState.UNKNOWN
+    assert row.credits is None and row.unlimited is False
+    assert "current value unknown, never zero" in row.detail

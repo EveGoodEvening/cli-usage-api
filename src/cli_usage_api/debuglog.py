@@ -18,9 +18,10 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
-from cli_usage_api.domain import ProviderId, Snapshot
+from cli_usage_api.domain import Money, ProviderId, Snapshot
 
 LOGGER = logging.getLogger("cli_usage_api.debug")
 LOGGER.propagate = False
@@ -258,6 +259,12 @@ def _time(value: datetime | None) -> str | None:
     return None if value is None else value.isoformat()
 
 
+def _money(value: Money | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return {"minor": value.minor, "currency": value.currency, "exponent": value.exponent}
+
+
 def snapshot(provider: ProviderId, result: Snapshot) -> None:
     """Summarize what an adapter (or a failed attempt) produced before merging."""
     if not enabled(provider):
@@ -286,14 +293,12 @@ def snapshot(provider: ProviderId, result: Snapshot) -> None:
                     if getattr(quota, name) is not None
                 },
                 "reset_at": _time(metric.reset_at),
-                "balance": None
-                if balance is None
-                else {
-                    "minor": balance.minor,
-                    "currency": balance.currency,
-                    "exponent": balance.exponent,
-                },
+                "balance": _money(balance),
                 "share_percent": metric.share_percent,
+                "spent": _money(metric.spent),
+                "spend_limit": _money(metric.spend_limit),
+                "credits": metric.credits,
+                "unlimited": metric.unlimited,
                 "shared_pool_id": metric.shared_pool_id,
             }
         )

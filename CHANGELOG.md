@@ -6,6 +6,23 @@
 with `--read-only`; writes no longer return 405; custom login-file paths must end in
 `auth.json`/`.credentials.json`.
 
+### Added — Codex credits row and parse-only Claude extra usage
+
+- Codex: an optional `codex.subscription.credits` row from the existing
+  `wham/usage` response's `credits` object (no new request). The TUI and web show
+  `<amount> credits` as exact fixed-point text, or `不限量` / Unlimited; accounts
+  without credits get no row, matching the official Codex client. Credits are never
+  converted to money, treated as quota, or given an expiry. `usage --demo` includes
+  a synthetic `137.5 credits` row.
+- Claude subscription: `extra_usage` from the existing `/api/oauth/usage` response
+  becomes an optional `claude.subscription.extra_usage` metric (spend in the current
+  billing period, the monthly cap or "no cap", and cap utilization; no reset time).
+  It appears in snapshots, `/api/v1/dashboard` and `--debug-log`, but the TUI and web
+  deliberately hide it for now.
+- New nullable metric fields `spent`, `spend_limit`, `credits` and `unlimited` in the
+  snapshot/API JSON; older snapshots without them still load. Neither new row is
+  required, and neither changes an account's fetch state or diagnostic.
+
 ### Added — account management over the API/web and account reorder
 
 - `usage api serve` and `usage --api` accept account writes from any API token unless

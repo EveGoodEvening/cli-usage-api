@@ -20,6 +20,7 @@ from cli_usage_api.domain import (
     FetchState,
     Metric,
     MetricState,
+    Money,
     ProviderId,
     QuotaValue,
     ResolvedCredential,
@@ -378,6 +379,56 @@ async def test_unknown_rows_clear_prior_product_share():
     assert missing.shared_pool_id is None
     await clock.advance(300)
     assert published[-1].metrics[-1].share_percent == Decimal(30)
+    await scheduler.stop()
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {
+            "spent": Money(1250, "USD", 2),
+            "spend_limit": Money(5000, "USD", 2),
+            "quota": QuotaValue(used_percent=Decimal(25)),
+        },
+        {"spent": Money(1250, "USD", 2), "unlimited": True},
+        {"unlimited": True},
+        {"credits": Decimal("12.5")},
+    ],
+)
+async def test_unknown_rows_clear_prior_spend_credits_and_unlimited(fields):
+    def extras(item, now, *, optional=True, state=FetchState.OK):
+        snapshot = observation(item, now, optional=False, state=state)
+        if not optional:
+            return snapshot
+        row = Metric(
+            "test.optional",
+            "Extra",
+            MetricState.READY,
+            SourceRef(SourceKind.OFFLINE_DEMO, "scheduler.test"),
+            **fields,
+        )
+        return replace(snapshot, metrics=(*snapshot.metrics, row))
+
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [
+        extras,
+        lambda item, now: extras(item, now, optional=False, state=FetchState.PARTIAL),
+    ]
+    await scheduler.start()
+    await settle()
+    shown = published[-1].metrics[-1]
+    for name, value in fields.items():
+        assert getattr(shown, name) == value
+    await scheduler.refresh()
+    await clock.advance(5)
+    missing = published[-1].metrics[-1]
+    assert missing.id == "test.optional"
+    assert missing.state == MetricState.UNKNOWN
+    assert missing.quota is None
+    assert missing.spent is None
+    assert missing.spend_limit is None
+    assert missing.credits is None
+    assert missing.unlimited is False
     await scheduler.stop()
 
 

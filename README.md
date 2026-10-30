@@ -55,7 +55,7 @@ theme produce a warning and fall back to nord; save failures are also reported.
 |---|---|
 | Claude subscription | 5-hour, weekly, and model-scoped Fable weekly usage |
 | Claude Platform | Purchased, promotional, and authoritative total credit balances; grant expiry |
-| Codex | Weekly (7-day) quota, plus reported optional windows such as 5-hour usage |
+| Codex | Weekly (7-day) quota, plus reported optional windows such as 5-hour usage, and a Codex credits balance (or Unlimited) when reported |
 | Grok | Shared-pool usage and GrokBuild / GrokChat consumption shares |
 
 Codex quota is **not ordinary ChatGPT chat usage**. Fable is a weekly subset, not
@@ -67,6 +67,14 @@ with an explicit weekly period and valid reset, omitted percentage scalars mean
 zero; explicit null/invalid values and absent products remain unknown. Product
 shares need not sum to the aggregate. Codex hides `plan_type`, `allowed`, and
 `limit_reached`; quota percentages and reset times remain visible.
+
+Codex credits come from the same usage response: a non-currency amount shown as
+`<amount> credits` (exact, never converted to money or given an expiry), or
+`不限量` / Unlimited. Like the official client, no row appears when the account has no
+credits. Claude subscription extra usage (spend in the current billing period
+against an optional monthly cap) is parsed from the existing usage response into
+snapshots, the debug log and the HTTP API (`claude.subscription.extra_usage`), but
+is deliberately **not displayed** in the TUI or web UI for now.
 
 Failed reads retain last-known values with freshness/error indicators; passing a
 reset does not invent new allowance. Claude subscription automatically polls no

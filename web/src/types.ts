@@ -85,6 +85,17 @@ export interface Metric {
   detail: string | null;
   /** Reported consumption share; never an allowance and never a source of "remaining". */
   share_percent: DecimalString | null;
+  /**
+   * Reported spend against a cap: consumption, never a balance. Optional so an
+   * older server's snapshot still type-checks; absent means null.
+   */
+  spent?: Money | null;
+  /** The spending cap; same currency and exponent as `spent`. */
+  spend_limit?: Money | null;
+  /** Non-currency credit balance (unit "credits"); never converted to money. */
+  credits?: DecimalString | null;
+  /** The source positively reported "no cap / unlimited". Absent means false. */
+  unlimited?: boolean;
 }
 
 export interface Diagnostic {

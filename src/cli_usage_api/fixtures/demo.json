@@ -23,7 +23,8 @@
     "codex_subscription": {
       "metrics": [
         {"id": "codex.subscription.weekly", "label": "Codex weekly (7d) · SYNTHETIC", "used_percent": "24", "reset_offset": 345600},
-        {"id": "codex.subscription.five_hour", "label": "Codex 5h · SYNTHETIC", "used_percent": "12.5", "reset_offset": 10800}
+        {"id": "codex.subscription.five_hour", "label": "Codex 5h · SYNTHETIC", "used_percent": "12.5", "reset_offset": 10800},
+        {"id": "codex.subscription.credits", "label": "Codex credits · SYNTHETIC", "credits": "137.5"}
       ]
     },
     "grok_subscription": {

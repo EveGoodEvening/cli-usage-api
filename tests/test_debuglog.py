@@ -7,6 +7,7 @@ import json
 import os
 import stat
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID
 
 import httpx
@@ -18,8 +19,16 @@ from cli_usage_api.domain import (
     Account,
     CredentialKind,
     FetchState,
+    Metric,
+    MetricId,
+    MetricState,
+    Money,
     ProviderId,
+    QuotaValue,
     ResolvedCredential,
+    Snapshot,
+    SourceKind,
+    SourceRef,
     TransportError,
 )
 from cli_usage_api.providers.base import build_providers
@@ -347,6 +356,50 @@ async def test_scheduler_snapshot_summarizes_every_metric(tmp_path):
     assert five_hour["reset_at"] == datetime(2026, 10, 28, 18, tzinfo=UTC).isoformat()
     assert any(metric["state"] == "unknown" for metric in metrics.values())
     assert SECRET not in log.read_text()
+
+
+def test_snapshot_summary_includes_spend_credits_and_unlimited(tmp_path):
+    log = tmp_path / "debug.jsonl"
+    debuglog.configure(log)
+    source = SourceRef(SourceKind.OFFLINE_DEMO, "debuglog.test")
+    now = datetime(2026, 10, 28, 12, tzinfo=UTC)
+    debuglog.snapshot(
+        ProviderId.CLAUDE_SUBSCRIPTION,
+        Snapshot(
+            str(UUID(int=1)),
+            (
+                Metric(
+                    MetricId.CLAUDE_EXTRA_USAGE,
+                    "Claude 额外用量",
+                    MetricState.READY,
+                    source,
+                    quota=QuotaValue(used_percent=Decimal(25)),
+                    spent=Money(1250, "USD", 2),
+                    spend_limit=Money(5000, "USD", 2),
+                ),
+                Metric("test.unlimited", "u", MetricState.READY, source, unlimited=True),
+                Metric(
+                    MetricId.CODEX_CREDITS,
+                    "Codex credits",
+                    MetricState.READY,
+                    source,
+                    credits=Decimal("-0.50"),
+                ),
+            ),
+            (),
+            FetchState.OK,
+            now,
+        ),
+    )
+    (summary,) = records(log)
+    extra, unlimited, credits = summary["metrics"]
+    assert extra["spent"] == {"minor": 1250, "currency": "USD", "exponent": 2}
+    assert extra["spend_limit"] == {"minor": 5000, "currency": "USD", "exponent": 2}
+    assert extra["credits"] is None and extra["unlimited"] is False
+    assert extra["balance"] is None
+    assert unlimited["unlimited"] is True and unlimited["spend_limit"] is None
+    assert Decimal(str(credits["credits"])) == Decimal("-0.50")
+    assert credits["spent"] is None and credits["spend_limit"] is None
 
 
 def test_open_refuses_unsafe_targets(tmp_path):

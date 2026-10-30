@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, type UsageClient } from "./api";
 import type { Dashboard } from "./types";
 import { parseTime } from "./format";
+import { displayDashboard } from "./semantics";
 
 export const POLL_MS = 15_000;
 
@@ -87,7 +88,8 @@ export function useDashboard(client: UsageClient, onSessionEnded: (error: ApiErr
       if (controller.signal.aborted) return null;
       const received = Date.now();
       const server = parseTime(result.server_time);
-      setData(result);
+      // Parse-only metrics never reach any view, including the raw JSON facts.
+      setData(displayDashboard(result));
       setReceivedAt(received);
       setOffset(server === null ? 0 : server - received);
       setError(null);

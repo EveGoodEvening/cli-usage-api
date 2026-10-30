@@ -1,7 +1,9 @@
 """Version-sensitive, read-only Claude subscription usage normalization."""
 
+import re
 from datetime import UTC, datetime
 from decimal import Decimal, DecimalException
+from types import MappingProxyType
 
 from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
@@ -10,7 +12,9 @@ from cli_usage_api.domain import (
     DomainError,
     FetchState,
     Metric,
+    MetricId,
     MetricState,
+    Money,
     ProviderId,
     QuotaValue,
     ResolvedCredential,
@@ -101,6 +105,128 @@ def _fable(payload: dict) -> tuple[tuple[QuotaValue, datetime | None, bool] | No
     return None, False
 
 
+_EXTRA_LABEL = "Claude 额外用量"
+# Explicit ISO 4217 minor-unit exponents; unknown codes leave amounts unknown
+# rather than guessing a scale (and absent currency never defaults to USD).
+_CURRENCY_EXPONENTS = MappingProxyType(
+    {
+        **dict.fromkeys(
+            (
+                "USD", "EUR", "GBP", "CAD", "AUD", "NZD", "SGD", "HKD",
+                "CHF", "SEK", "NOK", "DKK", "MXN", "BRL", "INR", "CNY",
+            ),
+            2,
+        ),
+        "JPY": 0,
+        "KRW": 0,
+    }
+)  # fmt: skip
+_MAX_MINOR_UNITS = 10**15
+_EXTRA_PERIOD_NOTE = (
+    "Extra usage spend in the current billing period; the server provides no reset time."
+)
+
+
+def _minor_units(value: object) -> int | None:
+    """Read a nonnegative integral minor-unit amount, bounded before arithmetic."""
+    if type(value) is int:
+        return value if 0 <= value <= _MAX_MINOR_UNITS else None
+    if type(value) is not Decimal or not value.is_finite():
+        return None
+    # Compare magnitude first: a compact exponent must not force a large expansion.
+    if value < 0 or value > _MAX_MINOR_UNITS or value != value.to_integral_value():
+        return None
+    return int(value)
+
+
+def _extra_usage(payload: dict) -> Metric | None:
+    """Parse the optional extra-usage spend row from the same usage response.
+
+    Amounts are minor currency units against an optional monthly spending cap;
+    this is consumption, never a balance or a subscription allowance.
+    """
+    raw = payload.get("extra_usage")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        return Metric(
+            MetricId.CLAUDE_EXTRA_USAGE,
+            _EXTRA_LABEL,
+            MetricState.UNKNOWN,
+            _SOURCE,
+            detail="Extra usage format is invalid; values are unknown.",
+        )
+    enabled = raw.get("is_enabled")
+    if type(enabled) is not bool:
+        return Metric(
+            MetricId.CLAUDE_EXTRA_USAGE,
+            _EXTRA_LABEL,
+            MetricState.UNKNOWN,
+            _SOURCE,
+            detail="Extra usage status is missing or invalid; values are unknown.",
+        )
+    notes = []
+    if not enabled:
+        notes.append("Extra usage is currently unavailable.")
+        reason = raw.get("disabled_reason")
+        if isinstance(reason, str) and re.fullmatch(r"[a-z0-9_]{1,64}", reason):
+            notes.append(f"Reason: {reason}.")
+    notes.append(_EXTRA_PERIOD_NOTE)
+
+    currency = raw.get("currency")
+    exponent = None
+    if isinstance(currency, str) and re.fullmatch(r"[A-Za-z]{3}", currency):
+        currency = currency.upper()
+        exponent = _CURRENCY_EXPONENTS.get(currency)
+
+    def money(key: str, label: str) -> Money | None:
+        value = raw.get(key)
+        if value is None:
+            return None
+        minor = _minor_units(value)
+        if minor is None:
+            notes.append(f"Reported {label} is invalid; amount unknown.")
+            return None
+        if exponent is None:
+            return None
+        return Money(minor, currency, exponent)
+
+    spent = money("used_credits", "spend")
+    has_cap = "monthly_limit" in raw and raw["monthly_limit"] is not None
+    spend_limit = money("monthly_limit", "monthly limit")
+    unlimited = enabled and "monthly_limit" in raw and raw["monthly_limit"] is None
+    if unlimited:
+        notes.append("No monthly spending cap.")
+    elif "monthly_limit" not in raw:
+        notes.append("Monthly spending cap is not reported; cap is unknown.")
+    has_amount = raw.get("used_credits") is not None or has_cap
+    if exponent is None and has_amount:
+        notes.append("Currency is missing or unsupported; amounts are unknown.")
+
+    quota = None
+    utilization = raw.get("utilization")
+    if has_cap and utilization is not None:
+        try:
+            quota = QuotaValue(
+                used_percent=percent(
+                    str(utilization) if type(utilization) is float else utilization
+                )
+            )
+        except DomainError:
+            notes.append("Reported cap utilization is invalid; utilization unknown.")
+    return Metric(
+        MetricId.CLAUDE_EXTRA_USAGE,
+        _EXTRA_LABEL,
+        MetricState.READY,
+        _SOURCE,
+        quota=quota,
+        detail=" ".join(notes),
+        spent=spent,
+        spend_limit=spend_limit,
+        unlimited=unlimited,
+    )
+
+
 class ClaudeProvider:
     """Fetch all three subscription rows in one fixed-origin Transport read."""
 
@@ -171,6 +297,11 @@ class ClaudeProvider:
         state = FetchState.PARTIAL if partial else FetchState.OK
         if not usable:
             state = FetchState.SCHEMA_ERROR
+        else:
+            # Optional extra: never affects fetch_state, diagnostic or usability.
+            extra = _extra_usage(payload)
+            if extra is not None:
+                metrics.append(extra)
         return Snapshot(
             account_id=account.id,
             metrics=tuple(metrics),

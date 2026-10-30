@@ -2,7 +2,7 @@
 // which repeated explanation is shown once for the whole group.
 
 import type { AccountView, Metric } from "./types";
-import { hoistedDetail, metricValue, nestedMetricIds, orderedMetrics } from "./semantics";
+import { displayedMetrics, hoistedDetail, metricValue, nestedMetricIds, orderedMetrics } from "./semantics";
 
 export const TOTAL_BALANCE_ID = "claude.platform.total_balance";
 
@@ -17,8 +17,14 @@ export interface RowPlan {
   detail: string | null;
 }
 
+/** Non-currency credit rows: no meter, no reset, never money. */
+export function isCreditsRowId(id: string): boolean {
+  return id === "codex.subscription.credits";
+}
+
 /** Subscription quota rows whose reset is part of their meaning. */
 export function isQuotaRowId(id: string): boolean {
+  if (isCreditsRowId(id)) return false;
   return id.startsWith("claude.subscription.") || id.startsWith("codex.subscription.");
 }
 
@@ -35,7 +41,7 @@ export function isBalanceRowId(id: string): boolean {
 export function accountNote(view: AccountView): string | null {
   const hoisted = hoistedDetail(view);
   if (hoisted) return hoisted;
-  const metrics = view.snapshot?.metrics ?? [];
+  const metrics = displayedMetrics(view.snapshot);
   if (view.account.provider !== "claude_platform" || metrics.length === 0) return null;
   if (!metrics.every((m) => m.source.kind === "offline_demo")) return null;
   const details = new Set(metrics.map((m) => m.detail));

@@ -29,6 +29,7 @@ from cli_usage_api.domain import (
     Snapshot,
     SourceKind,
     SourceRef,
+    credit_amount,
     parse_timestamp,
     utc_datetime,
 )
@@ -215,6 +216,14 @@ class DemoSource:
                     share_percent=(
                         item["share_percent"] if not unknown and "share_percent" in item else None
                     ),
+                    # Non-currency credits stay a decimal string in the fixture so the
+                    # bounded domain parser, not a binary float, sees the exact amount.
+                    credits=(
+                        credit_amount(item["credits"])
+                        if not unknown and "credits" in item
+                        else None
+                    ),
+                    unlimited=False if unknown else item.get("unlimited", False),
                     detail=detail,
                 )
             )

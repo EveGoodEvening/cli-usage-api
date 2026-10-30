@@ -1,8 +1,10 @@
 """Actual UsageApp Pilot interactions, using only offline/injected services."""
 
 import asyncio
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -17,10 +19,13 @@ from cli_usage_api.domain import (
     Account,
     CredentialKind,
     FetchState,
+    MetricId,
     ProviderId,
     ResolvedCredential,
     Snapshot,
 )
+from cli_usage_api.providers.claude import ClaudeProvider
+from cli_usage_api.providers.codex import CodexProvider
 from cli_usage_api.providers.grok import GrokProvider
 from cli_usage_api.reorder import ReorderableOptionList
 from cli_usage_api.transport import Transport
@@ -208,11 +213,12 @@ async def test_account_selection_filters_rows():
         account = next(a for a in app.accounts if a.provider == ProviderId.CODEX_SUBSCRIPTION)
         selector.value = account.id
         await pilot.pause()
-        assert app.query_one("#metrics", OptionList).option_count == 3
-        assert app.metric_option_count() == 2
+        assert app.query_one("#metrics", OptionList).option_count == 4
+        assert app.metric_option_count() == 3
         assert [metric_id for _, metric_id in app.rows] == [
             "codex.subscription.weekly",
             "codex.subscription.five_hour",
+            "codex.subscription.credits",
         ]
         assert all(a.id == account.id for a, _ in app.rows)
         await pilot.press("q")
@@ -501,3 +507,98 @@ async def test_manager_writes_notify_app_once_with_invalidate_sets(tmp_path):
         await pilot.pause()
         assert [account.id for account, _ in app._groups()] == [second.id, first.id]
         await pilot.press("q")
+
+
+async def test_real_codex_credits_shown_and_claude_extra_usage_parse_only():
+    claude = Account(
+        id="33333333-3333-4333-8333-333333333333",
+        provider=ProviderId.CLAUDE_SUBSCRIPTION,
+        label="Synthetic Claude",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref="memory:synthetic",
+    )
+    codex = Account(
+        id="44444444-4444-4444-8444-444444444444",
+        provider=ProviderId.CODEX_SUBSCRIPTION,
+        label="Synthetic Codex",
+        credential_kind=CredentialKind.CODEX_AUTH_FILE,
+        credential_ref="file:/synthetic/auth.json",
+    )
+    claude_body = json.loads((Path(__file__).parent / "fixtures" / "claude_usage.json").read_text())
+    claude_body["extra_usage"] = {
+        "is_enabled": True,
+        "monthly_limit": 5000,
+        "used_credits": 1234,
+        "utilization": 24.68,
+        "currency": "USD",
+    }
+    window = {"limit_window_seconds": 604800, "used_percent": 12.5, "reset_at": 4102444800}
+    codex_bodies = [
+        json.dumps({"rate_limit": {"primary_window": window}, "credits": credits}).encode()
+        for credits in (
+            {"has_credits": True, "unlimited": False, "balance": "1234.50"},
+            {"has_credits": False, "unlimited": True},
+        )
+    ]
+
+    def respond(request):
+        if request.url.host == "api.anthropic.com":
+            return httpx.Response(200, content=json.dumps(claude_body).encode())
+        assert str(request.url) == "https://chatgpt.com/backend-api/wham/usage"
+        return httpx.Response(200, content=codex_bodies.pop(0))
+
+    transport = Transport(http_transport=httpx.MockTransport(respond))
+    claude_provider, codex_provider = ClaudeProvider(transport), CodexProvider(transport)
+    claude_credential = ResolvedCredential(
+        claude.provider, CredentialKind.MANUAL_BEARER, "synthetic-secret", "generation-1"
+    )
+    codex_credential = ResolvedCredential(
+        codex.provider,
+        CredentialKind.CODEX_AUTH_FILE,
+        "synthetic-access-token",
+        "generation-1",
+        codex_account_id="synthetic-selected-account",
+    )
+
+    class ProviderScheduler(InjectedScheduler):
+        async def start(self):
+            await super().start()
+            await self.refresh()
+
+        async def refresh(self, account_id=None):
+            await super().refresh(account_id)
+            now = datetime.now(UTC)
+            factory.publish(await claude_provider.fetch(claude, claude_credential, now))
+            factory.publish(await codex_provider.fetch(codex, codex_credential, now))
+
+    factory = InjectedFactory()
+    factory.scheduler = ProviderScheduler()
+    app = UsageApp(mode="live", accounts=(claude, codex), scheduler_factory=factory)
+    async with app.run_test(size=(120, 45)) as pilot:
+        await pilot.pause()
+        # The provider still parses and publishes the Claude extra-usage metric...
+        extra = next(
+            m for m in app.snapshots[claude.id].metrics if m.id == MetricId.CLAUDE_EXTRA_USAGE
+        )
+        assert extra.spent is not None and extra.spend_limit is not None
+        # ...but the dashboard shows exactly the required Claude rows and nothing of it.
+        assert [m for a, m in app.rows if a == claude] == list(REQUIRED_METRIC_IDS[claude.provider])
+        screen = "\n".join(str(o.prompt) for o in app.listing._options)
+        assert "额外用量" not in screen and "12.34" not in screen and "50.00" not in screen
+        assert app.rows[-1] == (codex, MetricId.CODEX_CREDITS)
+        credits_prompt = str(app.listing.get_option_at_index(app.option_index(app.rows[-1])).prompt)
+        assert "Codex credits" in credits_prompt and "1234.50 credits" in credits_prompt
+        app.listing.highlighted = app.option_index(app.rows[-1])
+        await pilot.press("enter")
+        assert isinstance(app.screen, InformationScreen)
+        assert "1234.50 credits" in app.screen.content
+        assert "codex.wham.usage.v1" in app.screen.content
+        await pilot.press("escape")
+        app.listing.focus()
+        await pilot.press("r")
+        await pilot.pause()
+        assert not codex_bodies
+        unlimited = str(app.listing.get_option_at_index(app.option_index(app.rows[-1])).prompt)
+        assert "不限量 / Unlimited" in unlimited and "未知" not in unlimited
+        await pilot.press("q")
+    assert factory.closed and factory.scheduler.stopped

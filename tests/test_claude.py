@@ -16,9 +16,12 @@ from cli_usage_api.domain import (
     Account,
     CredentialKind,
     FetchState,
+    MetricId,
     MetricState,
+    Money,
     ProviderId,
     ResolvedCredential,
+    Snapshot,
     SourceKind,
 )
 from cli_usage_api.providers.claude import ClaudeProvider
@@ -484,3 +487,267 @@ async def test_invalid_primary_percentage_is_not_hidden_by_alias(payload):
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.metrics[0].state == MetricState.UNKNOWN
     assert snapshot.fetch_state == FetchState.PARTIAL
+
+
+# --- Optional extra-usage spend row (parsed from the same usage response) ---
+
+EXTRA = MetricId.CLAUDE_EXTRA_USAGE
+
+
+def extra_row(snapshot):
+    """Required rows stay first and intact; return the single optional row, if any."""
+    required = REQUIRED_METRIC_IDS[ACCOUNT.provider]
+    assert tuple(row.id for row in snapshot.metrics[:3]) == required
+    extras = snapshot.metrics[3:]
+    assert len(extras) <= 1
+    assert all(row.id == EXTRA for row in extras)
+    return extras[0] if extras else None
+
+
+def capped(**overrides):
+    value = {
+        "is_enabled": True,
+        "monthly_limit": 5000,
+        "used_credits": 1234,
+        "utilization": 24.68,
+        "currency": "USD",
+    }
+    value.update(overrides)
+    return value
+
+
+async def fetch(payload):
+    provider, requests = provider_for(payload)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert len(requests) == 1
+    return snapshot
+
+
+@pytest.mark.parametrize("present", [False, True])
+async def test_absent_or_null_extra_usage_emits_no_row(payload, present):
+    if present:
+        payload["extra_usage"] = None
+    snapshot = await fetch(payload)
+    assert_rows(snapshot)
+    assert extra_row(snapshot) is None
+    assert snapshot.fetch_state == FetchState.OK
+
+
+async def test_capped_extra_usage_reports_spend_cap_and_utilization(payload):
+    payload["extra_usage"] = capped()
+    snapshot = await fetch(payload)
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.diagnostic is None
+    row = extra_row(snapshot)
+    assert row.label == "Claude 额外用量"
+    assert row.state == MetricState.READY
+    assert row.source.kind == SourceKind.PRIVATE_HTTP and row.source.version_sensitive
+    assert row.spent == Money(1234, "USD", 2)
+    assert row.spend_limit == Money(5000, "USD", 2)
+    assert row.spent.format() == "12.34 USD"
+    assert row.quota.used_percent == Decimal("24.68")
+    assert row.unlimited is False
+    assert row.balance is None and row.credits is None and row.share_percent is None
+    assert row.reset_at is None
+    assert "no reset time" in row.detail
+    assert "unavailable" not in row.detail
+
+
+async def test_utilization_is_never_derived_from_amounts(payload):
+    payload["extra_usage"] = capped(utilization=None)
+    row = extra_row(await fetch(payload))
+    assert row.quota is None
+    assert row.spent == Money(1234, "USD", 2)
+    payload["extra_usage"] = capped(utilization=-1)
+    row = extra_row(await fetch(payload))
+    assert row.quota is None
+    assert "utilization" in row.detail
+
+
+async def test_unlimited_extra_usage_has_no_cap_or_quota(payload):
+    payload["extra_usage"] = capped(monthly_limit=None, utilization=50)
+    row = extra_row(await fetch(payload))
+    assert row.state == MetricState.READY
+    assert row.unlimited is True
+    assert row.spend_limit is None
+    assert row.quota is None
+    assert row.spent == Money(1234, "USD", 2)
+    assert "No monthly spending cap" in row.detail
+
+
+@pytest.mark.parametrize(
+    "reason,shown",
+    [
+        ("out_of_credits", True),
+        (None, False),
+        ("Out Of Credits", False),
+        ("<script>alert(1)</script>", False),
+        ("a" * 65, False),
+        (7, False),
+    ],
+)
+async def test_disabled_extra_usage_sanitizes_reason(payload, reason, shown):
+    value = capped(is_enabled=False, monthly_limit=None, utilization=None)
+    if reason is not None:
+        value["disabled_reason"] = reason
+    payload["extra_usage"] = value
+    row = extra_row(await fetch(payload))
+    assert row.state == MetricState.READY
+    # A disabled account with no monthly limit is not positively unlimited.
+    assert row.unlimited is False
+    assert "currently unavailable" in row.detail
+    assert ("Reason: out_of_credits." in row.detail) is shown
+    assert "script" not in row.detail and "Out Of" not in row.detail
+    assert "Reason" in row.detail if shown else "Reason" not in row.detail
+
+
+@pytest.mark.parametrize("currency", ["absent", None, "XYZ", "US", "usd$", 840])
+async def test_missing_or_unsupported_currency_leaves_amounts_unknown(payload, currency):
+    value = capped()
+    if currency == "absent":
+        value.pop("currency")
+    else:
+        value["currency"] = currency
+    payload["extra_usage"] = value
+    row = extra_row(await fetch(payload))
+    assert row.state == MetricState.READY
+    assert row.spent is None and row.spend_limit is None
+    # Other fields remain usable; no USD default is assumed.
+    assert row.quota.used_percent == Decimal("24.68")
+    assert "Currency" in row.detail
+    assert "USD" not in repr(row)
+
+
+async def test_currency_is_uppercased_and_zero_exponent_respected(payload):
+    payload["extra_usage"] = capped(currency="jpy", used_credits=1500, monthly_limit=10000)
+    row = extra_row(await fetch(payload))
+    assert row.spent == Money(1500, "JPY", 0)
+    assert row.spend_limit == Money(10000, "JPY", 0)
+    assert row.spent.format() == "1500 JPY"
+
+
+@pytest.mark.parametrize("raw", [-1, True, False, 12.5, "100", 10**15 + 1, [], {}])
+async def test_invalid_amounts_are_unknown_not_zero(payload, raw):
+    payload["extra_usage"] = capped(used_credits=raw, monthly_limit=raw)
+    snapshot = await fetch(payload)
+    assert snapshot.fetch_state == FetchState.OK
+    row = extra_row(snapshot)
+    assert row.state == MetricState.READY
+    assert row.spent is None and row.spend_limit is None
+    assert "spend is invalid" in row.detail
+    assert "monthly limit is invalid" in row.detail
+    # An invalid (non-null) cap is not "unlimited"; utilization still describes it.
+    assert row.unlimited is False
+    assert row.quota.used_percent == Decimal("24.68")
+
+
+@pytest.mark.parametrize(
+    "wire,expected",
+    [
+        ("0", 0),
+        ("1234", 1234),
+        ("1234.0", 1234),
+        ("1.5e3", 1500),
+        ("1000000000000000", 10**15),
+        ("1234.5", None),
+        ("-0.5", None),
+        ("1e16", None),
+        ("1e1000000", None),
+        ("1e-1000000", None),
+        ("true", None),
+    ],
+)
+async def test_raw_json_amounts_through_real_transport(payload, wire, expected):
+    payload["extra_usage"] = capped(used_credits="WIRE_AMOUNT", utilization="WIRE_UTIL")
+    body = (
+        json.dumps(payload)
+        .encode()
+        .replace(b'"WIRE_AMOUNT"', wire.encode())
+        .replace(b'"WIRE_UTIL"', b"33.333333333333333333333")
+    )
+    snapshot = await fetch(body)
+    assert snapshot.fetch_state == FetchState.OK
+    row = extra_row(snapshot)
+    assert row.spent == (None if expected is None else Money(expected, "USD", 2))
+    assert row.quota.used_percent == Decimal("33.333333333333333333333")
+    assert row.spend_limit == Money(5000, "USD", 2)
+
+
+@pytest.mark.parametrize("raw", [[], "enabled", 1, True])
+async def test_malformed_extra_usage_is_unknown_row(payload, raw):
+    payload["extra_usage"] = raw
+    snapshot = await fetch(payload)
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.diagnostic is None
+    row = extra_row(snapshot)
+    assert row.state == MetricState.UNKNOWN
+    assert "invalid" in row.detail
+    assert row.spent is None and row.spend_limit is None and row.quota is None
+
+
+@pytest.mark.parametrize("enabled", ["absent", None, "true", 1])
+async def test_invalid_enabled_flag_is_unknown_row(payload, enabled):
+    value = capped()
+    if enabled == "absent":
+        value.pop("is_enabled")
+    else:
+        value["is_enabled"] = enabled
+    payload["extra_usage"] = value
+    row = extra_row(await fetch(payload))
+    assert row.state == MetricState.UNKNOWN
+    assert row.spent is None and row.quota is None and row.unlimited is False
+
+
+async def test_missing_monthly_limit_key_is_unknown_cap_not_unlimited(payload):
+    value = capped()
+    value.pop("monthly_limit")
+    payload["extra_usage"] = value
+    row = extra_row(await fetch(payload))
+    assert row.unlimited is False
+    assert row.spend_limit is None
+    assert row.quota is None
+    assert "cap is unknown" in row.detail
+
+
+async def test_optional_row_does_not_change_partial_state(payload):
+    payload["five_hour"]["utilization"] = -1
+    payload["extra_usage"] = capped()
+    snapshot = await fetch(payload)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.diagnostic.code == "partial_data"
+    assert snapshot.metrics[0].state == MetricState.UNKNOWN
+    assert extra_row(snapshot).spent == Money(1234, "USD", 2)
+
+
+async def test_extra_usage_alone_does_not_make_response_usable():
+    snapshot = await fetch({"extra_usage": capped()})
+    assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
+    assert snapshot.diagnostic.code == "schema_error"
+    assert snapshot.fetched_at is None
+    assert_rows(snapshot)
+    assert extra_row(snapshot) is None
+
+
+async def test_failure_snapshots_emit_no_extra_row(payload):
+    payload["extra_usage"] = capped()
+    provider, _ = provider_for(payload, status=503)
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.PROVIDER_ERROR
+    assert_rows(snapshot)
+    snapshot = await provider.fetch(ACCOUNT, None, NOW)
+    assert snapshot.fetch_state == FetchState.AUTH_REQUIRED
+    assert_rows(snapshot)
+
+
+async def test_sibling_extra_objects_are_ignored(payload):
+    payload["extra_usage"] = capped()
+    for key in ("wattle_ember", "iguana_necktie", "cinder_cove", "cedar_ember"):
+        payload[key] = {"is_enabled": True, "used_credits": 1, "currency": "USD"}
+    snapshot = await fetch(payload)
+    assert [row.id for row in snapshot.metrics[3:]] == [EXTRA]
+
+
+async def test_extra_usage_round_trips_through_snapshot_serialization(payload):
+    payload["extra_usage"] = capped(currency="eur")
+    snapshot = await fetch(payload)
+    assert Snapshot.from_dict(json.loads(json.dumps(snapshot.to_dict()))) == snapshot
