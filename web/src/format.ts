@@ -136,7 +136,7 @@ export function creditsText(value: string | null | undefined): string {
 }
 
 /** Note shown whenever cents rounding changed an exact server amount (app.ROUNDED_NOTE). */
-export const ROUNDED_NOTE = "服务端金额已舍入到分 / rounded to cents";
+export const ROUNDED_NOTE = "已舍入到分";
 
 /**
  * An exact money amount at cents, e.g. {amount: "3.0700000000000003",

@@ -75,12 +75,11 @@ function timing(metric: Metric | null, now: number, quotaLike: boolean): Timing 
       cell: (
         <time className="row__reset" dateTime={metric.expires_at ?? undefined} title={timeTitle(metric.expires_at, expiry, "到期 ")}>
           <span className="row__reset-when">到期 {shortLocal(expiry, now)}</span>
-          <span> · 非周期重置</span>
         </time>
       ),
       phone: (
         <time dateTime={metric.expires_at ?? undefined} title={timeTitle(metric.expires_at, expiry, "到期 ")}>
-          到期 {shortLocal(expiry, now)} · 非周期重置
+          到期 {shortLocal(expiry, now)}
         </time>
       ),
     };
@@ -274,7 +273,7 @@ export function MetricRow({
         aria-controls={expanded && factsId ? factsId : undefined}
         onClick={onToggle}
       >
-        <span className="row__label" title={metric?.label ?? id}>
+        <span className="row__label" title={label}>
           {label}
         </span>
         <span className="row__meter">{meter}</span>

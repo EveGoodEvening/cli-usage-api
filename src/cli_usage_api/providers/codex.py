@@ -32,7 +32,7 @@ from cli_usage_api.transport import Transport
 _PROVIDER = ProviderId.CODEX_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "codex.wham.usage.v1", version_sensitive=True)
 _WEEKLY_LABEL = "Codex weekly (7d)"
-_MISSING = "Usage is unavailable; missing does not mean zero or establish eligibility."
+_MISSING = "本次未返回"
 _CREDITS_LABEL = "Codex credits"
 
 
@@ -67,6 +67,14 @@ def _window(value: dict) -> _Window:
     return _Window(used, _reset(value.get("reset_at")))
 
 
+def _span(seconds: int) -> str:
+    """A window length in its largest whole unit: 7d, 5h, 90m or 45s."""
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds % size == 0:
+            return f"{seconds // size}{unit}"
+    return f"{seconds}s"
+
+
 def _identity(seconds: int, feature: str | None) -> tuple[str, str] | None:
     # Reject durations that cannot fit any metric identity before converting
     # an arbitrarily large injected integer to text.
@@ -79,14 +87,14 @@ def _identity(seconds: int, feature: str | None) -> tuple[str, str] | None:
         except UnicodeEncodeError:
             return None
         metric_id = f"codex.pool.{digest}.window.{duration}"
-        label = f"Codex pool ({duration}s)"
+        label = f"Codex pool ({_span(seconds)})"
     elif seconds == 604800:
         return MetricId.CODEX_WEEKLY, _WEEKLY_LABEL
     elif seconds == 18000:
         return MetricId.CODEX_FIVE_HOUR, "Codex 5h"
     else:
         metric_id = f"codex.subscription.window.{duration}"
-        label = f"Codex window ({duration}s)"
+        label = f"Codex {_span(seconds)}"
     return (metric_id, label) if len(metric_id) <= 128 else None
 
 
@@ -237,7 +245,7 @@ class CodexProvider:
                 metric_id, label = identity
                 recognized = True
                 if feature is not None:
-                    label = f"{label}: {name}" if name else label
+                    label = f"Codex {name} ({_span(seconds)})" if name else label
                 if metric_id not in grouped:
                     grouped[metric_id] = (label, [])
                 grouped[metric_id][1].append(_window(value))

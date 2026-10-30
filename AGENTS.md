@@ -421,4 +421,6 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   semantics ("not a reset", "not derived from…", raw `key=value`). Codex's
   response-level `rate_limit_reached_type` names no window, so a concise
   "已达限额" on every row would falsely claim a 20%-used weekly limit is reached;
-  it is not shown at all.
+  it is not shown at all. Diagnostic messages read "<web label>：<action>" so the web
+  drops the repeated label while the TUI line stays self-contained; expiry text is
+  just "到期 …" and only the main rounded amount carries "已舍入到分".

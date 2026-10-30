@@ -78,7 +78,7 @@ describe("MetricRow product share", () => {
     expect(text(outsideRel(html))).toContain("等待刷新");
   });
 
-  it("keeps 非周期重置 outside the tablet-hidden countdown on an expiry row", () => {
+  it("keeps the expiry outside the tablet-hidden countdown and shows no reset on an expiry row", () => {
     const html = render(
       metric({
         id: "claude.subscription.weekly",
@@ -87,7 +87,9 @@ describe("MetricRow product share", () => {
         quota: { used_percent: "40", remaining_percent: "60", used_count: null, limit_count: null, remaining_count: null },
       }),
     );
-    expect(text(outsideRel(html))).toContain("非周期重置");
+    const shown = text(outsideRel(html));
+    expect(shown).toContain("到期");
+    expect(shown).not.toContain("重置");
   });
 
   it("labels an unknown Console balance as a balance, not a quota", () => {

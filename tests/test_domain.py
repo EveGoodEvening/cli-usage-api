@@ -513,7 +513,7 @@ def test_display_text_is_sanitized_and_bounded():
 
 def test_safe_diagnostics_do_not_accept_arbitrary_messages_or_codes():
     value = Diagnostic("auth_required")
-    assert value.message == "Reconnect this account using a supported credential."
+    assert value.message == "需要重新连接：请用支持的凭据重新连接。"
     with pytest.raises(TypeError):
         Diagnostic("auth_required", "synthetic-secret")
     with pytest.raises(DomainError) as caught:
@@ -526,7 +526,7 @@ def test_safe_transport_error_fields_and_serialization_refusal():
     assert value.status == 429
     assert value.retry_at == NOW
     assert value.fetch_state == FetchState.RATE_LIMITED
-    assert "Wait until" in str(value)
+    assert "到重试时间后再刷新" in str(value)
     for kwargs in ({"status": True}, {"status": 600}, {"retry_at": NOW.replace(tzinfo=None)}):
         with pytest.raises(DomainError):
             TransportError(FetchState.NETWORK_ERROR, "network_error", **kwargs)

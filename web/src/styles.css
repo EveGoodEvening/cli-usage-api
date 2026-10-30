@@ -106,7 +106,7 @@ button:disabled { cursor: default; }
   color: var(--ink-2);
 }
 .header__tz, .group__meta, .group__note, .unit, .row__counts, .row__detail, .row__sub,
-.grants__empty, .grants__foot, .grants__meta, .grants__table th, .menu__note, .field__help,
+.grants__empty, .grants__meta, .grants__table th, .menu__note, .field__help,
 .check small, .kicker, .facts dt, .facts__utc {
   font-size: 12px;
   line-height: 16px;
@@ -396,7 +396,6 @@ button:disabled { cursor: default; }
 .is-expired { opacity: 0.5; }
 .grants__cards { display: none; }
 .grants__empty { padding-top: 8px; }
-.grants__foot { margin-top: 8px; }
 .board-empty { padding: 48px 0; text-align: center; }
 
 /* ----------------------------------------------------------------- facts */

@@ -120,11 +120,9 @@ async def test_2023_sample_keeps_exact_available_without_paid_row():
     assert row.exact_balance.rounded_to_cents() == (Decimal("17.37"), True)
     assert row.expires_at is None
     assert "Reported" not in row.detail and "not derived" not in row.detail
-    # Detail text is shown on the dashboards: cents, marked when rounding changed it.
-    assert row.detail == (
-        "已授予 18.00 USD · 已用 0.63 USD (服务端金额已舍入到分 / rounded to cents)"
-        " · 1 笔授予，1 笔已过期"
-    )
+    # Detail text is shown on the dashboards as plain cents (no per-amount note).
+    assert row.detail == "已授予 18.00 USD · 已用 0.63 USD · 1 笔授予，1 笔已过期"
+    assert "舍入" not in row.detail
     assert "0.6284545" not in row.detail
     assert "≈" not in row.detail
     assert "到期" not in row.detail  # no future grant expiry
@@ -149,8 +147,8 @@ async def test_2024_sample_keeps_float_noise_exact_and_emits_paid_row():
     assert paid.state == MetricState.READY
     # granted - used (19.93) differs from the reported available: never derived.
     # The float noise stays in structured exact_balance data only; the dashboard
-    # detail text rounds every OpenAI amount to cents and marks the change.
-    assert "已用 3.07 USD (服务端金额已舍入到分 / rounded to cents)" in available.detail
+    # detail text rounds every OpenAI amount to plain cents.
+    assert "已用 3.07 USD" in available.detail and "舍入" not in available.detail
     assert "已授予 23.00 USD" in available.detail
     assert "3.0700000000000003" not in available.detail
     assert "23.0 USD" not in available.detail
@@ -217,7 +215,7 @@ async def test_missing_or_invalid_available_is_unknown_schema_error(body):
     row = snapshot.metrics[0]
     assert row.state == MetricState.UNKNOWN
     assert row.exact_balance is None
-    assert "missing does not mean zero" in row.detail
+    assert row.detail.startswith("可用余额缺失或无效")
 
 
 @pytest.mark.parametrize("body", [b"[]", b'[{"total_available": 1}]'])
@@ -287,7 +285,7 @@ async def test_invalid_grants_make_summary_partial_never_zero(grants):
     row = snapshot.metrics[0]
     assert row.state == MetricState.READY
     assert row.exact_balance.amount == Decimal(4)
-    assert "笔无效" in row.detail or "unavailable" in row.detail
+    assert "笔无效" in row.detail or row.detail == "授予列表无效"
 
 
 async def test_hostile_grant_exponent_is_invalid_not_expanded():
@@ -315,41 +313,50 @@ async def test_future_grant_expiry_is_detail_only_not_a_reset():
     assert row.detail == "1 笔授予，最早 2026-11-27 到期"
 
 
+PERMISSION_DETAIL = "权限不足：需要该组织的计费权限，且组织须为预付费。"
+
+
 @pytest.mark.parametrize(
     "status,body,state,code,detail",
     [
-        (401, {}, FetchState.AUTH_REQUIRED, "auth_required", "pasting a new"),
+        (
+            401,
+            {},
+            FetchState.AUTH_REQUIRED,
+            "auth_required",
+            "会话被拒绝：请粘贴新的会话密钥重新连接。",
+        ),
         (
             401,
             {"error": {"code": "expired_session_key", "message": "x"}},
             FetchState.AUTH_REQUIRED,
             "credential_expired",
-            "session expired",
+            "会话已过期：请粘贴新的会话密钥重新连接。",
         ),
         (
             400,
             {"error": {"code": "expired_session_key"}},
             FetchState.AUTH_REQUIRED,
             "credential_expired",
-            "session expired",
+            "会话已过期：请粘贴新的会话密钥重新连接。",
         ),
         (
             403,
             {"error": {"message": "Your request must be made with a session key (...)"}},
             FetchState.AUTH_REQUIRED,
             "credential_mismatch",
-            "API keys",
+            "仅支持 platform.openai.com 会话密钥，API key（sk-...）不可用。",
         ),
-        (403, {}, FetchState.PERMISSION_DENIED, "permission_denied", "billing permission"),
+        (403, {}, FetchState.PERMISSION_DENIED, "permission_denied", PERMISSION_DETAIL),
         (
             403,
             {"error": {"code": "personal_organization_access_blocked"}},
             FetchState.PERMISSION_DENIED,
             "permission_denied",
-            "billing permission",
+            PERMISSION_DETAIL,
         ),
-        (404, {}, FetchState.PROVIDER_ERROR, "provider_error", "safe diagnostic"),
-        (503, {}, FetchState.PROVIDER_ERROR, "provider_error", "safe diagnostic"),
+        (404, {}, FetchState.PROVIDER_ERROR, "provider_error", "余额不可用。"),
+        (503, {}, FetchState.PROVIDER_ERROR, "provider_error", "余额不可用。"),
     ],
 )
 async def test_http_failures_are_curated_unknown_rows(status, body, state, code, detail):
@@ -363,7 +370,7 @@ async def test_http_failures_are_curated_unknown_rows(status, body, state, code,
     assert [row.id for row in snapshot.metrics] == [MetricId.OPENAI_AVAILABLE_BALANCE]
     assert snapshot.metrics[0].state == MetricState.UNKNOWN
     assert snapshot.metrics[0].exact_balance is None
-    assert detail.lower() in snapshot.metrics[0].detail.lower()
+    assert snapshot.metrics[0].detail == detail
     assert "must be made" not in snapshot.metrics[0].detail
 
 

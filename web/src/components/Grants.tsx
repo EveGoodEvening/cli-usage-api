@@ -17,7 +17,7 @@ function Expiry({ grant, now }: { grant: Grant; now: number }) {
   }
   return (
     <time dateTime={grant.expires_at ?? undefined} title={timeTitle(grant.expires_at, expiry, "到期 ")}>
-      {shortLocal(expiry, now)} · {relativeUntil(expiry, now)}，非周期重置
+      {shortLocal(expiry, now)} · {relativeUntil(expiry, now)}
     </time>
   );
 }
@@ -109,9 +109,6 @@ export function Grants({
               </ul>
             </>
           )}
-          {grants.some((g) => g.expires_at === null) ? (
-            <p className="grants__foot">到期未知的赠款按当前值计入，失效时间不确定。</p>
-          ) : null}
         </div>
       ) : null}
     </li>

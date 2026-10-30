@@ -731,7 +731,7 @@ async def test_real_claude_credits_and_openai_balance_rows_display_rounded_value
             for m in openai_rows
         )
         assert "OpenAI 可用余额" in available and "17.37 USD" in available
-        assert "服务端金额已舍入到分 / rounded to cents" in available
+        assert "已舍入到分" in available
         assert "17.3715455" not in available
         assert "OpenAI 付费余额" in paid and "4.90 USD" in paid
         assert "舍入" not in paid
@@ -743,6 +743,6 @@ async def test_real_claude_credits_and_openai_balance_rows_display_rounded_value
         assert isinstance(app.screen, InformationScreen)
         assert "17.37 USD" in app.screen.content
         assert "精确金额 / exact: 17.3715455 USD" in app.screen.content
-        assert "服务端金额已舍入到分 / rounded to cents" in app.screen.content
+        assert "已舍入到分" in app.screen.content
         await pilot.press("escape")
         await pilot.press("q")

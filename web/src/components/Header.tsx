@@ -112,7 +112,7 @@ export function Header({
         {status}
         <span
           className="header__tz num"
-          title={`时间按浏览器时区显示：${zone ? `${zone}（${offset}）` : offset}。悬停任意时间可查看原始 UTC。`}
+          title={`时区 ${zone ? `${zone}（${offset}）` : offset}`}
         >
           {offset}
         </span>
@@ -132,7 +132,7 @@ export function Header({
           onClick={onReload}
           disabled={loading}
           aria-label="重新读取"
-          title="页面每 15 秒读取服务器缓存；手动刷新不会加快上游轮询"
+          title="刷新"
         >
           <span className={loading ? "spin" : undefined}>
             <RefreshIcon />

@@ -301,7 +301,7 @@ async def test_bad_reset_does_not_hide_conflicting_duplicates(payload, malformed
     assert snapshot.fetch_state == FetchState.PARTIAL
     assert snapshot.metrics[2].state == MetricState.UNKNOWN
     assert snapshot.metrics[2].quota is None
-    assert "Conflicting" in snapshot.metrics[2].detail
+    assert snapshot.metrics[2].detail == "Fable 窗口数值冲突。"
     assert all(row.state == MetricState.READY for row in snapshot.metrics[:2])
 
 
@@ -315,7 +315,7 @@ async def test_conflicting_valid_scoped_duplicates_reject_fable_not_siblings(pay
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.fetch_state == FetchState.PARTIAL
     assert snapshot.metrics[2].state == MetricState.UNKNOWN
-    assert "Conflicting" in snapshot.metrics[2].detail
+    assert snapshot.metrics[2].detail == "Fable 窗口数值冲突。"
     assert all(row.state == MetricState.READY for row in snapshot.metrics[:2])
 
 
@@ -348,7 +348,7 @@ async def test_absent_fable_never_infers_eligibility_or_substitutes_opus(payload
     assert snapshot.fetch_state == FetchState.PARTIAL
     assert snapshot.metrics[2].state == MetricState.UNKNOWN
     assert snapshot.metrics[2].quota is None
-    assert "eligibility" in snapshot.metrics[2].detail
+    assert snapshot.metrics[2].detail == "本次未返回。"
 
 
 @pytest.mark.parametrize(
@@ -890,17 +890,17 @@ async def test_unusable_usage_payload_never_requests_credits():
 
 
 @pytest.mark.parametrize(
-    ("status", "fragment"),
+    ("status", "detail"),
     [
-        (401, "reconnect"),
-        (403, "No billing permission"),
-        (404, "re-select the organization"),
-        (429, "rate limited"),
-        (500, "Credits request failed"),
-        (502, "Credits request failed"),
+        (401, "未授权：请重新连接账号。"),
+        (403, "无计费权限，或此方案不支持预付 credits。"),
+        (404, "找不到组织：请在账号设置中重新选择。"),
+        (429, "限流：到重试时间后再读取。"),
+        (500, "读取失败。"),
+        (502, "读取失败。"),
     ],
 )
-async def test_credits_failure_keeps_usage_rows_and_is_partial(payload, status, fragment):
+async def test_credits_failure_keeps_usage_rows_and_is_partial(payload, status, detail):
     snapshot, requests = await fetch_credits(payload, {"secret": "leak"}, status=status)
     assert len(requests) == 2
     assert snapshot.fetch_state == FetchState.PARTIAL
@@ -911,7 +911,7 @@ async def test_credits_failure_keeps_usage_rows_and_is_partial(payload, status, 
     row = credit_row(snapshot)
     assert row.state == MetricState.UNKNOWN
     assert row.balance is None
-    assert fragment in row.detail
+    assert row.detail == detail
     assert "leak" not in json.dumps(snapshot.to_dict())
 
 
@@ -967,7 +967,7 @@ async def test_credits_schema_error_is_unknown_partial(payload, body):
     assert snapshot.fetch_state == FetchState.PARTIAL
     row = credit_row(snapshot)
     assert row.state == MetricState.UNKNOWN
-    assert "format is invalid" in row.detail
+    assert row.detail == "响应格式无效。"
 
 
 @pytest.mark.parametrize("currency", ["absent", None, "", "US", "XYZ", "usd$", 840, ["USD"]])
@@ -981,7 +981,7 @@ async def test_missing_or_unsupported_currency_is_unknown_not_usd(payload, curre
     row = credit_row(snapshot)
     assert row.state == MetricState.UNKNOWN
     assert row.balance is None
-    assert "Currency is missing or unsupported" in row.detail
+    assert "币种缺失或不受支持。" in row.detail
     assert snapshot.fetch_state == FetchState.PARTIAL
 
 

@@ -80,19 +80,19 @@ def _category(
     raw: object, category: GrantCategory, currency: str, exponent: int, now: datetime
 ) -> tuple[Money | None, tuple[Grant, ...], datetime | None, str | None, bool]:
     if not isinstance(raw, list):
-        return None, (), None, "Grant array missing or invalid; category balance is unknown.", True
+        return None, (), None, "赠款列表缺失或无效。", True
     grants = []
     uncertain = False
     total = 0
     expiries = []
     for entry in raw:
         if not isinstance(entry, dict):
-            return None, (), None, "Invalid grant; category balance is unknown.", True
+            return None, (), None, "赠款无效。", True
         try:
             granted = Money(entry.get("granted_amount_minor_units"), currency, exponent)
             remaining = Money(entry.get("remaining_amount_minor_units"), currency, exponent)
         except DomainError:
-            return None, (), None, "Invalid grant amounts; category balance is unknown.", True
+            return None, (), None, "赠款金额无效。", True
         expiry = None
         try:
             expiry = parse_timestamp(entry.get("expires_at"))
@@ -122,7 +122,7 @@ def _category(
         Money(total, currency, exponent),
         tuple(grants),
         min(expiries, default=None),
-        " ".join(details) or None,
+        "".join(details) or None,
         uncertain,
     )
 
@@ -234,9 +234,7 @@ class ConsoleProvider:
             difference_text = Money(difference, currency, exponent).format()
             total_detail = f"总额 − 明细合计 = {difference_text}"
         if total is None:
-            total_detail = (
-                "Authoritative total is missing or invalid; category values remain independent."
-            )
+            total_detail = "总额缺失或无效。"
         metrics = tuple(
             Metric(
                 metric_id,
@@ -301,7 +299,7 @@ class ConsoleProvider:
                     label,
                     MetricState.UNKNOWN,
                     _SOURCE,
-                    detail="Balance unavailable; reconnect or inspect the safe diagnostic.",
+                    detail="余额不可用。",
                 )
                 for metric_id, label in zip(self.metric_ids, _LABELS, strict=True)
             ),

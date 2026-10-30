@@ -39,8 +39,8 @@ from cli_usage_api.transport import (
 
 _PROVIDER = ProviderId.CLAUDE_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "claude.oauth.usage", version_sensitive=True)
-_LABELS = ("Claude 5 小时", "Claude 每周", "Fable 每周（模型范围，非额外额度）")
-_MISSING = "Usage is unavailable in this response; absence does not establish eligibility."
+_LABELS = ("Claude 5 小时", "Claude 每周", "Claude Fable 每周")
+_MISSING = "本次未返回。"
 
 
 def _reset(value: object) -> datetime | None:
@@ -252,19 +252,14 @@ _CREDITS_LABEL = "Claude 已购 credits 余额"
 _CREDITS_RATE_LIMIT_COOLDOWN = timedelta(seconds=180)
 _CREDITS_FAILURES = MappingProxyType(
     {
-        "auth_required": "Credits request was not authorized; reconnect the account.",
-        "permission_denied": (
-            "No billing permission for this organization, or the plan is not eligible"
-            " for prepaid credits; balance unknown."
-        ),
-        "organization_not_found": (
-            "Organization not found; re-select the organization in the account settings."
-        ),
-        "rate_limited": "Credits request was rate limited; balance unknown until retry.",
-        "schema_error": "Credits response format is invalid; balance unknown.",
+        "auth_required": "未授权：请重新连接账号。",
+        "permission_denied": "无计费权限，或此方案不支持预付 credits。",
+        "organization_not_found": "找不到组织：请在账号设置中重新选择。",
+        "rate_limited": "限流：到重试时间后再读取。",
+        "schema_error": "响应格式无效。",
     }
 )
-_CREDITS_FALLBACK = "Credits request failed; balance unknown."
+_CREDITS_FALLBACK = "读取失败。"
 
 
 def _credits_unknown(detail: str) -> Metric:
@@ -323,7 +318,7 @@ def _promo_summary(raw: object, currency: str, exponent: int, now: datetime) -> 
         notes.append(f"{expired} 笔促销已过期。")
     if invalid:
         notes.append("部分促销条目无效。")
-    return " ".join(notes)
+    return "".join(notes)
 
 
 def _credit_balance(payload: object, now: datetime) -> Metric:
@@ -335,15 +330,11 @@ def _credit_balance(payload: object, now: datetime) -> Metric:
     amount = _minor_units(raw_amount)
     notes = []
     if amount is None:
-        notes.append(
-            "Reported credits amount is missing or invalid; balance unknown."
-            if raw_amount is not None
-            else "Credits amount is not reported; balance unknown."
-        )
+        notes.append("金额无效。" if raw_amount is not None else "未返回金额。")
     if currency is None:
-        notes.append("Currency is missing or unsupported; balance unknown.")
+        notes.append("币种缺失或不受支持。")
     if amount is None or currency is None:
-        return _credits_unknown(" ".join(notes))
+        return _credits_unknown("".join(notes))
     reload = payload.get("auto_reload_settings")
     enabled = reload.get("enabled") if isinstance(reload, dict) else None
     if type(enabled) is bool:
@@ -360,7 +351,7 @@ def _credit_balance(payload: object, now: datetime) -> Metric:
         MetricState.READY,
         _CREDITS_SOURCE,
         balance=Money(amount, currency, exponent),
-        detail=" ".join(notes) or None,
+        detail="".join(notes) or None,
     )
 
 
@@ -461,7 +452,7 @@ class ClaudeProvider:
             if window is None:
                 partial = True
                 detail = (
-                    "Conflicting scoped Fable windows; usage is unknown."
+                    "Fable 窗口数值冲突。"
                     if metric_id == self.metric_ids[2] and conflict
                     else _MISSING
                 )

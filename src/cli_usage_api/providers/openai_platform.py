@@ -45,23 +45,18 @@ _SOURCE = SourceRef(
 _CURRENCY = "USD"
 _AVAILABLE_LABEL = "OpenAI 可用余额"
 _PAID_LABEL = "OpenAI 付费余额"
-_MISSING = "Available balance is missing or invalid; missing does not mean zero"
+_MISSING = "可用余额缺失或无效"
 _MAX_EPOCH = Decimal(253402300799)  # 9999-12-31T23:59:59Z
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _FAILURE_DETAILS = {
-    "credential_unavailable": "No session key available; reconnect by pasting a new session key.",
-    "credential_expired": "Dashboard session expired; reconnect by pasting a new session key.",
-    "auth_required": "Session rejected; reconnect by pasting a new dashboard session key.",
-    "credential_mismatch": (
-        "Only a platform.openai.com dashboard session key works here; API keys (sk-...) do not."
-    ),
-    "permission_denied": (
-        "Access denied: needs billing permission on this organization, and the"
-        " organization must use prepaid billing."
-    ),
-    "rate_limited": "Rate limited; waiting for the retry deadline before reading again.",
+    "credential_unavailable": "无会话密钥：请粘贴新的会话密钥重新连接。",
+    "credential_expired": "会话已过期：请粘贴新的会话密钥重新连接。",
+    "auth_required": "会话被拒绝：请粘贴新的会话密钥重新连接。",
+    "credential_mismatch": "仅支持 platform.openai.com 会话密钥，API key（sk-...）不可用。",
+    "permission_denied": "权限不足：需要该组织的计费权限，且组织须为预付费。",
+    "rate_limited": "限流：到重试时间后再读取。",
 }
-_DEFAULT_FAILURE = "Balance unavailable; inspect the safe diagnostic."
+_DEFAULT_FAILURE = "余额不可用。"
 
 
 def _amount(value: object) -> Decimal | None:
@@ -85,15 +80,12 @@ def _epoch(value: object) -> datetime | None:
 
 
 def _money_text(amount: Decimal) -> str:
-    """A detail amount rounded half-even to cents, marked when rounding changed it.
+    """A detail amount rounded half-even to cents.
 
     Detail text is shown verbatim on the TUI and web dashboards, so it follows
     the cents display rule; the structured ``exact_balance`` stays exact.
     """
-    value = ExactMoney(amount, _CURRENCY)
-    _, changed = value.rounded_to_cents()
-    suffix = " (服务端金额已舍入到分 / rounded to cents)" if changed else ""
-    return f"{value.format_cents()}{suffix}"
+    return ExactMoney(amount, _CURRENCY).format_cents()
 
 
 def _grants_summary(raw: object, now: datetime) -> tuple[str | None, bool]:
@@ -106,7 +98,7 @@ def _grants_summary(raw: object, now: datetime) -> tuple[str | None, bool]:
         return None, False
     data = raw.get("data") if isinstance(raw, dict) else None
     if not isinstance(data, list):
-        return "Grant list is invalid; grant summary unavailable.", True
+        return "授予列表无效", True
     valid = 0
     invalid = 0
     expired = 0

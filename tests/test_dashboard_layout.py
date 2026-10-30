@@ -173,7 +173,7 @@ async def test_account_header_once_with_state_freshness_times_retry_diagnostic()
         for token in ("限流", "rate_limited", "LAST KNOWN", "STALE 过期 3/3", "成功 11:50"):
             assert token in text
         assert "尝试 12:00" in text and "重试 / retry 12:01:30 · 1分30秒后" in text
-        assert "Wait until the retry deadline" in text
+        assert "到重试时间后再刷新" in text
         all_text = "\n".join(str(o.prompt) for o in app.listing._options)
         for account in app.accounts:
             assert all_text.count(account.label) == 1
@@ -297,8 +297,9 @@ async def test_balance_amount_whole_without_percent_and_expiry_is_not_reset(size
         )
         app.publish_snapshot(replace(snapshot, metrics=(metric, *snapshot.metrics[1:])))
         text = prompt(app, purchased)
-        assert "1234567.89 USD" in text and "非周期重置" in text and "到期" in text
-        assert "后" not in text and "%" not in text
+        assert "1234567.89 USD" in text and "到期" in text
+        # Grant expiry is not a reset: no reset text and no countdown.
+        assert "重置" not in text and "后" not in text and "%" not in text
         await pilot.press("q")
 
 
@@ -826,7 +827,7 @@ async def test_claude_extra_usage_is_parse_only_and_never_displayed(size):
         await pilot.press("q")
 
 
-ROUNDED = "服务端金额已舍入到分 / rounded to cents"
+ROUNDED = "已舍入到分"
 OPENAI = Account(
     id="77777777-7777-4777-8777-777777777777",
     provider=ProviderId.OPENAI_PLATFORM,

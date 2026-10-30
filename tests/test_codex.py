@@ -140,8 +140,10 @@ async def test_arbitrary_main_durations_and_feature_pools_are_distinct_and_sanit
     assert result[MetricId.CODEX_WEEKLY].quota is None
     assert result[pool_id].quota.used_percent == 75
     assert result["codex.subscription.window.300"].quota.used_percent == 1
-    assert "300" in result["codex.subscription.window.300"].label
-    assert "3600" in result["codex.subscription.window.3600"].label
+    assert result["codex.subscription.window.300"].label == "Codex 5m"
+    assert result["codex.subscription.window.3600"].label == "Codex 1h"
+    assert result[pool_id].label.startswith("Codex ")
+    assert result[pool_id].label.endswith(" (7d)")
     assert "\x1b" not in result[pool_id].label + (result[pool_id].detail or "")
     assert "\n" not in result[pool_id].label
     assert len(pool_id) <= 128
@@ -564,7 +566,7 @@ async def test_distinct_feature_pools_with_same_duration_are_not_summed_or_alias
     for index, (feature, used) in enumerate(zip(features, (20, 30), strict=True)):
         metric_id = f"codex.pool.{hashlib.sha256(feature.encode()).hexdigest()}.window.604800"
         assert result[metric_id].quota.used_percent == used
-        assert result[metric_id].label.endswith(f"Synthetic pool {index}")
+        assert result[metric_id].label == f"Codex Synthetic pool {index} (7d)"
         assert result[metric_id].detail is None
     assert snapshot.fetch_state == FetchState.OK
 

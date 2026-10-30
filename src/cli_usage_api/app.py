@@ -72,7 +72,7 @@ def displayed_metrics(snapshot: Snapshot) -> tuple[Metric, ...]:
 
 
 # Shown whenever cents rounding changed an exact server amount (data stays exact).
-ROUNDED_NOTE = "服务端金额已舍入到分 / rounded to cents"
+ROUNDED_NOTE = "已舍入到分"
 
 
 def credit_text(metric: Metric) -> str | None:
@@ -720,7 +720,7 @@ class UsageApp(App[None]):
                 f"  重置 {local_time(metric.reset_at)} · {countdown(metric.reset_at, self.now())}"
             )
         if metric and metric.expires_at:
-            lines.append(f"  到期 {local_time(metric.expires_at)}（非周期重置）")
+            lines.append(f"  到期 {local_time(metric.expires_at)}")
         lines.append(
             f"  成功 / fresh {local_time(snapshot.fetched_at)} · 尝试 / attempt {local_time(snapshot.attempted_at)}"
         )
@@ -1114,7 +1114,7 @@ class UsageApp(App[None]):
                         bodies.insert(0, full + Text(absolute, style="dim"))
                 resets = [head + body for head in heads for body in bodies]
             if metric.expires_at is not None:
-                expiry = f"到期 {short_local_time(metric.expires_at, now)}（非周期重置）"
+                expiry = f"到期 {short_local_time(metric.expires_at, now)}"
                 resets = [Text(expiry, style=f"italic {self._color('secondary')}")]
         # Numeric Grok/Console rows need no explanation; failure details stay visible.
         numeric = (

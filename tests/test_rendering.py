@@ -172,12 +172,12 @@ async def test_live_codex_duration_rows_provenance_and_missing_weekly():
             ]
             weekly = app._row_text(account, "codex.subscription.weekly")
             assert "未知 / no data" in weekly and "已用 0" not in weekly
-            assert "300" in app._row_text(account, "codex.subscription.window.300")
+            assert "Codex 5m" in app._row_text(account, "codex.subscription.window.300")
             assert "8%" in app._row_text(account, "codex.subscription.window.300")
             visible_weekly = shown(app, (account, "codex.subscription.weekly"))
             assert "未知 / no data" in visible_weekly and "已用" not in visible_weekly
             window = shown(app, (account, "codex.subscription.window.300"))
-            assert "300" in window and "已用 8%" in window
+            assert "Codex 5m" in window and "已用 8%" in window
             await pilot.press("q")
     finally:
         await http_transport.aclose()
