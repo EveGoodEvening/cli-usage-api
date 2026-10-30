@@ -696,3 +696,55 @@ def test_non_regular_files_are_rejected_before_open(tmp_path, monkeypatch):
         assert error.value.code == "credential_unavailable"
     finally:
         server.close()
+
+
+CLAUDE_ORG = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+OPENAI_ORG = "org-Synthetic0123"
+
+
+def test_claude_subscription_file_carries_the_selected_organization(tmp_path, samples):
+    account = imported(tmp_path, samples["claude"])
+    instance = resolver()
+    plain = instance.resolve(account)
+    assert plain.organization_id is None
+    selected = instance.resolve(replace(account, organization_id=CLAUDE_ORG))
+    assert selected.organization_id == CLAUDE_ORG
+    assert selected.secret == plain.secret
+    # A different organization is a different generation for the same file.
+    assert selected.generation_fingerprint != plain.generation_fingerprint
+
+
+def test_openai_platform_session_resolves_from_session_or_keyring_refs_only():
+    store = CredentialStore()
+    ref = store.put(ACCOUNT_ID, "synthetic-openai-session-0000", persist=False)
+    account = Account(
+        ACCOUNT_ID,
+        ProviderId.OPENAI_PLATFORM,
+        "Synthetic",
+        ref,
+        CredentialKind.OPENAI_PLATFORM_SESSION,
+        organization_id=OPENAI_ORG,
+    )
+    result = resolver(store).resolve(account)
+    assert result.provider == ProviderId.OPENAI_PLATFORM
+    assert result.credential_kind == CredentialKind.OPENAI_PLATFORM_SESSION
+    assert result.organization_id == OPENAI_ORG
+    assert result.secret == "synthetic-openai-session-0000"
+    assert result.secret not in repr(result)
+    store.delete(ref)
+    assert_error(account, "credential_unavailable", store=store)
+
+
+def test_openai_platform_session_is_never_read_for_another_provider():
+    store = CredentialStore()
+    ref = store.put(ACCOUNT_ID, "synthetic-openai-session-0000", persist=False)
+    account = Account(
+        ACCOUNT_ID,
+        ProviderId.CLAUDE_SUBSCRIPTION,
+        "Synthetic",
+        ref,
+        CredentialKind.MANUAL_BEARER,
+    )
+    # Bypass the domain to exercise the resolver's own kind guard.
+    object.__setattr__(account, "credential_kind", CredentialKind.OPENAI_PLATFORM_SESSION)
+    assert_error(account, "credential_mismatch", store=store)

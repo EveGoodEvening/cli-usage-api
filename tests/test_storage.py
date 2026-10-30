@@ -608,3 +608,35 @@ def test_migration_accepts_only_supported_legacy_credential_shapes(store, kind):
     assert converted == Account(
         ACCOUNT_ID, ProviderId.CODEX_SUBSCRIPTION, "Synthetic", enabled=False
     )
+
+
+def test_new_organization_fields_round_trip_and_old_configs_load_unchanged(store):
+    openai = Account(
+        new_account_id(),
+        ProviderId.OPENAI_PLATFORM,
+        "Synthetic OpenAI",
+        organization_id="org-Synthetic0123",
+    )
+    openai = replace(
+        openai,
+        credential_ref=f"keyring:{openai.id}:{new_account_id()}",
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+    )
+    claude = account(organization_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+    store.save((claude, openai))
+    assert store.load() == (claude, openai)
+    store.save((account(),))
+    assert store.load()[0].organization_id is None
+
+
+def test_openai_session_kind_rejects_file_style_references(store):
+    value = Account(
+        ACCOUNT_ID,
+        ProviderId.OPENAI_PLATFORM,
+        "Synthetic OpenAI",
+        "/tmp/synthetic-session.txt",
+        CredentialKind.OPENAI_PLATFORM_SESSION,
+        organization_id="org-Synthetic0123",
+    )
+    with pytest.raises(ConfigError):
+        store.save((value,))

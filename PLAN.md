@@ -1828,7 +1828,7 @@ The user approved items "1" (Claude extra usage) and "2" (Codex credits) of the
 - §11.2 "Credits/unlimited-credit flags … do not mandate new metrics" **only** for a
   read-only optional Codex credits row from the existing WHAM usage response.
 
-Still out of scope: purchases/top-ups; the Claude prepaid usage-credits balance
+Still out of scope (items 3 and 4 below were later approved in §20): purchases/top-ups; the Claude prepaid usage-credits balance
 endpoint `/api/oauth/organizations/{org}/prepaid/credits` (deferred proposal item 3);
 OpenAI Platform credits (deferred proposal item 4); converting Codex credits to USD or
 any currency; inferring credit expiry or a spend reset; `wattle_ember`,
@@ -1885,8 +1885,9 @@ READY `credits`; missing/null/invalid → UNKNOWN "credits available, amount unk
 Non-bool `has_credits` → UNKNOWN. Label "Codex credits". Never converted to currency;
 no expiry; never changes `fetch_state`/diagnostic; failure snapshots carry no row.
 
-Display (TUI and web): credits as `<amount> credits` in plain fixed-point text
-(`format(value, "f")`, no exponent, no rounding); unlimited as `不限量` / Unlimited;
+Display (TUI and web) — *superseded by §20.2: now half-even, two decimals*: credits
+as `<amount> credits` in plain fixed-point text (`format(value, "f")`, no exponent,
+no rounding); unlimited as `不限量` / Unlimited;
 unknown amount `—`. Rows holding only the new fields are not empty placeholders;
 details show every value; numbers are never ellipsized; extras follow required rows.
 Claude extra usage is excluded per §19.1. Demo: one synthetic `Codex credits ·
@@ -1934,3 +1935,366 @@ clock; the demo loader accepts `credits` (decimal string) and `unlimited`.
 Open question: Codex `balance` wire type. The official model is `Option<String>`;
 numeric values are tolerated through the same bounded parser until a live response
 settles it.
+
+## 20. User-approved Claude prepaid credits and OpenAI Platform balance — 2026-10-30
+
+### 20.1 User decisions (binding)
+
+The user approved the two items §19.1 deferred ("好，现在做 3. Claude 已购 credits
+余额：要多一个请求，加上添加账号时选组织。4. OpenAI Platform 余额：新的服务商和凭证类型，
+外加高风险凭证的警告。"), with these orchestrator-recorded decisions:
+
+1. Claude prepaid credits belong to the **existing Claude subscription account**
+   (`claude_subscription`), not a new provider: an optional organization chosen
+   explicitly when adding/editing the account; when set, each refresh makes one
+   additional read-only request.
+2. OpenAI Platform balance is a **new provider and a new credential kind** with a
+   high-sensitivity warning before secret entry. TUI and web round OpenAI money to
+   cents (0.01, `ROUND_HALF_EVEN`) with a visible note when rounding changed the
+   value; snapshot/API JSON keep the exact value.
+3. Codex credits are displayed in TUI and web rounded half-even to **two decimals,
+   always two** (e.g. `137.50 credits`); data/API JSON keep the exact value.
+
+### 20.2 Scope change and remaining non-goals
+
+This section supersedes, only where stated:
+
+- §19.1 "Still out of scope … the Claude prepaid usage-credits balance endpoint
+  (deferred proposal item 3); OpenAI Platform credits (deferred proposal item 4)".
+  Both are now in scope as **read-only** balance reads.
+- §19.2 "Display … credits as `<amount> credits` in plain fixed-point text
+  (`format(value, "f")`, no exponent, no rounding)". Display now uses
+  `format_two_decimals()` (half-even, two decimals); `unlimited` and unknown display
+  are unchanged. Data, snapshots, debug log and API JSON still carry the exact amount.
+- The earlier "OpenAI/xAI API consumption does not establish consumer subscription
+  quota" boundary is unchanged: the OpenAI Platform row is a **prepaid credit
+  balance**, not ChatGPT/Codex quota and not API consumption.
+
+Still out of scope: purchases/top-ups and every write endpoint (Claude `POST
+contracts/prepaid/credits`, `setup_overage_billing`, `PUT overage_spend_limit`,
+`PUT contracts/auto_reload_settings`, `POST billing/tax_rate`; OpenAI `POST
+/v1/dashboard/billing/credit_grants` (a purchase on the same path),
+`/v1/dashboard/billing/subscription*`, `POST /v1/dashboard/onboarding/login`);
+OpenAI organization discovery; OpenAI session refresh; Admin cost/usage reports
+(spend, not balance); deriving any balance by subtraction; merging the Claude prepaid
+balance with Claude Platform (Console) balances or with `extra_usage`; showing Claude
+`extra_usage` (still parse-only per §19.1).
+
+### 20.3 Frozen contract — Claude subscription prepaid credits
+
+- **Domain.** `Account.organization_id` / `ResolvedCredential.organization_id` are
+  optional for `claude_subscription` and, when present, must be a canonical lowercase
+  UUID (`claude_organization_id()`); Claude Platform keeps its own rule. Saved
+  accounts without it load unchanged and make **no** second request. Optional
+  `MetricId.CLAUDE_CREDIT_BALANCE = "claude.subscription.credit_balance"`, label
+  "Claude 已购 credits 余额", not in `REQUIRED_METRIC_IDS`, emitted only when an
+  organization is saved.
+- **Discovery** (explicit connection operation; add/edit only; never during polling):
+  `ClaudeProvider.discover_organizations(credential)` → `GET
+  https://api.anthropic.com/api/oauth/profile` with `Authorization: Bearer`, `Accept:
+  application/json`, the app's identifying User-Agent and `Cache-Control: no-cache`;
+  **no** `anthropic-beta`, `anthropic-version` or `Content-Type`. The response has a
+  single `organization` object, so discovery yields at most one choice (label from
+  optional `organization.name`, falling back to the UUID); the user must still
+  confirm it — never auto-selected, even as a singleton. A null organization yields
+  no choices. Uses the same discovery plumbing, throttle and account lock as Console
+  discovery (`operations.py`, `cli.py`, `accounts.py`, generalized per provider);
+  "no organization" is an explicit choice that skips the credits request.
+- **Fetch.** `GET https://api.anthropic.com/api/oauth/organizations/{org}/prepaid/credits`
+  where `{org}` is the saved UUID; transport allows GET only, exact path, canonical
+  UUID regex, and requires the credential's bound organization to equal the path
+  organization (else `permission_denied`/`forbidden_request` before any request).
+  Headers: `Authorization: Bearer`, `anthropic-version: 2023-06-01`,
+  `x-organization-uuid: <same org>`, `Accept: application/json`, identifying
+  User-Agent; **no** `anthropic-beta`, no `Content-Type`, and no
+  `anthropic-client-platform` (see §20.6 amendment 3).
+- **Order.** Usage request first. The credits request is made only when the usage
+  request returned HTTP 2xx JSON; never after auth failure, 429 or transport error.
+  The Claude 3-minute floor applies to the whole refresh.
+- **Parse.** Root object; `amount` is an integral number of minor units (int or
+  integral Decimal, nonnegative, ≤ 10^15; bool/negative/non-integral rejected);
+  `currency` is three letters, uppercased, exponent from the shared explicit map
+  (USD/EUR/GBP/CAD/AUD/NZD/SGD/HKD/CHF/SEK/NOK/DKK/MXN/BRL/INR/CNY = 2, JPY/KRW = 0);
+  absent or unmapped currency → balance unknown (no USD default).
+  `auto_reload_settings.enabled` and `expiry_policy_months` are detail text only.
+  `promo_tranches[]` produce **no** `Grant` objects (granted amount unknown) and are
+  never added to the balance (the official client renders "X of your balance
+  expires", i.e. promo remaining is already inside `amount`); detail may summarize
+  active count, same-currency remaining sum and nearest expiry, explicitly not a
+  reset or renewal. Invalid tranches make the summary partial, never zero.
+- **Row and failures.** READY `Metric(balance=Money(...))` when amount and currency
+  are valid, otherwise UNKNOWN with detail. A credits-request failure keeps the fresh
+  usage rows, makes the credit row UNKNOWN with curated detail (401 reconnect; 403
+  no billing permission / plan not eligible; 404 organization not found, re-select;
+  429/5xx/schema/transport retry later) and sets `fetch_state` PARTIAL with
+  `partial_data` unless usage was already worse. A credits 429 retry deadline is
+  carried as `snapshot.retry_at`; the scheduler treats `retry_at` on a PARTIAL
+  snapshot as an embargo (no shortening, manual refresh and same-provider replacement
+  still blocked) while keeping the fresh rows. On OK it is cleared as before.
+  A credits 429 without a usable `Retry-After` gets a conservative local 180 s
+  deadline from the provider, and repeated PARTIAL embargoes escalate in the
+  scheduler like a primary Claude 429 (180, 360, 720, 900 s cap; a longer server
+  deadline wins); a full read resets the escalation.
+- **Organization binding across front ends.** The saved credits organization is
+  kept only while the login is unchanged (same credential kind and reference, no
+  newly entered secret). HTTP (`organization_reselect_required`), the TUI and the
+  CLI all require a fresh explicit discovery/selection, or no organization, after a
+  login change; the CLI no longer offers "keep" for a replaced login.
+- **Display.** A regular Money balance row under the Claude subscription account
+  after its required rows; not parse-only.
+
+### 20.4 Frozen contract — OpenAI Platform balance
+
+- **Domain.** `ProviderId.OPENAI_PLATFORM = "openai_platform"` (CLI choice
+  `openai-platform`, display "OpenAI Platform"). `CredentialKind.OPENAI_PLATFORM_SESSION
+  = "openai_platform_session"` is the only kind this provider accepts and is accepted
+  by no other provider (resolver and transport both bind provider + kind before
+  header construction). Storage: exact-policy OS keyring or explicit session-only,
+  exactly like `console_session`; no file kind, no argument or environment input,
+  no API keys. `Account.organization_id` is **required** and must match
+  `^org-[A-Za-z0-9]{8,64}$` (user-entered, nonsecret; **local assumption** — the
+  official bundle contains no org-ID format; see §20.6). `Snapshot.organization_id`
+  accepts up to 68 characters; the API still nulls it.
+- **ExactMoney.** New value type `ExactMoney(amount: Decimal, currency: str)`: amount
+  bounded by `credit_amount()` (≤ 64 chars before parsing, finite, ≤ 40 coefficient
+  digits, exponent −40…+40; zero and negative allowed), currency `^[A-Z]{3}$`.
+  `Metric.exact_balance` (last field) excludes `quota`, `balance`, `share_percent`,
+  `spent`, `spend_limit`, `credits` and `unlimited`; serialized as
+  `{"amount": "<exact decimal string>", "currency": "USD"}`; older snapshots without
+  it load. Scheduler unknown rows clear it; the debug log summary includes it.
+  Presentation helpers `round_to_cents()`, `format_two_decimals()`,
+  `ExactMoney.rounded_to_cents()` and `format_cents()` round half-even.
+- **Metrics.** Required `openai.platform.available_balance` ("OpenAI Platform
+  可用余额") from `total_available`. Optional `openai.platform.paid_available_balance`
+  ("OpenAI 付费余额") only when `total_paid_available` is present and
+  valid. Currency **USD is a documented contract assumption** (the payload names no
+  currency; the official dashboard hard-codes USD formatting). `total_granted` /
+  `total_used` are detail text only, rounded half-even to cents with the
+  `服务端金额已舍入到分 / rounded to cents` marker when that changed the value (detail
+  text is shown verbatim on the TUI/web boards, so user decision 2 applies; the
+  structured `exact_balance` stays exact); available is **never** computed as granted −
+  used (a 2024 community sample shows 23.0 − 3.07 ≠ 4.9). `grants.data[]` → detail
+  summary (count, expired count, nearest `expires_at` labelled grant expiry, not
+  reset); no `Grant` objects. Amounts arrive as `Decimal` from Transport; bool,
+  string, non-finite and hostile-exponent values → UNKNOWN with partial/schema per
+  existing rules (required row unknown with no usable data → `schema_error`).
+- **Transport.** Origin exactly `https://api.openai.com`; exact path
+  `/v1/dashboard/billing/credit_grants`; **GET only** (POST on the same path buys
+  credits and is rejected before any request, also through an injected transport).
+  Headers: `Authorization: Bearer <session>`, `OpenAI-Organization: <saved org>`
+  (from the same resolved credential binding), `Accept: application/json`,
+  identifying User-Agent; no `Content-Type`; no cookies persisted, no redirects, no
+  environment proxies/netrc.
+- **Errors.** 4xx other than 429 get a bounded best-effort body read for
+  classification only (never echoed): `error.code == "expired_session_key"` on any
+  4xx → `auth_required`/`credential_expired`; a message containing "must be made with
+  a session key" → `auth_required`/`credential_mismatch` (an API key was used); other
+  401 → `auth_required`; 403 (including `personal_organization_access_blocked`) →
+  `permission_denied` (billing permission / prepaid organization needed); 429 →
+  retry embargo; 5xx bodies are never read. Oversized, invalid or slow error bodies
+  keep the status-based result.
+- **Polling.** Provider default and floor **300 s**, applied to existing saved
+  accounts, retries and freshness like the Claude 180 s floor
+  (`POLL_FLOOR_SECONDS`, `default_poll_interval_seconds()`); new accounts default to
+  the provider value.
+- **Credential input** (`openai_session_key()`): strip surrounding whitespace only;
+  length 20…4096; reject internal whitespace/CR/LF, a `Bearer ` prefix, `Cookie:` /
+  header text, JSON/HAR-looking input and `, ; : < > " \ { } [ ] =` (`=` rejects a
+  pasted cookie `name=value` pair, which could carry another provider's session). The `sess-`
+  prefix is **not** required (community evidence only).
+- **Container.** Railway/containers have no OS keyring: OpenAI sessions are
+  session-only (web form to the `serve` process, or the one-process TUI) and are lost
+  on every restart, like the Console session.
+
+### 20.5 Display (TUI `app.py`, web)
+
+- `exact_balance`: `ExactMoney` rounded half-even to 0.01 with currency (`4.90 USD`);
+  when rounding changed the value, the row's note area shows
+  `服务端金额已舍入到分 / rounded to cents`; Enter details may also show the exact
+  value. Numbers are never ellipsized. The OpenAI dashboard itself formats with
+  `Intl.NumberFormat` (half-expand), so exact `…x5` values can differ by one cent from
+  what platform.openai.com shows — a deliberate user decision. Community payloads
+  routinely carry binary-float noise (`3.0700000000000003`), so the note will often
+  appear.
+- Codex credits: `<amount half-even, two decimals> credits` in rows and details;
+  unlimited unchanged (`不限量` / Unlimited).
+- Claude credit balance: ordinary Money row like Console balances.
+- OpenAI Platform: own provider card, name/label mapping, account header and demo.
+
+### 20.6 Sources, revisions and research amendments
+
+Both reports below are static inspection of public artifacts; no credentials, no
+execution of official binaries, no authenticated requests.
+
+- **Claude:** official npm `@anthropic-ai/claude-code-linux-x64@2.1.312`, tarball
+  sha256 `f1c3d923ff3ac7e7080b8b9c638833dde72feab15e46940a65a0122d728c6bfd`, embedded
+  VERSION 2.1.312, GIT_SHA `f375cd85d4f70920de17ce3a4ad646e18834e833`, BUILD_TIME
+  2026-10-27T16:53:02Z. Profile request and zod schema `{account:{uuid,email},
+  organization:{uuid}}` (passthrough; optional `organization.name`); prepaid credits
+  via the `teleport-org` auth mode (`Authorization`, `anthropic-version: 2023-06-01`,
+  `anthropic-client-platform`, `x-organization-uuid` = path org; no beta); response
+  used as `{amount, currency, auto_reload_settings.enabled, expiry_policy_months,
+  promo_tranches[]}`; display treats JPY/KRW/VND as zero-decimal and divides others
+  by 100. Official timeouts: credits 5 s, profile 10 s, usage 5 s. The official
+  client fetches credits only for claude.ai OAuth logins whose `billing_type` is one
+  of `stripe_subscription`, `stripe_subscription_contracted`,
+  `stripe_subscription_enterprise_self_serve`, `aws_marketplace`,
+  `c4e_consumption_trial`, `apple_subscription`, `google_play_subscription`, and
+  refuses Console-profile sign-ins.
+- **OpenAI:** platform.openai.com bundle archived by Wayback `20261015153411`,
+  `static/index--sOdQTiI.js` (772,605 bytes gzipped; decompressed md5
+  `d2b4927c940634462215728d9b79295b`). `getCreditSummary(org)` → `GET
+  https://api.openai.com/v1/dashboard/billing/credit_grants` with only
+  `Authorization: Bearer <session.sensitive_id>` and `OpenAI-Organization` (fixed
+  base URL, not the regional helper; plain fetch, no cookies). The client reads only
+  `total_available`; it requests it only for `billing_mechanism == "advance"`,
+  non-free, non-cancelled organizations with `api.billing.write`, caching 300 s.
+  `sensitive_id` comes from `POST /v1/dashboard/onboarding/login` with an Auth0
+  token, so this app cannot refresh it. Community thread community.openai.com 18827
+  (posts 5, 8, 13, 17, 18; 2023-01 … 2026-05) supplies `total_granted`, `total_used`,
+  `total_paid_available`, `grants.data[]` samples, the `sess-` prefix, the
+  "expires in a few days" report and the API-key rejection text; these are community
+  evidence only, which is why those fields are optional.
+
+Amendments adopted over the computed contract (recorded so later work does not
+"restore" the original wording):
+
+1. Claude profile headers differ from usage: no `anthropic-beta`; add
+   `Cache-Control: no-cache`. Tokens without the `user:profile` scope cannot call
+   profile; that failure maps to a curated error.
+2. Profile discovery yields at most one organization; the explicit-confirmation rule
+   is kept for that single choice.
+3. `anthropic-client-platform` has a sourced value (`claude_code_cli`) but is
+   **omitted**: sending it would make this app claim to be the Claude Code CLI.
+   Also no `Content-Type` on GETs. (Open decision; see §20.9.)
+4. Claude currency: the official client defaults absent currency to USD; this app
+   keeps "absent → unknown" (stricter).
+5. Claude amount: the official client only checks `typeof number`; this app keeps
+   nonnegative integral ≤ 10^15 (stricter; negatives are not evidenced).
+6. Zero-decimal currencies: the official set is JPY/KRW/VND; this app's explicit map
+   has JPY/KRW = 0 and leaves VND (and every unlisted code) unknown rather than
+   guessing — an accepted ISO-based choice.
+7. Promo tranches mirror the official filter (positive numeric remaining, parseable
+   future `expires_at`, non-empty currency) for the "active" summary and are never
+   added to the balance; invalid entries make the summary partial.
+8. OpenAI allowlist is GET + exact path because a POST on the same path purchases
+   credits; tests reject POST/PUT/DELETE even through an injected transport.
+9. OpenAI expiry is signalled by `error.code == "expired_session_key"` on any 4xx,
+   not by status alone; the bounded classification read is not a debug-only read.
+10. OpenAI "403 = API key rejected" is unverified (status and shape unknown): the
+    curated `credential_mismatch` is keyed on the session-key message instead, and
+    403 means permission/billing.
+11. `GET /v1/organizations` exists in the bundle but has no evidenced caller or
+    response shape; the evidenced org list comes only from the forbidden login POST.
+    OpenAI organization discovery stays out of scope; the org-ID regex is a local
+    assumption.
+12. `effective_at` / `expires_at` are epoch-second floats in samples; integral or
+    fractional Decimal is accepted, non-finite/bool rejected; already-expired grants
+    are counted and labelled expired, not active.
+
+### 20.7 Security and sensitivity analysis — OpenAI dashboard session key
+
+- **What it is.** `session.sensitive_id` returned by the dashboard login: a bearer
+  for the platform.openai.com dashboard API, not a scoped API key. Whoever holds it
+  can do what the dashboard can for that user and organization — billing changes,
+  **purchasing credits** (POST on the very same path), cancelling subscriptions,
+  creating API keys. Treat it like a logged-in password session; it is at least as
+  sensitive as the Console `sessionKey`.
+- **Warning before input** (TUI, CLI and web, before the masked field, mirroring the
+  Console warning and its test): dashboard session key; full dashboard access
+  (billing, purchases, creating API keys); treat like a password session; paste only
+  the token value — never a password, full Cookie/Authorization header or HAR file;
+  expires within days and must be re-pasted (no refresh); stored only in the OS
+  keyring or kept for this session only; this app performs one read-only GET;
+  API keys (`sk-…`) do not work here.
+- **Least use.** The only request ever built with it is the single GET above to the
+  exact origin/path; transport rejects every other method/path and every other
+  provider/kind before headers exist. No redirects, no cookie persistence, no
+  environment proxy/netrc. Errors are curated; bodies are classified, never echoed.
+  The debug log redacts the session and `sensitive_id` by key/value.
+- **Storage.** Exact-policy OS keyring or explicit session-only memory; never
+  accounts JSON, arguments, environment variables, labels or snapshots. Non-TTY
+  secret operations are refused. The HTTP API accepts it only in a write body and
+  never returns it, its reference or the organization ID.
+- **Lifetime.** No refresh path exists for this app (refresh needs the Auth0 token
+  and a login POST, both forbidden). Expired sessions surface as `auth_required` with
+  "paste a new session key". Removing the account or stopping the process does not
+  revoke the remote session; log out in the browser to revoke it.
+- **Residual risks.** Python cannot zeroize memory; a session-only key on a public
+  container is readable by anyone with process access (core dumps disabled
+  best-effort); possible bot protection may reject non-browser clients (forum
+  opinion, unverified); arrears-billed or free organizations may return errors or
+  meaningless data — such results stay UNKNOWN, never zero.
+
+### 20.8 Demo
+
+`usage --demo` (healthy) adds a `Claude 已购 credits 余额 · SYNTHETIC` row of
+25.00 USD on the fictional Claude account (fictional organization
+`00000000-0000-4000-8000-00000000c0de`) and a `FICTIONAL DEMO · OpenAI Platform`
+card (fictional organization `org-FictionalDemo0001`) whose available balance is the
+float-noise exact amount `4.8999999999999995` (displayed `4.90 USD` with the rounding
+note) and whose paid-available balance is `3.07` (no note). `--scenario errors` adds a
+Claude account whose credits request failed (PARTIAL, usage rows fresh, credit row
+unknown) and an OpenAI account with an expired session (`auth_required`, required row
+unknown). All-unknown failure profiles now carry only required rows, matching a real
+failed first fetch. Every row keeps `offline_demo` provenance and the fixed demo
+clock; demo construction still reads only the packaged fixture. The web mock
+(`web/src/mock/demo-dashboard.json`) carries the same new rows/accounts generated from
+`account_view()`.
+
+### 20.9 Acceptance ledger
+
+- [x] Foundation (domain, transport, scheduler PARTIAL embargo, debug log, credential
+  binding, floors) implemented with tests (worker report; not orchestrator-verified).
+- [x] Providers (Claude credits/discovery, OpenAI adapter and registry), account
+  flows (TUI/CLI/web, warnings, discovery plumbing), TUI and web display.
+- [x] Demo fixture/loader, demo tests and web mock updated.
+- [x] Merged offline gate: `uv run --locked pytest -q` **2,171 passed, 2 failed in
+  97.60s**; `ruff check .` passed; `ruff format --check .` 59 files formatted; web
+  typecheck and lint passed, vitest **172 passed** (12 files). The two failures are the
+  pre-existing clock-dependent
+  `test_saturated_retry_response_renders_without_local_overflow` cases. Throwaway
+  synthetic end-to-end check (real providers + Transport over `httpx.MockTransport`,
+  API JSON, headless `UsageApp`) passed; installed-entry demo PTY smoke 4/4 passed
+  with rendered metrics and terminal restoration.
+- [x] Independent review: four-lens review with adversarial verification. Round 1
+  confirmed five defects (OpenAI detail rounding location, CLI keeping a credits
+  organization after a login change ×3, credits 429 without Retry-After lacking an
+  embargo); round 2 confirmed two (unrounded OpenAI detail totals, TUI `k` crash on
+  OpenAI accounts); all fixed with regression tests. A final three-lens rereview with
+  two independent verifiers per finding confirmed one documentation error (live step
+  4 expected `credential_mismatch` for an API key; inputs reject `sk-` first),
+  fixed. Split-vote items: a pasted cookie `name=value` pair is now rejected as
+  hardening; alternating primary/secondary Claude 429s each reset the other's
+  backoff counter but never send faster than the 180 s floor — left as designed.
+- OpenAI labels shortened to `OpenAI 可用余额` / `OpenAI 付费余额` so the 120-column
+  tier keeps full reset text.
+- [ ] Live acceptance — pending, each step with the user's own account and explicit
+  authorization, never sharing secrets in chat:
+  1. Claude: edit an existing Claude subscription account, run Discover, confirm the
+     single organization; check the API JSON/debug log for exactly one profile GET
+     at discovery and, per refresh, usage then one credits GET; compare the credit
+     row with Claude Code `/usage-credits`. Then choose "no organization" and confirm
+     the second request stops.
+  2. Claude negative paths: an ineligible plan (expect 403 → permission text, usage
+     rows intact, PARTIAL) and a deliberately stale organization (expect 404 →
+     re-select).
+  3. OpenAI: add an OpenAI Platform account with the organization ID from
+     platform.openai.com settings, read the warning, paste the dashboard session key
+     (keyring, or session-only on a container); compare available (and paid
+     available, if present) with the dashboard's credit balance, allowing one cent
+     for half-even vs half-expand rounding.
+  4. OpenAI negative paths: paste an API key (`sk-…`; expect input rejection before
+     anything is saved or sent — HTTP 422 `invalid_secret`, TUI/CLI "API keys
+     (sk-...) do not work here", web form field error; the transport-level
+     `credential_mismatch` text arises only for a non-`sk-` value that upstream
+     rejects with the "must be made with a session key" message, and is covered
+     offline), wait for/simulate expiry (expect `auth_required` "paste a new session key"),
+     and confirm the effective poll interval is ≥ 300 s in `accounts list`.
+  5. Confirm that a non-browser client is not rejected by bot protection; if it is,
+     record it as an upstream blocker rather than adding browser headers.
+
+Open decisions: whether to send `anthropic-client-platform: claude_code_cli`
+(currently omitted); whether to align Claude zero-decimal currencies with the
+official JPY/KRW/VND set; `ExactMoney` uses the `credit_amount()` bounds (40 digits,
+exponent ±40).

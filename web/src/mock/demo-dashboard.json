@@ -83,6 +83,32 @@
        "shared_pool_id": null,
        "detail": "Fictional synthetic demonstration; not live account data.",
        "share_percent": null
+      },
+      {
+       "id": "claude.subscription.credit_balance",
+       "label": "Claude 已购 credits 余额 · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": {
+        "minor": 2500,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
       }
      ],
      "grants": [],
@@ -392,6 +418,85 @@
        "shared_pool_id": "fictional-grok-pool",
        "detail": "Fictional synthetic demonstration; not live account data.",
        "share_percent": "15"
+      }
+     ],
+     "grants": [],
+     "fetch_state": "ok",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": null,
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000005",
+     "provider": "openai_platform",
+     "label": "FICTIONAL DEMO · OpenAI Platform",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 300
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000005",
+     "metrics": [
+      {
+       "id": "openai.platform.available_balance",
+       "label": "OpenAI 可用余额 · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": {
+        "amount": "4.8999999999999995",
+        "currency": "USD"
+       }
+      },
+      {
+       "id": "openai.platform.paid_available_balance",
+       "label": "OpenAI 付费余额 · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": {
+        "amount": "3.07",
+        "currency": "USD"
+       }
       }
      ],
      "grants": [],
@@ -751,6 +856,32 @@
        "shared_pool_id": null,
        "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
        "share_percent": null
+      },
+      {
+       "id": "claude.subscription.credit_balance",
+       "label": "Claude 已购 credits 余额 · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": {
+        "minor": 2500,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic stale LAST KNOWN observation; latest attempt failed. Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
       }
      ],
      "grants": [],
@@ -929,6 +1060,32 @@
        "shared_pool_id": null,
        "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
        "share_percent": null
+      },
+      {
+       "id": "claude.subscription.credit_balance",
+       "label": "Claude 已购 credits 余额 · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": {
+        "minor": 2500,
+        "currency": "USD",
+        "exponent": 2
+       },
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
       }
      ],
      "grants": [],
@@ -1110,6 +1267,198 @@
      "age_seconds": 0.0,
      "attempted_age_seconds": 0.0,
      "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-000000000019",
+     "provider": "claude_subscription",
+     "label": "FICTIONAL DEMO · credits request failed",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 180
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-000000000019",
+     "metrics": [
+      {
+       "id": "claude.subscription.five_hour",
+       "label": "Claude 5h · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "37.5",
+        "remaining_percent": "62.5",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-28T14:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
+      },
+      {
+       "id": "claude.subscription.weekly",
+       "label": "Claude weekly · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "62.25",
+        "remaining_percent": "37.75",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-31T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
+      },
+      {
+       "id": "claude.subscription.fable_weekly",
+       "label": "Fable weekly · SYNTHETIC",
+       "state": "ready",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": {
+        "used_percent": "110.25",
+        "remaining_percent": "0",
+        "used_count": null,
+        "limit_count": null,
+        "remaining_count": null
+       },
+       "balance": null,
+       "reset_at": "2026-10-31T12:00:00Z",
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Fictional synthetic demonstration; not live account data.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
+      },
+      {
+       "id": "claude.subscription.credit_balance",
+       "label": "Claude 已购 credits 余额 · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "partial",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": "2026-10-28T12:00:00Z",
+     "retry_at": null,
+     "diagnostic": {
+      "code": "partial_data",
+      "message": "Some values are unavailable; inspect the individual metric details."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": 0.0,
+     "attempted_age_seconds": 0.0,
+     "stale": false,
+     "reset_passed": false,
+     "last_known": false
+    }
+   },
+   {
+    "account": {
+     "id": "00000000-0000-4000-8000-00000000001a",
+     "provider": "openai_platform",
+     "label": "FICTIONAL DEMO · OpenAI session expired",
+     "enabled": true,
+     "credential_kind": null,
+     "poll_interval_seconds": 300
+    },
+    "snapshot": {
+     "account_id": "00000000-0000-4000-8000-00000000001a",
+     "metrics": [
+      {
+       "id": "openai.platform.available_balance",
+       "label": "OpenAI 可用余额 · SYNTHETIC",
+       "state": "unknown",
+       "source": {
+        "kind": "offline_demo",
+        "contract": "synthetic-demo-v1",
+        "version_sensitive": false
+       },
+       "quota": null,
+       "balance": null,
+       "reset_at": null,
+       "expires_at": null,
+       "shared_pool_id": null,
+       "detail": "Synthetic missing or malformed field; current value unknown, never zero.",
+       "share_percent": null,
+       "spent": null,
+       "spend_limit": null,
+       "credits": null,
+       "unlimited": false,
+       "exact_balance": null
+      }
+     ],
+     "grants": [],
+     "fetch_state": "auth_required",
+     "attempted_at": "2026-10-28T12:00:00Z",
+     "fetched_at": null,
+     "retry_at": null,
+     "diagnostic": {
+      "code": "auth_required",
+      "message": "Reconnect this account using a supported credential."
+     },
+     "organization_id": null
+    },
+    "freshness": {
+     "age_seconds": null,
+     "attempted_age_seconds": 0.0,
+     "stale": true,
      "reset_passed": false,
      "last_known": false
     }

@@ -7,10 +7,11 @@ omit all services. Secret input is never populated from stored credentials.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from uuid import uuid4
 
@@ -26,9 +27,14 @@ from cli_usage_api.domain import (
     READ_CREDENTIAL_KINDS,
     Account,
     CredentialKind,
+    DomainError,
     ProviderId,
     ResolvedCredential,
+    default_poll_interval_seconds,
+    openai_organization_id,
+    openai_session_key,
     sanitize_text,
+    validate_credential_kind,
 )
 from cli_usage_api.providers.console import OrganizationChoice
 from cli_usage_api.storage import (
@@ -50,19 +56,22 @@ PROVIDERS = {
     ProviderId.CLAUDE_PLATFORM: "Claude Platform",
     ProviderId.CODEX_SUBSCRIPTION: "Codex subscription",
     ProviderId.GROK_SUBSCRIPTION: "Grok subscription",
+    ProviderId.OPENAI_PLATFORM: "OpenAI Platform",
 }
 KINDS = {
     CredentialKind.CLAUDE_CODE_FILE: "External Claude Code file",
     CredentialKind.GROK_AUTH_FILE: "External Grok auth file",
     CredentialKind.CODEX_AUTH_FILE: "External Codex auth file",
     CredentialKind.CONSOLE_SESSION: "Console session (not an API key)",
+    CredentialKind.OPENAI_PLATFORM_SESSION: "OpenAI Platform dashboard session key (not an API key)",
     CredentialKind.MANUAL_BEARER: "Manual bearer",
     CredentialKind.API_KEY: "API key — local storage only, no quota reads",
 }
 GUIDANCE = {
     ProviderId.CLAUDE_SUBSCRIPTION: (
         "Reconnect using Claude Code login with user:profile scope, then retry. "
-        "A missing user:profile scope requires signing in again; an API key does not enable quotas."
+        "A missing user:profile scope requires signing in again; an API key does not enable quotas. "
+        "For prepaid credits, edit the account, explicitly Discover the organization and select it."
     ),
     ProviderId.CLAUDE_PLATFORM: (
         "Replace the Console session, explicitly Discover organizations and select one. "
@@ -77,12 +86,39 @@ GUIDANCE = {
         "CODEX_HOME/auth.json (otherwise ~/.codex/auth.json) is read only; API keys, manual "
         "bearers and keyring-only Codex login are unsupported. Reconnect after signing in again."
     ),
+    ProviderId.OPENAI_PLATFORM: (
+        "Sign in at platform.openai.com, copy a new dashboard session key, then edit this account "
+        "and paste it. Session keys expire within days and are never refreshed here. Enter the "
+        "organization ID (org-...) from the organization settings. API keys (sk-...) do not work."
+    ),
 }
 
 CONSOLE_SESSION_WARNING = (
     "High-sensitivity account session: enter only the sessionKey value. "
     "Do not enter your password, a full Cookie header, or a HAR file."
 )
+
+OPENAI_SESSION_WARNING = (
+    "High-sensitivity account session: this is the platform.openai.com dashboard session key. "
+    "It grants full dashboard access to the account (billing, purchases, creating API keys); "
+    "treat it like a password session. Paste only the token value; never your password, a "
+    "full Cookie or Authorization header, or a HAR file. It expires within days and must be "
+    "pasted again (no refresh). It is stored only in the encrypted OS store or kept for this "
+    "session only. This app performs only one read-only GET of the credit balance. "
+    "API keys (sk-...) do not work here."
+)
+
+CREDITS_ORGANIZATION_HELP = (
+    "Optional prepaid credits: Discover reads the signed-in profile (read-only) and lists its "
+    "organization. Selecting it adds one read-only prepaid-credits request to each refresh; "
+    "nothing is selected automatically. Choose no organization to skip that request."
+)
+
+# Providers whose organization is chosen from an explicit, read-only discovery.
+DISCOVERY_PROVIDERS = frozenset({ProviderId.CLAUDE_PLATFORM, ProviderId.CLAUDE_SUBSCRIPTION})
+NO_ORGANIZATION = "none"
+
+OrganizationDiscovery = Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]]
 
 
 MAX_ACCOUNTS = 100
@@ -114,9 +150,16 @@ class AccountFlowError(ValueError):
 
 
 def allowed_kinds(provider: ProviderId) -> tuple[CredentialKind, ...]:
-    """Selectable credential kinds in display order; API keys are never Codex sources."""
+    """Selectable credential kinds in display order; the domain decides API-key records.
+
+    Codex and OpenAI Platform accept only their read kinds (no local API-key records).
+    """
     allowed = set(READ_CREDENTIAL_KINDS[provider])
-    if provider != ProviderId.CODEX_SUBSCRIPTION:
+    try:
+        validate_credential_kind(provider, CredentialKind.API_KEY)
+    except DomainError:
+        pass
+    else:
         allowed.add(CredentialKind.API_KEY)
     return tuple(kind for kind in KINDS if kind in allowed)
 
@@ -151,7 +194,27 @@ def validate_reference(kind: CredentialKind, reference: object) -> str:
 
 
 def validate_secret(kind: CredentialKind, value: object, *, maximum: int = 1_048_576) -> str:
-    """Accept only a bare header token; a Console session must also be a cookie value."""
+    """Accept only a bare header token; a Console session must also be a cookie value.
+
+    An OpenAI Platform session key follows the stricter dashboard-session rule and is
+    returned without surrounding whitespace.
+    """
+    if kind == CredentialKind.OPENAI_PLATFORM_SESSION:
+        if isinstance(value, str) and value.strip().lower().startswith("sk-"):
+            raise AccountFlowError(
+                "API keys (sk-...) do not work here; paste the dashboard session key.",
+                code="invalid_secret",
+            )
+        try:
+            if not isinstance(value, str) or len(value) > maximum:
+                raise DomainError("Invalid session key.")
+            return openai_session_key(value)
+        except DomainError:
+            raise AccountFlowError(
+                "Invalid session key; paste only the dashboard session token value, not an API "
+                "key, header, cookie text or HAR.",
+                code="invalid_secret",
+            ) from None
     if (
         not isinstance(value, str)
         or not 1 <= len(value) <= maximum
@@ -413,6 +476,8 @@ class ConfirmDialog(ModalScreen[bool]):
 class AccountForm(ModalScreen[bool]):
     """A credential-free initial form; discovery uses a short-lived session ref."""
 
+    DISCOVERY_SECONDS = 30.0
+
     BINDINGS = (("escape", "cancel", "Cancel"),)
     DEFAULT_CSS = """
     AccountForm { align: center middle; }
@@ -428,6 +493,8 @@ class AccountForm(ModalScreen[bool]):
         self.original = account
         self.account_id = account.id if account else str(uuid4())
         self.organizations: set[str] = set()
+        # Claude subscription prepaid-credits organizations from the latest discovery.
+        self.credit_organizations: set[str] = set()
         self._busy = False
         # An explicit source submission invalidates the scheduler generation and
         # snapshot even when the saved value is equal (file contents can change).
@@ -449,7 +516,18 @@ class AccountForm(ModalScreen[bool]):
             "secret": "",
             "scope": Select.NULL,
             "organization": Select.NULL,
+            "credits-organization": Select.NULL,
+            "openai-organization": (
+                account.organization_id
+                if account and account.provider == ProviderId.OPENAI_PLATFORM
+                else ""
+            ),
         }
+        saved_credits = bool(
+            account
+            and account.provider == ProviderId.CLAUDE_SUBSCRIPTION
+            and account.organization_id
+        )
         with VerticalScroll():
             yield Label("Edit account" if account else "Add account")
             yield Input(
@@ -466,6 +544,12 @@ class AccountForm(ModalScreen[bool]):
                 disabled=account is not None,
             )
             yield Static(GUIDANCE[provider], id="guidance", markup=False)
+            yield Input(
+                str(self._initial["openai-organization"]),
+                placeholder="OpenAI organization ID (org-...)",
+                max_length=80,
+                id="openai-organization",
+            )
             yield Select(self._kinds(provider), value=kind, allow_blank=False, id="kind")
             yield Input(
                 reference,
@@ -474,6 +558,7 @@ class AccountForm(ModalScreen[bool]):
                 id="reference",
             )
             yield Static(CONSOLE_SESSION_WARNING, id="session-warning", markup=False)
+            yield Static(OPENAI_SESSION_WARNING, id="openai-session-warning", markup=False)
             yield Input(
                 "",
                 password=True,
@@ -494,8 +579,18 @@ class AccountForm(ModalScreen[bool]):
                 "Session-only secrets disappear on exit. Process-memory zeroization is not promised.",
                 markup=False,
             )
+            yield Static(CREDITS_ORGANIZATION_HELP, id="credits-help", markup=False)
             yield Button("Discover organizations / Grok scopes (explicit check)", id="discover")
             yield Select([], prompt="Select discovered organization", id="organization")
+            yield Select(
+                self._credit_options(()),
+                prompt=(
+                    "Keep saved prepaid-credits organization"
+                    if saved_credits
+                    else "No prepaid-credits organization"
+                ),
+                id="credits-organization",
+            )
             yield Select([], prompt="Select discovered Grok scope", id="scope")
             yield Static("No secret is ever prefilled or revealed.", id="form-status", markup=False)
             with Horizontal():
@@ -504,12 +599,16 @@ class AccountForm(ModalScreen[bool]):
 
     @staticmethod
     def _kinds(provider: ProviderId) -> list[tuple[str, str]]:
-        allowed = set(READ_CREDENTIAL_KINDS[provider])
-        if provider != ProviderId.CODEX_SUBSCRIPTION:
-            allowed.add(CredentialKind.API_KEY)
         return [
             ("No credential / local profile", "none"),
-            *((label, kind) for kind, label in KINDS.items() if kind in allowed),
+            *((KINDS[kind], kind) for kind in allowed_kinds(provider)),
+        ]
+
+    @staticmethod
+    def _credit_options(choices: Sequence[OrganizationChoice]) -> list[tuple[str, str]]:
+        return [
+            ("No organization — skip the prepaid credits read", NO_ORGANIZATION),
+            *((sanitize_text(choice.label, max_length=120), choice.id) for choice in choices),
         ]
 
     def on_mount(self) -> None:
@@ -524,11 +623,13 @@ class AccountForm(ModalScreen[bool]):
         if self.original and provider == self.original.provider:
             return
         self.query_one("#kind", Select).set_options(self._kinds(provider))
-        self.query_one("#kind", Select).value = (
-            CredentialKind.CODEX_AUTH_FILE if provider == ProviderId.CODEX_SUBSCRIPTION else "none"
-        )
+        self.query_one("#kind", Select).value = {
+            ProviderId.CODEX_SUBSCRIPTION: CredentialKind.CODEX_AUTH_FILE,
+            ProviderId.OPENAI_PLATFORM: CredentialKind.OPENAI_PLATFORM_SESSION,
+        }.get(provider, "none")
         self.query_one("#guidance", Static).update(GUIDANCE[provider])
         self._invalidate_discovery()
+        self._visibility()
 
     @on(Select.Changed, "#kind")
     def kind_changed(self, event: Select.Changed) -> None:
@@ -544,7 +645,11 @@ class AccountForm(ModalScreen[bool]):
 
     @on(Select.Changed, "#scope")
     @on(Select.Changed, "#organization")
-    def selection_changed(self, event: Select.Changed) -> None:
+    @on(Select.Changed, "#credits-organization")
+    @on(Input.Changed, "#openai-organization")
+    def selection_changed(self, event: Select.Changed | Input.Changed) -> None:
+        # An organization belongs to the credential identity: a change invalidates
+        # prior observations, but it does not replace the stored secret.
         self._mark_source(event)
 
     def _mark_source(self, event: Input.Changed | Select.Changed) -> None:
@@ -555,7 +660,9 @@ class AccountForm(ModalScreen[bool]):
 
     def _invalidate_discovery(self) -> None:
         self.organizations.clear()
+        self.credit_organizations.clear()
         self.query_one("#organization", Select).set_options([])
+        self.query_one("#credits-organization", Select).set_options(self._credit_options(()))
         self.query_one("#scope", Select).set_options([])
 
     def _visibility(self) -> None:
@@ -564,12 +671,31 @@ class AccountForm(ModalScreen[bool]):
         self.query_one("#secret").display = kind != "none" and kind not in FILE_KINDS
         self.query_one("#persist").display = kind != "none" and kind not in FILE_KINDS
         self.query_one("#session-warning").display = kind == CredentialKind.CONSOLE_SESSION
-        provider = self.query_one("#provider", Select).value
-        self.query_one("#organization").display = provider == ProviderId.CLAUDE_PLATFORM
-        self.query_one("#scope").display = kind == CredentialKind.GROK_AUTH_FILE
-        self.query_one("#discover").display = (
-            kind == CredentialKind.CONSOLE_SESSION or kind == CredentialKind.GROK_AUTH_FILE
+        self.query_one("#openai-session-warning").display = (
+            kind == CredentialKind.OPENAI_PLATFORM_SESSION
         )
+        provider = self.query_one("#provider", Select).value
+        self.query_one("#openai-organization").display = provider == ProviderId.OPENAI_PLATFORM
+        self.query_one("#organization").display = provider == ProviderId.CLAUDE_PLATFORM
+        credits = (
+            provider == ProviderId.CLAUDE_SUBSCRIPTION
+            and kind in READ_CREDENTIAL_KINDS[ProviderId.CLAUDE_SUBSCRIPTION]
+        )
+        self.query_one("#credits-organization").display = credits
+        self.query_one("#credits-help").display = credits
+        self.query_one("#scope").display = kind == CredentialKind.GROK_AUTH_FILE
+        discover = self.query_one("#discover", Button)
+        discover.display = (
+            kind == CredentialKind.CONSOLE_SESSION
+            or kind == CredentialKind.GROK_AUTH_FILE
+            or credits
+        )
+        if credits:
+            discover.label = "Discover organization for prepaid credits (read-only check)"
+        elif kind == CredentialKind.GROK_AUTH_FILE:
+            discover.label = "Discover Grok scopes (explicit check)"
+        else:
+            discover.label = "Discover organizations (explicit check)"
 
     def _draft(self) -> Account:
         provider = ProviderId(self.query_one("#provider", Select).value)
@@ -592,7 +718,6 @@ class AccountForm(ModalScreen[bool]):
             ref = f"session:{uuid4()}"
             if not self.query_one("#secret", Input).value:
                 raise AccountFlowError("Enter a new secret for the selected source kind.")
-        organization = self.query_one("#organization", Select).value
         scope = self.query_one("#scope", Select).value
         return Account(
             id=self.account_id,
@@ -607,16 +732,39 @@ class AccountForm(ModalScreen[bool]):
                 if original and kind == original.credential_kind and ref == original.credential_ref
                 else None
             ),
-            organization_id=(
-                str(organization)
-                if organization is not Select.NULL
-                else original.organization_id
-                if original
-                else None
-            ),
+            organization_id=self._organization_id(provider, kind),
             enabled=original.enabled if original else True,
-            poll_interval_seconds=original.poll_interval_seconds if original else 60,
+            poll_interval_seconds=(
+                original.poll_interval_seconds
+                if original
+                else default_poll_interval_seconds(provider)
+            ),
         )
+
+    def _organization_id(self, provider: ProviderId, kind: CredentialKind | None) -> str | None:
+        original = self.original
+        kept = original.organization_id if original and original.provider == provider else None
+        if provider == ProviderId.OPENAI_PLATFORM:
+            # Entered by the user (no discovery endpoint is evidenced); not a secret.
+            try:
+                return openai_organization_id(self.query_one("#openai-organization", Input).value)
+            except DomainError:
+                raise AccountFlowError(
+                    "Enter the OpenAI organization ID (org- followed by 8-64 letters or digits) "
+                    "from the platform.openai.com organization settings.",
+                    code="invalid_organization",
+                ) from None
+        if provider == ProviderId.CLAUDE_SUBSCRIPTION:
+            if kind not in READ_CREDENTIAL_KINDS[provider]:
+                return None
+            selected = self.query_one("#credits-organization", Select).value
+            if selected == NO_ORGANIZATION:
+                return None
+            return kept if selected is Select.NULL else str(selected)
+        if provider == ProviderId.CLAUDE_PLATFORM:
+            selected = self.query_one("#organization", Select).value
+            return kept if selected is Select.NULL else str(selected)
+        return None
 
     @on(Button.Pressed, "#discover")
     async def discover(self) -> None:
@@ -628,26 +776,33 @@ class AccountForm(ModalScreen[bool]):
         temporary = None
         try:
             draft = self._draft()
+            credits = (
+                draft.provider == ProviderId.CLAUDE_SUBSCRIPTION
+                and draft.credential_kind in READ_CREDENTIAL_KINDS[draft.provider]
+            )
             if draft.credential_kind in (
                 CredentialKind.GROK_AUTH_FILE,
                 CredentialKind.CONSOLE_SESSION,
             ):
                 self.source_dirty = True
-            if draft.credential_kind == CredentialKind.GROK_AUTH_FILE:
+            if credits:
+                await self._discover_credit_organizations(draft)
+            elif draft.credential_kind == CredentialKind.GROK_AUTH_FILE:
                 scopes = grok_scopes(_read_file(self.manager.resolver._path(draft)))
                 self.query_one("#scope", Select).set_options(
                     [(f"Grok scope {index + 1}", scope) for index, scope in enumerate(scopes)]
                 )
                 self._status("Select the intended Grok scope explicitly.")
             elif draft.credential_kind == CredentialKind.CONSOLE_SESSION:
-                if self.manager.console_discovery is None:
+                discovery = self.manager.discovery_for(ProviderId.CLAUDE_PLATFORM)
+                if discovery is None:
                     raise AccountFlowError("Organization discovery is unavailable in this host.")
                 secret = self.query_one("#secret", Input).value
                 if secret:
                     temporary = self.manager.credential_store.put(draft.id, secret, persist=False)
                     draft = replace(draft, credential_ref=temporary)
                 credential = self.manager.resolver.resolve(draft)
-                choices = await self.manager.console_discovery(credential)
+                choices = await discovery(credential)
                 self.organizations = {choice.id for choice in choices}
                 self.query_one("#organization", Select).set_options(
                     [(sanitize_text(choice.label, max_length=120), choice.id) for choice in choices]
@@ -669,6 +824,46 @@ class AccountForm(ModalScreen[bool]):
                     )
             self._busy = False
             button.disabled = False
+
+    async def _discover_credit_organizations(self, draft: Account) -> None:
+        """Read the Claude profile's organization as an explicit, unselected choice.
+
+        A typed bearer is held only in a temporary session ref for this read. The
+        draft's saved organization is not sent: the profile read is unscoped.
+        """
+        discovery = self.manager.discovery_for(ProviderId.CLAUDE_SUBSCRIPTION)
+        if discovery is None:
+            raise AccountFlowError("Organization discovery is unavailable in this host.")
+        draft = replace(draft, organization_id=None)
+        temporary = None
+        try:
+            secret = self.query_one("#secret", Input).value
+            if draft.credential_kind not in FILE_KINDS and secret:
+                temporary = self.manager.credential_store.put(draft.id, secret, persist=False)
+                draft = replace(draft, credential_ref=temporary)
+            credential = self.manager.resolver.resolve(draft)
+            async with asyncio.timeout(self.DISCOVERY_SECONDS):
+                choices = tuple(await discovery(credential))
+        finally:
+            if temporary is not None:
+                try:
+                    self.manager.credential_store.delete(temporary)
+                except Exception:  # noqa: BLE001 - Redact injected credential cleanup errors.
+                    raise AccountFlowError(
+                        "Temporary credential cleanup failed; close this session to discard it."
+                    ) from None
+        self.credit_organizations = {choice.id for choice in choices}
+        self.query_one("#credits-organization", Select).set_options(self._credit_options(choices))
+        if not choices:
+            self._status(
+                "The profile reported no organization; prepaid credits cannot be read for this "
+                "login. Choose no organization."
+            )
+        else:
+            self._status(
+                "Select the organization explicitly to read its prepaid credits on each refresh "
+                "(one extra read-only request), or choose no organization. Nothing was selected."
+            )
 
     def _status(self, text: str) -> None:
         self.query_one("#form-status", Static).update(text)
@@ -708,6 +903,23 @@ class AccountForm(ModalScreen[bool]):
                 and not draft.credential_selector
             ):
                 raise AccountFlowError("Discover and explicitly select a Grok scope first.")
+            if draft.provider == ProviderId.CLAUDE_SUBSCRIPTION and draft.organization_id:
+                selected = self.query_one("#credits-organization", Select).value
+                explicit = selected is not Select.NULL and selected in self.credit_organizations
+                if not explicit and (
+                    not original
+                    or changed_source
+                    or draft.organization_id != original.organization_id
+                ):
+                    raise AccountFlowError(
+                        "The login changed: Discover and explicitly select the prepaid-credits "
+                        "organization again, or choose no organization."
+                    )
+            if (
+                secret is not None
+                and draft.credential_kind == CredentialKind.OPENAI_PLATFORM_SESSION
+            ):
+                secret = validate_secret(draft.credential_kind, secret)
             self._clear_secret()
             if changed_source:
                 self.app.push_screen(
@@ -774,6 +986,9 @@ class AccountForm(ModalScreen[bool]):
 class AccountManagerScreen(Screen[None]):
     """Inject stores/resolver/discovery; readonly mode performs no service calls.
 
+    Discovery is ``{ProviderId: async callable}`` (see ``discovery_for``); a bare
+    callable is the Console discovery only.
+
     Every mutation holds the host's ``account_lock`` (or a screen-local lock for a
     host without one) across the service call and the ``on_changed`` notification,
     so publication order matches commit order with other writers such as the API.
@@ -812,7 +1027,8 @@ class AccountManagerScreen(Screen[None]):
         account_store: AccountStore | None = None,
         credential_store: CredentialStore | None = None,
         resolver: CredentialResolver | None = None,
-        console_discovery: Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]]
+        console_discovery: OrganizationDiscovery
+        | Mapping[ProviderId, OrganizationDiscovery]
         | None = None,
         *,
         on_changed: Callable | None = None,
@@ -820,8 +1036,6 @@ class AccountManagerScreen(Screen[None]):
         readonly: bool = False,
         accounts: tuple[Account, ...] = (),
     ) -> None:
-        import asyncio
-
         super().__init__()
         if not readonly and any(
             item is None for item in (account_store, credential_store, resolver)
@@ -837,6 +1051,17 @@ class AccountManagerScreen(Screen[None]):
         self.on_changed = on_changed
         self.on_reconnect = on_reconnect
         self._local_lock = asyncio.Lock()
+
+    def discovery_for(self, provider: ProviderId) -> OrganizationDiscovery | None:
+        """The explicit discovery operation for ``provider``, if this host supplies one.
+
+        ``console_discovery`` is either a mapping keyed by provider (Claude Platform
+        and Claude subscription) or, for older hosts, the Console callable alone.
+        """
+        discovery = self.console_discovery
+        if isinstance(discovery, Mapping):
+            return discovery.get(provider) if provider in DISCOVERY_PROVIDERS else None
+        return discovery if provider == ProviderId.CLAUDE_PLATFORM else None
 
     def compose(self) -> ComposeResult:
         from cli_usage_api.reorder import ReorderableOptionList
@@ -998,6 +1223,9 @@ class AccountManagerScreen(Screen[None]):
     ) -> None:
         try:
             updated = change()
+        except DomainError:
+            # An invalid draft is rejected before any write; never crash the app.
+            self.status("Account change rejected: invalid account values.")
         except AccountFlowError as error:
             if error.updated is not None:
                 await self.changed(error.updated, invalidate)
@@ -1095,7 +1323,13 @@ class AccountManagerScreen(Screen[None]):
                                 credential_ref=None,
                                 credential_kind=None,
                                 credential_selector=None,
-                                organization_id=None,
+                                # OpenAI's organization is required, nonsecret
+                                # metadata, not credential state (as in the CLI).
+                                organization_id=(
+                                    account.organization_id
+                                    if account.provider == ProviderId.OPENAI_PLATFORM
+                                    else None
+                                ),
                             ),
                             original=account,
                         ),

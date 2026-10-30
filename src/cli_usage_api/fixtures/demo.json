@@ -2,10 +2,12 @@
   "now": "2026-10-28T12:00:00Z",
   "providers": {
     "claude_subscription": {
+      "organization_id": "00000000-0000-4000-8000-00000000c0de",
       "metrics": [
         {"id": "claude.subscription.five_hour", "label": "Claude 5h · SYNTHETIC", "used_percent": "37.5", "reset_offset": 7200},
         {"id": "claude.subscription.weekly", "label": "Claude weekly · SYNTHETIC", "used_percent": "62.25", "reset_offset": 259200},
-        {"id": "claude.subscription.fable_weekly", "label": "Fable weekly · SYNTHETIC", "used_percent": "110.25", "reset_offset": 259200}
+        {"id": "claude.subscription.fable_weekly", "label": "Fable weekly · SYNTHETIC", "used_percent": "110.25", "reset_offset": 259200},
+        {"id": "claude.subscription.credit_balance", "label": "Claude 已购 credits 余额 · SYNTHETIC", "balance_minor": 2500}
       ]
     },
     "claude_platform": {
@@ -33,6 +35,13 @@
         {"id": "grok.product.build", "label": "GrokBuild · SYNTHETIC", "share_percent": "30", "shared_pool_id": "fictional-grok-pool"},
         {"id": "grok.product.chat", "label": "GrokChat · SYNTHETIC", "share_percent": "15", "shared_pool_id": "fictional-grok-pool"}
       ]
+    },
+    "openai_platform": {
+      "organization_id": "org-FictionalDemo0001",
+      "metrics": [
+        {"id": "openai.platform.available_balance", "label": "OpenAI 可用余额 · SYNTHETIC", "exact_balance": "4.8999999999999995"},
+        {"id": "openai.platform.paid_available_balance", "label": "OpenAI 付费余额 · SYNTHETIC", "exact_balance": "3.07"}
+      ]
     }
   },
   "scenarios": {
@@ -40,7 +49,8 @@
       {"id": "00000000-0000-4000-8000-000000000001", "provider": "claude_subscription", "label": "FICTIONAL DEMO · Claude"},
       {"id": "00000000-0000-4000-8000-000000000002", "provider": "claude_platform", "label": "FICTIONAL DEMO · Console"},
       {"id": "00000000-0000-4000-8000-000000000003", "provider": "codex_subscription", "label": "FICTIONAL DEMO · Codex"},
-      {"id": "00000000-0000-4000-8000-000000000004", "provider": "grok_subscription", "label": "FICTIONAL DEMO · Grok"}
+      {"id": "00000000-0000-4000-8000-000000000004", "provider": "grok_subscription", "label": "FICTIONAL DEMO · Grok"},
+      {"id": "00000000-0000-4000-8000-000000000005", "provider": "openai_platform", "label": "FICTIONAL DEMO · OpenAI Platform"}
     ],
     "errors": [
       {"id": "00000000-0000-4000-8000-000000000011", "provider": "claude_subscription", "label": "FICTIONAL DEMO · auth required", "fetch_state": "auth_required", "diagnostic": "auth_required", "unknown_all": true},
@@ -50,7 +60,9 @@
       {"id": "00000000-0000-4000-8000-000000000015", "provider": "claude_platform", "label": "FICTIONAL DEMO · malformed response", "fetch_state": "schema_error", "diagnostic": "schema_error", "unknown_all": true, "retry_offset": 60},
       {"id": "00000000-0000-4000-8000-000000000016", "provider": "claude_subscription", "label": "FICTIONAL DEMO · unknown Fable", "fetch_state": "partial", "diagnostic": "partial_data", "unknown_metrics": ["claude.subscription.fable_weekly"]},
       {"id": "00000000-0000-4000-8000-000000000017", "provider": "grok_subscription", "label": "FICTIONAL DEMO · missing products", "fetch_state": "partial", "diagnostic": "partial_data", "unknown_metrics": ["grok.product.build", "grok.product.chat"]},
-      {"id": "00000000-0000-4000-8000-000000000018", "provider": "codex_subscription", "label": "FICTIONAL DEMO · Codex"}
+      {"id": "00000000-0000-4000-8000-000000000018", "provider": "codex_subscription", "label": "FICTIONAL DEMO · Codex"},
+      {"id": "00000000-0000-4000-8000-000000000019", "provider": "claude_subscription", "label": "FICTIONAL DEMO · credits request failed", "fetch_state": "partial", "diagnostic": "partial_data", "unknown_metrics": ["claude.subscription.credit_balance"]},
+      {"id": "00000000-0000-4000-8000-00000000001a", "provider": "openai_platform", "label": "FICTIONAL DEMO · OpenAI session expired", "fetch_state": "auth_required", "diagnostic": "auth_required", "unknown_all": true}
     ]
   }
 }

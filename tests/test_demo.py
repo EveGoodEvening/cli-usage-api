@@ -30,6 +30,18 @@ from cli_usage_api.domain import (
 )
 from cli_usage_api.scheduler import freshness
 
+UNKNOWN_ALL_STATES = {
+    FetchState.AUTH_REQUIRED,
+    FetchState.PERMISSION_DENIED,
+    FetchState.SCHEMA_ERROR,
+}
+DEMO_EXTRAS = {
+    ProviderId.CLAUDE_SUBSCRIPTION: (MetricId.CLAUDE_CREDIT_BALANCE,),
+    ProviderId.CODEX_SUBSCRIPTION: (MetricId.CODEX_FIVE_HOUR, MetricId.CODEX_CREDITS),
+    ProviderId.OPENAI_PLATFORM: (MetricId.OPENAI_PAID_AVAILABLE_BALANCE,),
+}
+SYNTHETIC = "Fictional synthetic demonstration; not live account data."
+
 
 @pytest.fixture
 def forbid_live(monkeypatch):
@@ -63,7 +75,7 @@ def forbid_live(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario,count", [("healthy", 4), ("errors", 8)])
+@pytest.mark.parametrize("scenario,count", [("healthy", 5), ("errors", 10)])
 async def test_lifecycle_without_live_construction_or_reads(forbid_live, scenario, count):
     published = []
     source = DemoSource(scenario=scenario, publish=published.append)
@@ -108,13 +120,11 @@ async def test_packaged_fixture_fictional_identity_and_required_rows(scenario):
             metric_ids = tuple(row.id for row in snapshot.metrics)
             assert metric_ids[: len(required)] == required
             assert len(set(metric_ids)) == len(metric_ids)
-            if account.provider == ProviderId.CODEX_SUBSCRIPTION:
-                assert required == (MetricId.CODEX_WEEKLY,)
-                assert metric_ids == (
-                    MetricId.CODEX_WEEKLY,
-                    MetricId.CODEX_FIVE_HOUR,
-                    MetricId.CODEX_CREDITS,
-                )
+            if snapshot.fetch_state in UNKNOWN_ALL_STATES:
+                # A failed first fetch has only required rows; optional extras are absent.
+                assert metric_ids == required
+            elif account.provider in DEMO_EXTRAS:
+                assert metric_ids == required + DEMO_EXTRAS[account.provider]
             else:
                 assert metric_ids == required
             # Parse-only Claude extra usage never gets a demo row (user request).
@@ -135,7 +145,7 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
     try:
         assert all(snapshot.fetch_state == FetchState.OK for snapshot in published)
         rows = {row.id: row for snapshot in published for row in snapshot.metrics}
-        assert len(rows) == 12
+        assert len(rows) == 15
         assert all(row.state == MetricState.READY for row in rows.values())
         fable = rows[MetricId.CLAUDE_FABLE_WEEKLY]
         assert fable.quota.used_percent == Decimal("110.25")
@@ -169,6 +179,42 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
         assert credits.spent is None and credits.spend_limit is None
         assert credits.unlimited is False
         assert credits.reset_at is None
+        # Claude prepaid credits: an ordinary Money balance, distinct from Console.
+        claude_credit = rows[MetricId.CLAUDE_CREDIT_BALANCE]
+        assert claude_credit.label == "Claude 已购 credits 余额 · SYNTHETIC"
+        assert claude_credit.balance.minor == 2500
+        assert claude_credit.balance.currency == "USD"
+        assert claude_credit.balance.exponent == 2
+        assert claude_credit.quota is None and claude_credit.exact_balance is None
+        assert claude_credit.reset_at is None
+        assert claude_credit.detail == SYNTHETIC
+        # Shown under the Claude subscription account, after its required rows.
+        assert published[0].metrics[-1] == claude_credit
+        # OpenAI Platform: any-scale exact money that keeps its float noise in data.
+        openai = published[4]
+        assert source.accounts[4].provider == ProviderId.OPENAI_PLATFORM
+        assert openai.organization_id == source.accounts[4].organization_id
+        available = rows[MetricId.OPENAI_AVAILABLE_BALANCE]
+        paid = rows[MetricId.OPENAI_PAID_AVAILABLE_BALANCE]
+        assert available.label == "OpenAI 可用余额 · SYNTHETIC"
+        assert paid.label == "OpenAI 付费余额 · SYNTHETIC"
+        assert str(available.exact_balance.amount) == "4.8999999999999995"
+        assert available.exact_balance.currency == "USD"
+        assert available.exact_balance.rounded_to_cents() == (Decimal("4.90"), True)
+        assert available.exact_balance.format_cents() == "4.90 USD"
+        assert paid.exact_balance.rounded_to_cents() == (Decimal("3.07"), False)
+        assert paid.exact_balance.format_cents() == "3.07 USD"
+        for row in (available, paid):
+            assert row.state == MetricState.READY
+            assert row.source.kind == SourceKind.OFFLINE_DEMO
+            assert row.detail == SYNTHETIC
+            assert row.balance is None and row.quota is None and row.credits is None
+            assert row.reset_at is None
+        assert openai.grants == ()
+        assert openai.to_dict()["metrics"][0]["exact_balance"] == {
+            "amount": "4.8999999999999995",
+            "currency": "USD",
+        }
         pool = rows[MetricId.GROK_SHARED_POOL]
         assert rows[MetricId.GROK_BUILD].share_percent == Decimal(30)
         assert rows[MetricId.GROK_CHAT].share_percent == Decimal(15)
@@ -254,16 +300,16 @@ async def test_errors_cover_failures_partial_unknowns_and_stale_last_known():
         ):
             assert state in by_state
             assert by_state[state].diagnostic is not None
-        for state in (
-            FetchState.AUTH_REQUIRED,
-            FetchState.PERMISSION_DENIED,
-            FetchState.SCHEMA_ERROR,
-        ):
-            snapshot = by_state[state]
+        failed = [item for item in published if item.fetch_state in UNKNOWN_ALL_STATES]
+        assert len(failed) == 4
+        for snapshot in failed:
             assert snapshot.fetched_at is None
             assert snapshot.grants == ()
             assert all(row.state == MetricState.UNKNOWN for row in snapshot.metrics)
-            assert all(row.quota is None and row.balance is None for row in snapshot.metrics)
+            assert all(
+                row.quota is None and row.balance is None and row.exact_balance is None
+                for row in snapshot.metrics
+            )
         for state in (FetchState.RATE_LIMITED, FetchState.NETWORK_ERROR):
             snapshot = by_state[state]
             assert snapshot.fetched_at < snapshot.attempted_at
@@ -272,7 +318,7 @@ async def test_errors_cover_failures_partial_unknowns_and_stale_last_known():
             assert status.stale and status.last_known
             assert all("LAST KNOWN" in row.detail for row in snapshot.metrics)
         partials = [item for item in published if item.fetch_state == FetchState.PARTIAL]
-        assert len(partials) == 2
+        assert len(partials) == 3
         unknown = {
             row.id
             for snapshot in partials
@@ -281,13 +327,14 @@ async def test_errors_cover_failures_partial_unknowns_and_stale_last_known():
         }
         assert unknown == {
             MetricId.CLAUDE_FABLE_WEEKLY,
+            MetricId.CLAUDE_CREDIT_BALANCE,
             MetricId.GROK_BUILD,
             MetricId.GROK_CHAT,
         }
         for snapshot in partials:
             assert snapshot.fetched_at == DEMO_NOW
             for row in snapshot.metrics:
-                if row.id in unknown:
+                if row.state == MetricState.UNKNOWN:
                     assert row.quota is None and row.balance is None
                     assert row.reset_at is None
                     assert "current value unknown, never zero" in row.detail
@@ -344,7 +391,9 @@ async def test_account_selection_replacement_disable_removal_and_atomic_rejectio
         for invalid in (
             (original[0], original[0]),
             (replace(original[0], id=str(UUID(int=999))),),
-            (replace(original[0], provider=ProviderId.GROK_SUBSCRIPTION),),
+            (replace(original[0], provider=ProviderId.GROK_SUBSCRIPTION, organization_id=None),),
+            (replace(original[0], organization_id=None),),
+            (replace(original[0], organization_id=str(UUID(int=7))),),
             (
                 replace(
                     original[0],
@@ -390,7 +439,7 @@ async def test_injected_clock_and_sleep_use_only_explicit_time():
             await cancelled
         clock.advance(10)
         await clock.sleep(0)
-        assert len(published) == 4
+        assert len(published) == 5
     finally:
         await source.stop()
 
@@ -536,3 +585,81 @@ async def test_unknown_codex_credits_clear_amount_and_unlimited(tmp_path, monkey
     assert row.state == MetricState.UNKNOWN
     assert row.credits is None and row.unlimited is False
     assert "current value unknown, never zero" in row.detail
+
+
+@pytest.mark.asyncio
+async def test_errors_cover_failed_claude_credits_and_expired_openai_session():
+    published = []
+    source = DemoSource(scenario="errors", publish=published.append)
+    await source.start()
+    try:
+        views = dict(zip((a.label for a in source.accounts), published, strict=True))
+        credits_failed = views["FICTIONAL DEMO · credits request failed"]
+        # A failed second request leaves the usage rows fresh and only the credit row unknown.
+        assert credits_failed.fetch_state == FetchState.PARTIAL
+        assert credits_failed.fetched_at == DEMO_NOW
+        by_id = {row.id: row for row in credits_failed.metrics}
+        assert all(
+            by_id[metric_id].state == MetricState.READY
+            for metric_id in REQUIRED_METRIC_IDS[ProviderId.CLAUDE_SUBSCRIPTION]
+        )
+        credit = by_id[MetricId.CLAUDE_CREDIT_BALANCE]
+        assert credit.state == MetricState.UNKNOWN
+        assert credit.balance is None
+        assert "never zero" in credit.detail
+        expired = views["FICTIONAL DEMO · OpenAI session expired"]
+        assert expired.fetch_state == FetchState.AUTH_REQUIRED
+        assert expired.fetched_at is None
+        assert tuple(row.id for row in expired.metrics) == (MetricId.OPENAI_AVAILABLE_BALANCE,)
+        assert expired.metrics[0].exact_balance is None
+    finally:
+        await source.stop()
+
+
+def test_demo_accounts_carry_only_fictional_well_formed_organizations():
+    source = DemoSource(publish=lambda snapshot: None)
+    organizations = {account.provider: account.organization_id for account in source.accounts}
+    claude = organizations[ProviderId.CLAUDE_SUBSCRIPTION]
+    assert str(UUID(claude)) == claude
+    assert organizations[ProviderId.OPENAI_PLATFORM].startswith("org-Fictional")
+    assert organizations[ProviderId.CODEX_SUBSCRIPTION] is None
+    assert all(account.credential_kind is None for account in source.accounts)
+
+
+def _openai_fixture(tmp_path, monkeypatch, value):
+    fixture = json.loads(files("cli_usage_api").joinpath("fixtures/demo.json").read_text())
+    fixture["providers"]["openai_platform"]["metrics"][0]["exact_balance"] = value
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    (fixture_dir / "demo.json").write_text(json.dumps(fixture))
+    monkeypatch.setattr("cli_usage_api.demo.files", lambda package: tmp_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [4.9, True, "1e999999999", "NaN", "x" * 65])
+async def test_exact_balance_loader_rejects_binary_float_and_hostile_amounts(
+    tmp_path, monkeypatch, value
+):
+    _openai_fixture(tmp_path, monkeypatch, value)
+    source = DemoSource(publish=lambda snapshot: None)
+    try:
+        with pytest.raises(DomainError):
+            await source.start()
+    finally:
+        await source.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("value", "cents"), [("-0.005", "-0.00"), ("0", "0.00")])
+async def test_exact_balance_loader_keeps_zero_and_negative(tmp_path, monkeypatch, value, cents):
+    _openai_fixture(tmp_path, monkeypatch, value)
+    published = []
+    source = DemoSource(publish=published.append)
+    try:
+        await source.start()
+        row = published[4].metrics[0]
+        assert row.state == MetricState.READY
+        assert row.exact_balance.amount == Decimal(value)
+        assert row.exact_balance.format_cents() == f"{cents} USD"
+    finally:
+        await source.stop()

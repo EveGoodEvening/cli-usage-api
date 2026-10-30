@@ -7,13 +7,15 @@ export type ProviderId =
   | "claude_subscription"
   | "claude_platform"
   | "codex_subscription"
-  | "grok_subscription";
+  | "grok_subscription"
+  | "openai_platform";
 
 export type CredentialKind =
   | "claude_code_file"
   | "grok_auth_file"
   | "codex_auth_file"
   | "console_session"
+  | "openai_platform_session"
   | "manual_bearer"
   | "api_key";
 
@@ -46,6 +48,12 @@ export interface Money {
   currency: string;
   /** 0..4 digits after the decimal point. */
   exponent: number;
+}
+
+/** Exact money (domain.ExactMoney): any-scale decimal amount, may be negative. */
+export interface ExactMoney {
+  amount: DecimalString;
+  currency: string;
 }
 
 export interface QuotaValue {
@@ -96,6 +104,12 @@ export interface Metric {
   credits?: DecimalString | null;
   /** The source positively reported "no cap / unlimited". Absent means false. */
   unlimited?: boolean;
+  /**
+   * Exact money whose minor-unit scale is not reported (OpenAI Platform). The
+   * amount stays exact here; the UI shows it rounded half-even to cents.
+   * Optional so an older server's snapshot still type-checks; absent means null.
+   */
+  exact_balance?: ExactMoney | null;
 }
 
 export interface Diagnostic {
@@ -215,7 +229,8 @@ export interface PrepareChoice {
 export interface PrepareResult {
   prepare_id: string;
   expires_in: number;
-  kind: "grok_scope" | "console_organization";
+  /** claude_organization: the optional Claude subscription prepaid-credits organization. */
+  kind: "grok_scope" | "console_organization" | "claude_organization";
   choices: PrepareChoice[];
 }
 
@@ -226,6 +241,11 @@ export interface SourceBody {
   persist?: boolean;
   prepare_id?: string;
   choice_id?: string;
+  /**
+   * Claude subscription read kinds only, without prepare_id/choice_id: "none" stops
+   * the prepaid-credits read; "keep" keeps the saved organization (same login only).
+   */
+  organization?: "none" | "keep";
 }
 
 export interface CreateAccountBody {
@@ -234,6 +254,8 @@ export interface CreateAccountBody {
   poll_interval_seconds?: number;
   enabled?: boolean;
   source: SourceBody | null;
+  /** OpenAI Platform only, and required there (user-entered, never echoed back). */
+  organization_id?: string;
 }
 
 export interface UpdateAccountBody {
@@ -241,13 +263,15 @@ export interface UpdateAccountBody {
   poll_interval_seconds?: number;
   enabled?: boolean;
   source?: SourceBody | null;
+  /** OpenAI Platform only; omitted keeps the saved organization. */
+  organization_id?: string;
 }
 
 export interface PrepareBody {
   account_id: string | null;
   revision: string | null;
   provider?: ProviderId;
-  credential_kind: "grok_auth_file" | "console_session";
+  credential_kind: "grok_auth_file" | "console_session" | "claude_code_file" | "manual_bearer";
   reference?: string;
   secret?: string;
 }

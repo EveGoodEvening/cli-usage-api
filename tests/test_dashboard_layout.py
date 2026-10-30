@@ -12,13 +12,19 @@ from rich.cells import cell_len
 from cli_usage_api.app import InformationScreen, UsageApp, short_local_time
 from cli_usage_api.domain import (
     Account,
+    CredentialKind,
     Diagnostic,
+    ExactMoney,
     FetchState,
+    Metric,
     MetricId,
     MetricState,
     Money,
     ProviderId,
     QuotaValue,
+    Snapshot,
+    SourceKind,
+    SourceRef,
 )
 
 BARS = ("█", "░", "▶")
@@ -81,7 +87,8 @@ async def test_headers_are_never_highlighted_and_enter_opens_metric():
         for key in ("home", "up", "up", "end", "home"):
             await pilot.press(key)
             assert app.highlighted_row() is not None
-        await pilot.press("down", "down", "down", "down")
+        # The demo Claude account's prepaid credit row precedes the Console rows.
+        await pilot.press("down", "down", "down", "down", "down")
         selected = app.highlighted_row()
         assert selected[1] == "claude.platform.promotional_balance"
         await pilot.press("enter")
@@ -367,7 +374,8 @@ async def test_passed_reset_marks_only_that_row_without_changing_quota():
         weekly = prompt(app, row(app, "claude.subscription.weekly"))
         assert "awaiting refresh" not in weekly and "STALE" not in weekly
         assert app._metric(*five).quota is metric.quota
-        assert "STALE 过期 1/3" in header(app, five[0])
+        # Five-hour, weekly, Fable and the prepaid credit row; one passed reset.
+        assert "STALE 过期 1/4" in header(app, five[0])
         await pilot.press("q")
 
 
@@ -730,10 +738,14 @@ async def test_codex_credits_and_unlimited_are_whole_values_not_unknown(size):
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         for value, shown in (
-            (Decimal("1234567.0000001"), "1234567.0000001 credits"),
-            (Decimal("1E+5"), "100000 credits"),
-            (Decimal(0), "0 credits"),
+            # Display rounds half-even to exactly two decimals; data stays exact.
+            (Decimal("1234567.0000001"), "1234567.00 credits"),
+            (Decimal("1E+5"), "100000.00 credits"),
+            (Decimal(0), "0.00 credits"),
             (Decimal("-2.50"), "-2.50 credits"),
+            (Decimal("137.5"), "137.50 credits"),
+            (Decimal("0.125"), "0.12 credits"),
+            (Decimal("0.135"), "0.14 credits"),
         ):
             target = codex_extra(app, credits=value)
             # Extras follow the required rows of their account.
@@ -745,6 +757,8 @@ async def test_codex_credits_and_unlimited_are_whole_values_not_unknown(size):
             assert "%" not in text and "USD" not in text and "重置" not in text
             assert "E+" not in text and lines_fit(app, text)
             assert shown in app.details(*target)
+            # The snapshot (and so API JSON) keeps the exact wire value.
+            assert app.snapshots[target[0].id].metrics[-1].credits == value
             if size[0] < 72:
                 # Narrow: the bare amount sits on the label line.
                 first, second = text.split("\n")[:2]
@@ -809,4 +823,142 @@ async def test_claude_extra_usage_is_parse_only_and_never_displayed(size):
             )
         )
         assert header(app, account) == before_header
+        await pilot.press("q")
+
+
+ROUNDED = "服务端金额已舍入到分 / rounded to cents"
+OPENAI = Account(
+    id="77777777-7777-4777-8777-777777777777",
+    provider=ProviderId.OPENAI_PLATFORM,
+    label="Synthetic OpenAI",
+    credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+    credential_ref="memory:synthetic",
+    organization_id="org-SyntheticOrg1234",
+)
+OPENAI_SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "openai.platform.billing.credit_grants", True)
+
+
+def openai_snapshot(available, paid=None, *, state=MetricState.READY, detail=None):
+    now = datetime.now(UTC)
+    metrics = [
+        Metric(
+            MetricId.OPENAI_AVAILABLE_BALANCE,
+            "OpenAI 可用余额",
+            state,
+            OPENAI_SOURCE,
+            exact_balance=None if available is None else ExactMoney(available, "USD"),
+            detail=detail,
+        )
+    ]
+    if paid is not None:
+        metrics.append(
+            Metric(
+                MetricId.OPENAI_PAID_AVAILABLE_BALANCE,
+                "OpenAI 付费余额",
+                MetricState.READY,
+                OPENAI_SOURCE,
+                exact_balance=ExactMoney(paid, "USD"),
+            )
+        )
+    return Snapshot(
+        OPENAI.id,
+        tuple(metrics),
+        (),
+        FetchState.OK if state == MetricState.READY else FetchState.SCHEMA_ERROR,
+        now,
+        fetched_at=now if state == MetricState.READY else None,
+    )
+
+
+@pytest.mark.parametrize("size", [(140, 40), (120, 40), (80, 24), (56, 40)])
+async def test_openai_exact_balance_rounds_to_cents_with_note_in_every_tier(size):
+    app = UsageApp(mode="live", accounts=(OPENAI,), scheduler_factory=lambda *a, **kw: None)
+    async with app.run_test(size=size) as pilot:
+        for available, shown, rounded in (
+            (Decimal("17.3715455"), "17.37 USD", True),
+            (Decimal("4.9"), "4.90 USD", False),
+            (Decimal("0.125"), "0.12 USD", True),  # half-even, not half-up
+            (Decimal("0.135"), "0.14 USD", True),
+            (Decimal("-3.07"), "-3.07 USD", False),
+            (Decimal(0), "0.00 USD", False),
+            (Decimal("1234567890.005"), "1234567890.00 USD", True),
+        ):
+            app.publish_snapshot(openai_snapshot(available, Decimal("4.9")))
+            await pilot.pause()
+            target = (OPENAI, MetricId.OPENAI_AVAILABLE_BALANCE)
+            text = prompt(app, target)
+            assert "OpenAI 可用余额" in text and shown in text, text
+            assert "未知" not in text and "%" not in text
+            # The note wraps whole (never truncated) and appears only when rounding changed it.
+            assert (ROUNDED in flat(text)) == rounded and "舍入" not in text.split("\n")[0]
+            assert lines_fit(app, text)
+            details = app.details(*target)
+            assert shown in details and (ROUNDED in details) == rounded
+            assert f"精确金额 / exact: {available:f} USD" in details
+            # The snapshot keeps the exact amount; display alone rounds.
+            assert app.snapshots[OPENAI.id].metrics[0].exact_balance.amount == available
+            if size[0] < 72:
+                first, second = text.split("\n")[:2]
+                assert first.rstrip().endswith(shown) and second.startswith("  余额")
+            paid = prompt(app, (OPENAI, MetricId.OPENAI_PAID_AVAILABLE_BALANCE))
+            assert "4.90 USD" in paid and "舍入" not in paid and lines_fit(app, paid)
+            if size[0] >= 100:
+                # Wide rows keep the whole distinguishing label.
+                assert "OpenAI 付费余额" in paid
+        await pilot.press("q")
+
+
+async def test_openai_unknown_balance_is_unknown_not_zero():
+    app = UsageApp(mode="live", accounts=(OPENAI,), scheduler_factory=lambda *a, **kw: None)
+    async with app.run_test(size=(120, 30)) as pilot:
+        app.publish_snapshot(
+            openai_snapshot(
+                None,
+                state=MetricState.UNKNOWN,
+                detail="Available balance is missing or invalid; missing does not mean zero.",
+            )
+        )
+        await pilot.pause()
+        target = (OPENAI, MetricId.OPENAI_AVAILABLE_BALANCE)
+        text = prompt(app, target) + header(app, OPENAI)
+        assert "未知 / no data" in text and "missing does not mean zero" in text
+        assert "0.00" not in text and "USD" not in text and "舍入" not in text
+        assert [m for _, m in app.rows] == [MetricId.OPENAI_AVAILABLE_BALANCE]
+        assert "精确金额" not in app.details(*target)
+        await pilot.press("q")
+
+
+@pytest.mark.parametrize("size", [(120, 40), (80, 24), (56, 40)])
+async def test_claude_credit_balance_row_follows_required_rows(size):
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        weekly = row(app, "claude.subscription.weekly")
+        account = weekly[0]
+        snapshot = app.snapshots[account.id]
+        credit = replace(
+            app._metric(*weekly),
+            id=MetricId.CLAUDE_CREDIT_BALANCE,
+            label="Claude 已购 credits 余额",
+            quota=None,
+            reset_at=None,
+            balance=Money(123456789, "USD", 2),
+        )
+        others = tuple(m for m in snapshot.metrics if m.id != MetricId.CLAUDE_CREDIT_BALANCE)
+        app.publish_snapshot(replace(snapshot, metrics=(*others, credit)))
+        await pilot.pause()
+        account_rows = [m for a, m in app.rows if a == account]
+        assert account_rows[-1] == MetricId.CLAUDE_CREDIT_BALANCE
+        target = (account, MetricId.CLAUDE_CREDIT_BALANCE)
+        text = prompt(app, target)
+        assert "1234567.89 USD" in text and "未知" not in text and "%" not in text
+        assert "舍入" not in text and lines_fit(app, text)
+        assert "1234567.89 USD" in app.details(*target)
+        unknown = replace(
+            credit, state=MetricState.UNKNOWN, balance=None, detail="Org not found; re-select."
+        )
+        app.publish_snapshot(replace(snapshot, metrics=(*others, unknown)))
+        await pilot.pause()
+        text = prompt(app, target)
+        assert "未知 / no data" in text and "USD" not in text
         await pilot.press("q")

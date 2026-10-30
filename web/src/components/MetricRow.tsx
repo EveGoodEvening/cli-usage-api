@@ -3,6 +3,7 @@ import type { Metric } from "../types";
 import {
   UNKNOWN,
   creditsText,
+  exactMoneyText,
   formatMoney,
   fullLocalZoned,
   parseTime,
@@ -117,6 +118,10 @@ function rowFacts(metric: Metric): Fact[] {
     const credits =
       metric.credits != null ? creditsText(metric.credits) : metric.unlimited === true ? UNLIMITED_TEXT : UNKNOWN;
     items.push({ label: "Credits", value: credits });
+  } else if (value.kind === "exact") {
+    // The row shows cents; the exact server amount stays inspectable here.
+    items.push({ label: "余额", value: value.text });
+    items.push({ label: "精确金额", value: <span className="mono">{exactMoneyText(metric.exact_balance)}</span> });
   } else if (value.kind === "balance" || (isBalanceRowId(metric.id) && !q)) {
     items.push({ label: "余额", value: value.kind === "balance" ? formatMoney(metric.balance) : UNKNOWN });
   } else {
@@ -193,6 +198,10 @@ export function MetricRow({
   } else if (value.kind === "balance") {
     const negative = !!metric.balance && metric.balance.minor < 0;
     used = <Fig text={formatMoney(metric.balance)} className={negative ? "is-error" : undefined} />;
+    time = timing(metric, now, false);
+    if (time.phone) sub = [time.phone];
+  } else if (value.kind === "exact") {
+    used = <Fig text={value.text} className={value.negative ? "is-error" : undefined} />;
     time = timing(metric, now, false);
     if (time.phone) sub = [time.phone];
   } else if (value.kind === "credits") {

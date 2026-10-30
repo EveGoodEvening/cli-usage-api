@@ -13,6 +13,7 @@ from cli_usage_api.domain import (
     CredentialKind,
     Diagnostic,
     DomainError,
+    ExactMoney,
     FetchState,
     Grant,
     GrantCategory,
@@ -27,11 +28,16 @@ from cli_usage_api.domain import (
     SourceKind,
     SourceRef,
     TransportError,
+    claude_organization_id,
     credit_amount,
+    default_poll_interval_seconds,
     dumps,
     format_timestamp,
+    format_two_decimals,
     loads,
     new_account_id,
+    openai_organization_id,
+    openai_session_key,
     parse_timestamp,
     percent,
     remaining_percent,
@@ -93,7 +99,7 @@ def snapshot():
 
 
 def test_ids_and_required_metric_inventory():
-    assert len(ProviderId) == 4
+    assert len(ProviderId) == 5
     assert {str(item) for items in REQUIRED_METRIC_IDS.values() for item in items} == {
         "claude.subscription.five_hour",
         "claude.subscription.weekly",
@@ -105,6 +111,7 @@ def test_ids_and_required_metric_inventory():
         "grok.subscription.shared_pool",
         "grok.product.build",
         "grok.product.chat",
+        "openai.platform.available_balance",
     }
     assert new_account_id() != new_account_id()
     with pytest.raises(TypeError):
@@ -174,7 +181,10 @@ def test_read_credentials_preserve_explicit_provider_binding(provider, kind):
         validate_credential_binding(other, value)
 
 
-@pytest.mark.parametrize("provider", [p for p in ProviderId if p != ProviderId.CODEX_SUBSCRIPTION])
+@pytest.mark.parametrize(
+    "provider",
+    [p for p in ProviderId if p not in (ProviderId.CODEX_SUBSCRIPTION, ProviderId.OPENAI_PLATFORM)],
+)
 def test_api_keys_can_be_stored_but_never_enable_reads(provider):
     value = ResolvedCredential(provider, CredentialKind.API_KEY, "synthetic", "generation-1")
     with pytest.raises(DomainError):
@@ -807,3 +817,204 @@ def test_serialized_unit_mismatch_and_exclusivity_are_rejected():
     metric["credits"] = "1"
     with pytest.raises(DomainError):
         loads(json.dumps(payload))
+
+
+# --- Claude subscription organization, OpenAI Platform and exact money -------------
+
+CLAUDE_ORG = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+OPENAI_ORG = "org-Synthetic0123"
+
+
+def test_claude_subscription_accepts_only_an_optional_canonical_uuid_organization():
+    assert account().organization_id is None
+    assert account(organization_id=CLAUDE_ORG).organization_id == CLAUDE_ORG
+    for value in (CLAUDE_ORG.upper(), CLAUDE_ORG.replace("-", ""), "{" + CLAUDE_ORG + "}", "org-1"):
+        with pytest.raises(DomainError):
+            account(organization_id=value)
+    credential = ResolvedCredential(
+        ProviderId.CLAUDE_SUBSCRIPTION,
+        CredentialKind.MANUAL_BEARER,
+        "synthetic",
+        "generation-1",
+        organization_id=CLAUDE_ORG,
+    )
+    assert credential.organization_id == CLAUDE_ORG
+    with pytest.raises(DomainError):
+        replace(credential, organization_id=CLAUDE_ORG.upper())
+    # Saved accounts without an organization keep loading unchanged.
+    saved = account(poll_interval_seconds=200)
+    assert loads(dumps(saved)) == saved
+    assert loads(dumps(account(organization_id=CLAUDE_ORG))).organization_id == CLAUDE_ORG
+
+
+def openai_account(**changes):
+    values = {
+        "id": ACCOUNT_ID,
+        "provider": ProviderId.OPENAI_PLATFORM,
+        "label": "Synthetic OpenAI",
+        "organization_id": OPENAI_ORG,
+    }
+    return Account(**{**values, **changes})
+
+
+def test_openai_platform_requires_its_session_kind_and_organization():
+    value = openai_account(
+        credential_ref="session:" + ACCOUNT_ID,
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+    )
+    assert value.organization_id == OPENAI_ORG
+    assert loads(dumps(value)) == value
+    for org in (None, "org-short", "org-" + "a" * 65, "Org-Synthetic0123", "org-Synthetic_0123"):
+        with pytest.raises(DomainError):
+            openai_account(organization_id=org)
+    for kind in (
+        CredentialKind.API_KEY,
+        CredentialKind.MANUAL_BEARER,
+        CredentialKind.CONSOLE_SESSION,
+        CredentialKind.CODEX_AUTH_FILE,
+    ):
+        with pytest.raises(DomainError):
+            validate_credential_kind(ProviderId.OPENAI_PLATFORM, kind)
+    for provider in ProviderId:
+        if provider != ProviderId.OPENAI_PLATFORM:
+            with pytest.raises(DomainError):
+                validate_credential_kind(provider, CredentialKind.OPENAI_PLATFORM_SESSION)
+    resolved = ResolvedCredential(
+        ProviderId.OPENAI_PLATFORM,
+        CredentialKind.OPENAI_PLATFORM_SESSION,
+        "synthetic-session-value-0000",
+        "generation-1",
+        organization_id=OPENAI_ORG,
+    )
+    validate_credential_binding(ProviderId.OPENAI_PLATFORM, resolved)
+    with pytest.raises(DomainError):
+        replace(resolved, organization_id=None)
+    with pytest.raises(DomainError):
+        validate_credential_binding(ProviderId.CLAUDE_PLATFORM, resolved)
+    # Other providers never carry an OpenAI-shaped organization.
+    with pytest.raises(DomainError):
+        account(organization_id=OPENAI_ORG)
+
+
+def test_poll_floors_apply_to_saved_intervals_and_new_defaults():
+    assert openai_account().effective_poll_interval_seconds == 300
+    assert openai_account(poll_interval_seconds=900).effective_poll_interval_seconds == 900
+    assert account().effective_poll_interval_seconds == 180
+    assert default_poll_interval_seconds(ProviderId.OPENAI_PLATFORM) == 300
+    assert default_poll_interval_seconds(ProviderId.CLAUDE_SUBSCRIPTION) == 180
+    assert default_poll_interval_seconds(ProviderId.GROK_SUBSCRIPTION) == 60
+
+
+def test_organization_and_session_input_helpers():
+    assert claude_organization_id(CLAUDE_ORG) == CLAUDE_ORG
+    assert openai_organization_id(f"  {OPENAI_ORG}\n") == OPENAI_ORG
+    for value in (None, 7, CLAUDE_ORG.upper()):
+        with pytest.raises(DomainError):
+            claude_organization_id(value)
+    with pytest.raises(DomainError):
+        openai_organization_id("org-a b")
+    token = "sess-" + "A1b2C3d4" * 3
+    assert openai_session_key(f"  {token}\n") == token
+    assert openai_session_key("x" * 20) == "x" * 20
+    for value in (
+        None,
+        "x" * 19,
+        "x" * 4097,
+        f"Bearer {token}",
+        f"bearer{token}",
+        f"Cookie: a={token}",
+        f"sessionKey={token}",
+        f"__Secure-next-auth.session-token={token}",
+        f"Authorization: Bearer {token}",
+        token[:10] + " " + token[10:],
+        token[:10] + "\r\n" + token[10:],
+        json.dumps({"token": token}),
+        '{"log": {"entries": []}}',
+        token + "é",
+    ):
+        with pytest.raises(DomainError):
+            openai_session_key(value)
+
+
+def test_exact_money_bounds_rounding_and_round_trip():
+    value = ExactMoney(Decimal("17.3715455"), "USD")
+    assert value.rounded_to_cents() == (Decimal("17.37"), True)
+    assert value.format_cents() == "17.37 USD"
+    assert ExactMoney(Decimal("4.9"), "USD").rounded_to_cents() == (Decimal("4.90"), False)
+    # Half-even: ties go to the even cent.
+    assert ExactMoney(Decimal("0.125"), "USD").format_cents() == "0.12 USD"
+    assert ExactMoney(Decimal("0.135"), "USD").format_cents() == "0.14 USD"
+    assert ExactMoney(Decimal("-3.075"), "USD").format_cents() == "-3.08 USD"
+    assert ExactMoney(Decimal("1E+3"), "USD").format_cents() == "1000.00 USD"
+    assert ExactMoney(5, "USD").amount == Decimal(5)
+    assert format_two_decimals(Decimal("137.5")) == "137.50"
+    assert format_two_decimals(Decimal("1E-30")) == "0.00"
+    for amount in (
+        True,
+        1.5,
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("1E+100000"),
+        Decimal("1E-100000"),
+        "1" * 65,
+    ):
+        with pytest.raises(DomainError):
+            ExactMoney(amount, "USD")
+    for currency in ("usd", "US", "USDX", None):
+        with pytest.raises(DomainError):
+            ExactMoney(Decimal(1), currency)
+
+
+def test_metric_exact_balance_is_exclusive_and_serializable():
+    exact = ExactMoney(Decimal("3.0700000000000003"), "USD")
+    row = Metric(
+        MetricId.OPENAI_AVAILABLE_BALANCE, "OpenAI", MetricState.READY, SOURCE, exact_balance=exact
+    )
+    value = Snapshot(
+        ACCOUNT_ID,
+        (row,),
+        (),
+        FetchState.OK,
+        NOW,
+        fetched_at=NOW,
+        organization_id=OPENAI_ORG,
+    )
+    restored = loads(dumps(value))
+    assert restored == value
+    assert restored.metrics[0].exact_balance.amount == Decimal("3.0700000000000003")
+    assert json.loads(dumps(value))["value"]["metrics"][0]["exact_balance"] == {
+        "amount": "3.0700000000000003",
+        "currency": "USD",
+    }
+    for extra in (
+        {"quota": QuotaValue(used_percent=Decimal(1))},
+        {"balance": Money(1, "USD", 2)},
+        {"share_percent": Decimal(1)},
+        {"spent": Money(1, "USD", 2)},
+        {"spend_limit": Money(1, "USD", 2)},
+        {"credits": Decimal(1)},
+        {"unlimited": True},
+    ):
+        with pytest.raises(DomainError):
+            replace(row, **extra)
+    with pytest.raises(DomainError):
+        replace(row, exact_balance=Money(1, "USD", 2))
+    # Snapshots serialized before the field existed still load.
+    data = json.loads(dumps(snapshot()))
+    for metric in data["value"]["metrics"]:
+        metric.pop("exact_balance")
+    assert loads(json.dumps(data)) == snapshot()
+    # A hostile serialized amount is rejected, not expanded.
+    data = json.loads(dumps(value))
+    data["value"]["metrics"][0]["exact_balance"]["amount"] = "1E+999999999"
+    with pytest.raises(DomainError):
+        loads(json.dumps(data))
+
+
+def test_new_metric_ids_are_optional_extras():
+    required = {item for items in REQUIRED_METRIC_IDS.values() for item in items}
+    assert MetricId.CLAUDE_CREDIT_BALANCE == "claude.subscription.credit_balance"
+    assert MetricId.OPENAI_PAID_AVAILABLE_BALANCE == "openai.platform.paid_available_balance"
+    assert MetricId.CLAUDE_CREDIT_BALANCE not in required
+    assert MetricId.OPENAI_PAID_AVAILABLE_BALANCE not in required
+    assert REQUIRED_METRIC_IDS[ProviderId.OPENAI_PLATFORM] == (MetricId.OPENAI_AVAILABLE_BALANCE,)

@@ -11,7 +11,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation, localcontext
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
@@ -27,6 +27,7 @@ class ProviderId(StrEnum):
     CLAUDE_PLATFORM = "claude_platform"
     CODEX_SUBSCRIPTION = "codex_subscription"
     GROK_SUBSCRIPTION = "grok_subscription"
+    OPENAI_PLATFORM = "openai_platform"
 
 
 class CredentialKind(StrEnum):
@@ -34,6 +35,8 @@ class CredentialKind(StrEnum):
     GROK_AUTH_FILE = "grok_auth_file"
     CODEX_AUTH_FILE = "codex_auth_file"
     CONSOLE_SESSION = "console_session"
+    # platform.openai.com dashboard session key (``session.sensitive_id``).
+    OPENAI_PLATFORM_SESSION = "openai_platform_session"
     MANUAL_BEARER = "manual_bearer"
     API_KEY = "api_key"
 
@@ -47,8 +50,12 @@ class MetricId(StrEnum):
     CLAUDE_TOTAL_BALANCE = "claude.platform.total_balance"
     CODEX_WEEKLY = "codex.subscription.weekly"
     CODEX_FIVE_HOUR = "codex.subscription.five_hour"
+    OPENAI_AVAILABLE_BALANCE = "openai.platform.available_balance"
     # Optional extras, never required rows.
     CLAUDE_EXTRA_USAGE = "claude.subscription.extra_usage"
+    # Emitted only when the subscription account has an explicitly selected org.
+    CLAUDE_CREDIT_BALANCE = "claude.subscription.credit_balance"
+    OPENAI_PAID_AVAILABLE_BALANCE = "openai.platform.paid_available_balance"
     CODEX_CREDITS = "codex.subscription.credits"
     GROK_SHARED_POOL = "grok.subscription.shared_pool"
     GROK_BUILD = "grok.product.build"
@@ -73,6 +80,7 @@ REQUIRED_METRIC_IDS = MappingProxyType(
             MetricId.GROK_BUILD,
             MetricId.GROK_CHAT,
         ),
+        ProviderId.OPENAI_PLATFORM: (MetricId.OPENAI_AVAILABLE_BALANCE,),
     }
 )
 
@@ -92,8 +100,24 @@ READ_CREDENTIAL_KINDS = MappingProxyType(
                 CredentialKind.MANUAL_BEARER,
             }
         ),
+        ProviderId.OPENAI_PLATFORM: frozenset({CredentialKind.OPENAI_PLATFORM_SESSION}),
     }
 )
+
+# Providers whose only management kinds are their read kinds (no API-key records).
+_NO_API_KEY_PROVIDERS = frozenset({ProviderId.CODEX_SUBSCRIPTION, ProviderId.OPENAI_PLATFORM})
+
+# Provider polling floors apply to saved accounts at runtime; the default is the
+# initial interval for a newly added account.
+POLL_FLOOR_SECONDS = MappingProxyType(
+    {ProviderId.CLAUDE_SUBSCRIPTION: 180, ProviderId.OPENAI_PLATFORM: 300}
+)
+DEFAULT_POLL_INTERVAL_SECONDS = 60
+
+
+def default_poll_interval_seconds(provider: ProviderId) -> int:
+    """The initial interval for a new account: the provider floor, else 60 seconds."""
+    return max(DEFAULT_POLL_INTERVAL_SECONDS, POLL_FLOOR_SECONDS.get(provider, 0))
 
 
 class MetricState(StrEnum):
@@ -221,11 +245,77 @@ def new_account_id() -> str:
     return str(uuid4())
 
 
+_CANONICAL_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+# Local format assumption (no sourced regex): ``org-`` plus an alphanumeric ID.
+_OPENAI_ORGANIZATION = re.compile(r"org-[A-Za-z0-9]{8,64}")
+
+
 def _organization(value: str | None) -> str | None:
     if value is not None and (
-        not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,64}", value)
+        not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,68}", value)
     ):
         _fail()
+    return value
+
+
+def _provider_organization(provider: ProviderId, value: str | None) -> None:
+    """Organization rules per provider: optional, required or forbidden."""
+    if provider == ProviderId.OPENAI_PLATFORM:
+        if not isinstance(value, str) or not _OPENAI_ORGANIZATION.fullmatch(value):
+            _fail()
+    elif value is None:
+        return
+    elif provider == ProviderId.CLAUDE_PLATFORM:
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,64}", value):
+            _fail()
+    elif provider == ProviderId.CLAUDE_SUBSCRIPTION:
+        if not _CANONICAL_UUID.fullmatch(value):
+            _fail()
+    else:
+        _fail()
+
+
+def claude_organization_id(value: object) -> str:
+    """A Claude subscription organization: a lowercase canonical UUID."""
+    if not isinstance(value, str) or not _CANONICAL_UUID.fullmatch(value):
+        raise DomainError("Invalid organization ID.")
+    return value
+
+
+def openai_organization_id(value: object) -> str:
+    """An OpenAI Platform organization ID, ``org-`` plus 8..64 ASCII letters/digits.
+
+    Surrounding whitespace is removed; nothing else is altered.
+    """
+    if isinstance(value, str):
+        value = value.strip()
+    if not isinstance(value, str) or not _OPENAI_ORGANIZATION.fullmatch(value):
+        raise DomainError("Invalid organization ID.")
+    return value
+
+
+OPENAI_SESSION_MIN_LENGTH = 20
+OPENAI_SESSION_MAX_LENGTH = 4096
+
+
+def openai_session_key(value: object) -> str:
+    """Accept only a bare dashboard session token value.
+
+    Surrounding whitespace is removed; internal whitespace/controls, a ``Bearer``
+    prefix, header text (``Cookie:``/``Authorization:``), a cookie ``name=value``
+    pair, JSON/HAR-looking input and out-of-range lengths are rejected. No ``sess-`` prefix is required.
+    """
+    if not isinstance(value, str) or len(value) > 2 * OPENAI_SESSION_MAX_LENGTH:
+        raise DomainError("Invalid session key.")
+    value = value.strip()
+    lowered = value.lower()
+    if (
+        not OPENAI_SESSION_MIN_LENGTH <= len(value) <= OPENAI_SESSION_MAX_LENGTH
+        or any(not 0x21 <= ord(char) <= 0x7E for char in value)
+        or lowered.startswith(("bearer", "cookie:", "authorization:"))
+        or any(char in '{}[]"\\,;:<>=' for char in value)
+    ):
+        raise DomainError("Invalid session key.")
     return value
 
 
@@ -328,7 +418,7 @@ def validate_credential_kind(
     provider = _enum(ProviderId, provider)
     kind = _enum(CredentialKind, kind)
     allowed = READ_CREDENTIAL_KINDS[provider]
-    if not for_read and provider != ProviderId.CODEX_SUBSCRIPTION:
+    if not for_read and provider not in _NO_API_KEY_PROVIDERS:
         allowed = allowed | {CredentialKind.API_KEY}
     if kind not in allowed:
         raise DomainError("Credential kind is not supported by this provider.")
@@ -365,16 +455,12 @@ class Account:
             _text(self.credential_selector, maximum=1024)
             if self.provider != ProviderId.GROK_SUBSCRIPTION:
                 _fail()
-        _organization(self.organization_id)
-        if self.organization_id is not None and self.provider != ProviderId.CLAUDE_PLATFORM:
-            _fail()
+        _provider_organization(self.provider, self.organization_id)
 
     @property
     def effective_poll_interval_seconds(self) -> int:
         """Runtime cadence; preserve saved preferences without rewriting config."""
-        if self.provider == ProviderId.CLAUDE_SUBSCRIPTION:
-            return max(180, self.poll_interval_seconds)
-        return self.poll_interval_seconds
+        return max(POLL_FLOOR_SECONDS.get(self.provider, 0), self.poll_interval_seconds)
 
     def to_dict(self) -> dict[str, Any]:
         return _encode(self)
@@ -408,6 +494,50 @@ class Money:
         if self.exponent:
             digits = digits[: -self.exponent] + "." + digits[-self.exponent :]
         return f"{'-' if self.minor < 0 else ''}{digits} {self.currency}"
+
+
+_CENT = Decimal("0.01")
+
+
+def round_to_cents(value: Decimal) -> Decimal:
+    """Round an exact bounded amount half-even to two decimal places (display only)."""
+    value = credit_amount(value)
+    with localcontext() as context:
+        # credit_amount bounds digits and exponent, so this precision is exact.
+        context.prec = 2 * (_MAX_CREDIT_DIGITS + _MAX_CREDIT_EXPONENT) + 4
+        return value.quantize(_CENT, rounding=ROUND_HALF_EVEN)
+
+
+def format_two_decimals(value: Decimal) -> str:
+    """Half-even rounded, always two decimals, plain notation (e.g. ``137.50``)."""
+    return f"{round_to_cents(value):f}"
+
+
+@dataclass(frozen=True, slots=True)
+class ExactMoney:
+    """An exact provider money amount whose minor-unit scale is not reported.
+
+    ``amount`` keeps the wire value (bounded like ``credit_amount``; zero and
+    negative allowed). Presentation rounds to cents; data never does.
+    """
+
+    amount: Decimal
+    currency: str
+
+    def __post_init__(self) -> None:
+        if type(self.amount) not in (Decimal, int, str):
+            _fail()
+        object.__setattr__(self, "amount", credit_amount(self.amount))
+        if not isinstance(self.currency, str) or not re.fullmatch(r"[A-Z]{3}", self.currency):
+            _fail()
+
+    def rounded_to_cents(self) -> tuple[Decimal, bool]:
+        """The half-even cents value and whether rounding changed the amount."""
+        rounded = round_to_cents(self.amount)
+        return rounded, rounded != self.amount
+
+    def format_cents(self) -> str:
+        return f"{format_two_decimals(self.amount)} {self.currency}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,6 +626,8 @@ class Metric:
     credits: Decimal | None = None
     # The source positively reported "no cap / unlimited".
     unlimited: bool = False
+    # Exact money without a reported minor-unit scale; exclusive with every other value.
+    exact_balance: ExactMoney | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.id)
@@ -548,6 +680,22 @@ class Metric:
         if type(self.unlimited) is not bool:
             _fail()
         if self.unlimited and (self.spend_limit is not None or self.credits is not None):
+            _fail()
+        if self.exact_balance is not None and (
+            not isinstance(self.exact_balance, ExactMoney)
+            or self.unlimited
+            or any(
+                item is not None
+                for item in (
+                    self.quota,
+                    self.balance,
+                    self.share_percent,
+                    self.spent,
+                    self.spend_limit,
+                    self.credits,
+                )
+            )
+        ):
             _fail()
         object.__setattr__(self, "reset_at", _optional_time(self.reset_at))
         object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
@@ -615,9 +763,7 @@ class ResolvedCredential:
         elif self.codex_account_id is not None:
             _fail()
         object.__setattr__(self, "expires_at", _optional_time(self.expires_at))
-        _organization(self.organization_id)
-        if self.organization_id is not None and self.provider != ProviderId.CLAUDE_PLATFORM:
-            _fail()
+        _provider_organization(self.provider, self.organization_id)
 
 
 def validate_credential_binding(provider: ProviderId, credential: ResolvedCredential) -> None:
@@ -680,7 +826,17 @@ class Snapshot:
             raise DomainError("Invalid serialized snapshot.") from None
 
 
-_SERIALIZABLE = (Account, Money, QuotaValue, SourceRef, Grant, Metric, Diagnostic, Snapshot)
+_SERIALIZABLE = (
+    Account,
+    Money,
+    ExactMoney,
+    QuotaValue,
+    SourceRef,
+    Grant,
+    Metric,
+    Diagnostic,
+    Snapshot,
+)
 
 
 def _encode(value: Any) -> Any:
@@ -746,6 +902,7 @@ def _metric_from_dict(value: Any) -> Metric:
             ("balance", Money),
             ("spent", Money),
             ("spend_limit", Money),
+            ("exact_balance", ExactMoney),
         ):
             if data.get(name) is not None:
                 data[name] = _construct(cls, data[name])

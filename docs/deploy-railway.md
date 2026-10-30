@@ -128,7 +128,8 @@ Codex 0.165.0 的源码依赖图包含已修复的 rustls-webpki，但原生程�
   （`~/.grok/auth.json`）。这些文件由各官方 CLI 写在卷上的 `HOME` 里。网页里选“默认位置”
   即可；自定义路径必须是规范化的绝对路径，文件名为 `auth.json`（Claude 为
   `.credentials.json`），且是属于服务进程用户（容器里是 root）、权限 `0600` 的普通文件。
-- 无法**持久保存**：**Claude Platform（Console session）** 以及任何手动密钥。持久存储
+- 无法**持久保存**：**Claude Platform（Console session）**、**OpenAI Platform（dashboard
+  session key）** 以及任何手动密钥。持久存储
   要求受支持的 keyring；没有时 CLI 和 API 都会如实失败（API 返回
   `secure_store_unavailable`，不会悄悄降级），网页里的“加密保存到服务器系统密钥环”
   选项也会被禁用。
@@ -137,6 +138,12 @@ Codex 0.165.0 的源码依赖图包含已修复的 rustls-webpki，但原生程�
   存储方式选 **仅本次会话**。这个 `sessionKey` 只保存在 `serve` 进程内存中，
   **每次重启或重新部署都会丢失**；之后该账号显示“会话凭据已丢失”，在网页里编辑该
   账号重新输入即可。其余代价（高敏感度会话、Console 会话过期、keepalive 不覆盖）见第 8 步。
+- **OpenAI Platform 同理只能用仅本次会话**：在网页账号管理里添加 OpenAI Platform 账号，
+  填写组织 ID（`org-…`，在 platform.openai.com 设置页查看，本项目不做组织发现），阅读
+  高敏感度警告后只粘贴 dashboard session key 的值（不是 `sk-…` API key），存储方式选
+  **仅本次会话**。它同样**每次重启或重新部署都会丢失**，而且官方会话本身几天内就会过期、
+  本项目无法刷新，需要重新粘贴。该 key 拥有 dashboard 的完整权限（账单、购买、创建 API key），
+  风险高于 Console 会话；本项目只用它发一个只读 GET（见 PLAN.md §20.7）。keepalive 不覆盖它。
 - 一进程模式（`usage --api …`，TUI 与 API 同进程）仍可作为替代：在 TUI 的账号管理里
   选择 **Session only — lost on exit**，效果相同。两个进程之间不共享 session-only 凭据。
 - 本项目的读取进程从不刷新令牌。官方 CLI 只有在被运行时才会自己续期；在所查看的源码

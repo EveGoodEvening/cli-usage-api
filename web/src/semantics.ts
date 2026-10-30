@@ -2,7 +2,7 @@
 // TUI already settled a rule (labels, Grok aggregate naming, nesting, hoisting).
 
 import type { AccountView, Dashboard, FetchState, Metric, ProviderId, Snapshot } from "./types";
-import { overagePercent, parseTime } from "./format";
+import { exactMoneyCents, overagePercent, parseTime } from "./format";
 
 export const METRIC_LABELS: Record<string, string> = {
   "claude.subscription.five_hour": "Claude 5h 用量",
@@ -14,6 +14,9 @@ export const METRIC_LABELS: Record<string, string> = {
   "codex.subscription.weekly": "Codex weekly (7d)",
   "codex.subscription.five_hour": "Codex 5h",
   "codex.subscription.credits": "Codex credits",
+  "claude.subscription.credit_balance": "Claude 已购 credits 余额",
+  "openai.platform.available_balance": "OpenAI 可用余额",
+  "openai.platform.paid_available_balance": "OpenAI 付费余额",
   "grok.subscription.shared_pool": "Grok 共享池",
   "grok.product.build": "GrokBuild",
   "grok.product.chat": "GrokChat",
@@ -63,6 +66,7 @@ export const REQUIRED_METRICS: Record<ProviderId, string[]> = {
     "grok.product.build",
     "grok.product.chat",
   ],
+  openai_platform: ["openai.platform.available_balance"],
 };
 
 export const PROVIDERS: Record<ProviderId, { name: string; short: string; mark: string }> = {
@@ -70,6 +74,7 @@ export const PROVIDERS: Record<ProviderId, { name: string; short: string; mark: 
   claude_platform: { name: "Claude Platform", short: "Platform", mark: "Pl" },
   codex_subscription: { name: "Codex 订阅", short: "Codex", mark: "Cx" },
   grok_subscription: { name: "Grok 订阅", short: "Grok", mark: "Gk" },
+  openai_platform: { name: "OpenAI Platform", short: "OpenAI", mark: "OA" },
 };
 
 export const PROVIDER_ORDER: ProviderId[] = [
@@ -77,6 +82,7 @@ export const PROVIDER_ORDER: ProviderId[] = [
   "claude_platform",
   "codex_subscription",
   "grok_subscription",
+  "openai_platform",
 ];
 
 export function providerInfo(provider: string) {
@@ -107,6 +113,7 @@ export const CREDENTIAL_LABELS: Record<string, string> = {
   grok_auth_file: "Grok 登录文件",
   codex_auth_file: "Codex 登录文件",
   console_session: "Console 会话",
+  openai_platform_session: "OpenAI Platform 会话密钥",
   manual_bearer: "手动令牌",
   api_key: "API key",
 };
@@ -149,6 +156,8 @@ export function metricLabel(metric: Metric): string {
 export type MetricValue =
   | { kind: "missing"; text: string }
   | { kind: "balance" }
+  /** Exact money shown rounded half-even to cents; `changed` when rounding altered it. */
+  | { kind: "exact"; text: string; changed: boolean; negative: boolean }
   | { kind: "share"; used: string }
   | { kind: "credits"; amount: string }
   | { kind: "unlimited" }
@@ -166,6 +175,11 @@ export function metricValue(metric: Metric): MetricValue {
     return { kind: "missing", text: STATE_TEXT[metric.state] ?? "未知" };
   }
   if (metric.balance) return { kind: "balance" };
+  if (metric.exact_balance) {
+    const cents = exactMoneyCents(metric.exact_balance);
+    if (cents) return { kind: "exact", ...cents, negative: cents.text.startsWith("-") };
+    return { kind: "missing", text: "未知" };
+  }
   if (metric.share_percent !== null) return { kind: "share", used: metric.share_percent };
   // Credits are a non-currency balance: shown as "<n> credits", never as money.
   if (metric.credits != null) return { kind: "credits", amount: metric.credits };

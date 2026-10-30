@@ -409,3 +409,9 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   consumers exclude it via `PARSE_ONLY_METRIC_IDS`, a deliberate exception to the
   "extras stay visible" rule; do not drop it in the provider. The prepaid balance is
   a separate endpoint, so never derive it from cap minus spend.
+- Write endpoints can share a read path: OpenAI's POST `credit_grants` buys credits and
+  Claude's `contracts/prepaid/credits` purchases, so allowlist method and exact path.
+  OpenAI signals session expiry by `error.code == "expired_session_key"`, not only 401.
+  Claude's `/api/oauth/profile` returns one organization (discovery still needs explicit
+  confirmation); its prepaid-credits read sends `x-organization-uuid` and no
+  `anthropic-beta`. Round money only at display; label width drives TUI reset tiers.

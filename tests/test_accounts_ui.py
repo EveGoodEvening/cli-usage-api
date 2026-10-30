@@ -141,6 +141,43 @@ async def test_replace_secret_requires_confirmation_and_old_value_never_prefille
         assert not manager.credential_store._session
 
 
+async def test_delete_key_keeps_required_openai_organization(manager):
+    """`k` on an OpenAI Platform account removes the session secret and keeps the
+    required nonsecret organization instead of crashing the dashboard."""
+    account_id = str(uuid4())
+    ref = manager.credential_store.put(
+        account_id, "synthetic-openai-session-0000000", persist=False
+    )
+    account = Account(
+        id=account_id,
+        provider=ProviderId.OPENAI_PLATFORM,
+        label="Synthetic OpenAI",
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+        credential_ref=ref,
+        organization_id="org-Synthetic0001",
+        poll_interval_seconds=300,
+    )
+    manager.account_store.save((account,))
+    changes = []
+    manager.on_changed = changes.append
+    app = Host(manager)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("k")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, ConfirmDialog)
+        await pilot.click("#confirm")
+        await pilot.pause()
+        assert pilot.app.screen is manager
+        saved = manager.accounts[0]
+        assert saved.credential_ref is None and saved.credential_kind is None
+        assert saved.organization_id == "org-Synthetic0001"
+        assert manager.account_store.load() == (saved,)
+        assert not manager.credential_store._session
+        assert len(changes) == 1
+    assert app.return_code in (None, 0)
+
+
 async def test_console_discovery_explicit_selection_and_temporary_cleanup(manager):
     class Discovery:
         calls = 0
@@ -356,7 +393,12 @@ async def test_service_failure_clears_input_and_redacts_error(manager, monkeypat
 
 
 @pytest.mark.parametrize(
-    "provider", [provider for provider in ProviderId if provider != ProviderId.CODEX_SUBSCRIPTION]
+    "provider",
+    [
+        provider
+        for provider in ProviderId
+        if provider not in (ProviderId.CODEX_SUBSCRIPTION, ProviderId.OPENAI_PLATFORM)
+    ],
 )
 async def test_api_key_storage_never_discovers_or_implies_reads(manager, provider):
     class ForbiddenDiscovery:
@@ -887,3 +929,321 @@ async def test_form_rejects_new_reference_with_wrong_basename(manager, tmp_path)
         await pilot.pause()
         assert "absolute path to auth.json" in str(form.query_one("#form-status", Static).render())
         assert manager.account_store.load() == ()
+
+
+CLAUDE_ORG = "3f2c1b0a-9d8e-4f7a-8b6c-5d4e3f2a1b0c"
+OTHER_CLAUDE_ORG = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+OPENAI_SESSION = "sess-" + "Synthetic0" * 3
+
+
+class ProfileDiscovery:
+    """A synthetic Claude profile read: one organization, as the real profile reports."""
+
+    def __init__(self, choices=((CLAUDE_ORG, "Synthetic Org"),)):
+        self.calls = []
+        self.choices = tuple(OrganizationChoice(*choice) for choice in choices)
+
+    async def __call__(self, credential):
+        self.calls.append(credential)
+        return self.choices
+
+
+def subscription_manager(manager, discovery):
+    return AccountManagerScreen(
+        manager.account_store,
+        manager.credential_store,
+        manager.resolver,
+        {ProviderId.CLAUDE_SUBSCRIPTION: discovery},
+    )
+
+
+async def test_claude_credits_discovery_never_auto_selects_a_singleton(manager):
+    discovery = ProfileDiscovery()
+    manager = subscription_manager(manager, discovery)
+    async with Host(manager).run_test() as pilot:
+        form = await open_form(pilot.app, pilot)
+        await set_source(form, pilot, ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.MANUAL_BEARER)
+        help_text = form.query_one("#credits-help", Static)
+        assert help_text.display and "read-only" in str(help_text.render())
+        assert form.query_one("#credits-organization", Select).display
+        button = form.query_one("#discover")
+        assert button.display and "prepaid credits" in str(button.label)
+        assert not form.query_one("#organization", Select).display
+        form.query_one("#secret", Input).value = "synthetic-claude-bearer"
+        await pilot.pause()
+        assert discovery.calls == []
+        await form.discover()
+        await pilot.pause()
+        # The typed bearer reached discovery only through a temporary session ref,
+        # and the profile read is unscoped.
+        assert len(discovery.calls) == 1
+        assert discovery.calls[0].secret == "synthetic-claude-bearer"
+        assert discovery.calls[0].organization_id is None
+        assert not manager.credential_store._session
+        assert manager.account_store.load() == ()
+        select = form.query_one("#credits-organization", Select)
+        assert select.value is Select.NULL
+        status = str(form.query_one("#form-status", Static).render())
+        assert "Nothing was selected" in status
+        # Saving without choosing keeps no organization: a single choice is not consent.
+        await form.save()
+        await pilot.pause()
+        assert manager.accounts[0].organization_id is None
+        assert len(discovery.calls) == 1
+
+
+async def test_claude_credits_explicit_select_edit_keep_and_clear(manager):
+    discovery = ProfileDiscovery()
+    manager = subscription_manager(manager, discovery)
+    async with Host(manager).run_test() as pilot:
+        form = await open_form(pilot.app, pilot)
+        await set_source(form, pilot, ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.MANUAL_BEARER)
+        form.query_one("#secret", Input).value = "synthetic-claude-bearer"
+        await pilot.pause()
+        await form.discover()
+        await pilot.pause()
+        form.query_one("#credits-organization", Select).value = CLAUDE_ORG
+        await form.save()
+        await pilot.pause()
+        saved = manager.accounts[0]
+        assert saved.organization_id == CLAUDE_ORG
+        assert saved.poll_interval_seconds == 180
+        assert manager.credential_store.get(saved.credential_ref) == "synthetic-claude-bearer"
+        # A rename keeps the saved organization without another discovery.
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        assert form.query_one("#secret", Input).value == ""
+        form.query_one("#label", Input).value = "Renamed"
+        await form.save()
+        await pilot.pause()
+        assert manager.accounts[0].organization_id == CLAUDE_ORG
+        assert len(discovery.calls) == 1
+        # Explicitly choosing no organization stops the credits read.
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        form.query_one("#credits-organization", Select).value = "none"
+        await form.save()
+        await pilot.pause()
+        assert manager.accounts[0].organization_id is None
+        assert manager.accounts[0].label == "Renamed"
+
+
+async def test_claude_credits_login_change_requires_new_explicit_selection(manager):
+    discovery = ProfileDiscovery(((OTHER_CLAUDE_ORG, "Other"),))
+    manager = subscription_manager(manager, discovery)
+    account_id = str(uuid4())
+    saved = Account(
+        account_id,
+        ProviderId.CLAUDE_SUBSCRIPTION,
+        "Synthetic",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref=manager.credential_store.put(account_id, "synthetic-old", persist=False),
+        organization_id=CLAUDE_ORG,
+    )
+    manager.account_store.save((saved,))
+    async with Host(manager).run_test() as pilot:
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        form.query_one("#secret", Input).value = "synthetic-new"
+        await pilot.pause()
+        await form.save()
+        await pilot.pause()
+        # The old organization is never silently carried to a new login.
+        assert isinstance(pilot.app.screen, AccountForm)
+        assert "again" in str(form.query_one("#form-status", Static).render())
+        assert form.query_one("#secret", Input).value == ""
+        assert manager.account_store.load() == (saved,)
+        form.query_one("#secret", Input).value = "synthetic-new"
+        await pilot.pause()
+        await form.discover()
+        await pilot.pause()
+        assert discovery.calls[0].secret == "synthetic-new"
+        form.query_one("#credits-organization", Select).value = OTHER_CLAUDE_ORG
+        await form.save()
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, ConfirmDialog)
+        await pilot.click("#confirm")
+        await pilot.pause()
+        updated = manager.accounts[0]
+        assert updated.organization_id == OTHER_CLAUDE_ORG
+        assert manager.credential_store.get(updated.credential_ref) == "synthetic-new"
+
+
+async def test_claude_credits_discovery_unavailable_or_failing_is_redacted(manager):
+    class Failing:
+        async def __call__(self, _credential):
+            raise RuntimeError("synthetic-SECRET profile body")
+
+    # A legacy host passes only the Console callable: no subscription discovery.
+    legacy = AccountManagerScreen(
+        manager.account_store,
+        manager.credential_store,
+        manager.resolver,
+        Failing(),
+    )
+    assert legacy.discovery_for(ProviderId.CLAUDE_SUBSCRIPTION) is None
+    assert legacy.discovery_for(ProviderId.CLAUDE_PLATFORM) is not None
+    mapped = subscription_manager(manager, Failing())
+    assert mapped.discovery_for(ProviderId.CLAUDE_PLATFORM) is None
+    assert mapped.discovery_for(ProviderId.OPENAI_PLATFORM) is None
+    for host_manager, expected in ((legacy, "unavailable"), (mapped, "Discovery failed")):
+        async with Host(host_manager).run_test() as pilot:
+            form = await open_form(pilot.app, pilot)
+            await set_source(
+                form, pilot, ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.MANUAL_BEARER
+            )
+            form.query_one("#secret", Input).value = "synthetic-claude-bearer"
+            await pilot.pause()
+            await form.discover()
+            await pilot.pause()
+            status = str(form.query_one("#form-status", Static).render())
+            assert expected in status and "synthetic-SECRET" not in status
+            assert not host_manager.credential_store._session
+            assert host_manager.account_store.load() == ()
+
+
+async def test_claude_credits_selection_hidden_without_a_read_credential(manager):
+    async with Host(manager).run_test() as pilot:
+        form = await open_form(pilot.app, pilot)
+        await set_source(form, pilot, ProviderId.CLAUDE_SUBSCRIPTION, CredentialKind.API_KEY)
+        assert not form.query_one("#credits-organization", Select).display
+        assert not form.query_one("#discover").display
+        await set_source(form, pilot, ProviderId.GROK_SUBSCRIPTION, CredentialKind.MANUAL_BEARER)
+        assert not form.query_one("#credits-organization", Select).display
+
+
+@pytest.mark.parametrize("size", [(80, 24), (40, 12)])
+async def test_openai_session_warning_visible_before_secret_entry(manager, size):
+    async with Host(manager).run_test(size=size) as pilot:
+        form = await open_form(pilot.app, pilot)
+        warning = form.query_one("#openai-session-warning", Static)
+        assert not warning.display
+        form.query_one("#provider", Select).value = ProviderId.OPENAI_PLATFORM
+        await pilot.pause()
+        # The only kind is preselected, so the warning precedes any secret entry.
+        assert form.query_one("#kind", Select).value == CredentialKind.OPENAI_PLATFORM_SESSION
+        assert form.query_one("#secret", Input).value == ""
+        assert warning.display and warning.visible
+        assert not form.query_one("#session-warning", Static).display
+        assert not form.query_one("#discover").display
+        warning.scroll_visible(animate=False)
+        await pilot.pause()
+        assert warning.region.overlaps(form.region)
+        secret = form.query_one("#secret", Input)
+        assert form.query_one("#openai-organization", Input).display
+        widgets = list(form.query("*"))
+        assert widgets.index(warning) < widgets.index(secret)
+        text = str(warning.render())
+        for required in (
+            "High-sensitivity",
+            "platform.openai.com dashboard session key",
+            "full dashboard access",
+            "billing",
+            "API keys",
+            "password",
+            "Cookie",
+            "Authorization",
+            "HAR",
+            "expires within days",
+            "OS store",
+            "session only",
+            "read-only GET",
+            "sk-",
+        ):
+            assert required in text
+        form.query_one("#kind", Select).value = "none"
+        await pilot.pause()
+        assert not warning.display
+
+
+async def test_openai_add_requires_valid_org_and_session_then_saves(manager):
+    async with Host(manager).run_test() as pilot:
+        form = await open_form(pilot.app, pilot)
+        form.query_one("#provider", Select).value = ProviderId.OPENAI_PLATFORM
+        await pilot.pause()
+        kinds = [value for _label, value in AccountForm._kinds(ProviderId.OPENAI_PLATFORM)]
+        assert kinds == ["none", CredentialKind.OPENAI_PLATFORM_SESSION]
+        secret = form.query_one("#secret", Input)
+        organization = form.query_one("#openai-organization", Input)
+        status = form.query_one("#form-status", Static)
+        assert secret.password
+        for bad_org in ("", "org-short", "Org-Synthetic01", "org-Synthetic01!", "sk-abc12345678"):
+            organization.value = bad_org
+            secret.value = OPENAI_SESSION
+            await pilot.pause()
+            await form.save()
+            await pilot.pause()
+            assert "organization ID" in str(status.render())
+            assert secret.value == ""
+        organization.value = "  org-Synthetic01  "
+        for bad_secret in ("sk-proj-" + "a" * 40, "Bearer " + OPENAI_SESSION, "Cookie: a=b"):
+            secret.value = bad_secret
+            await pilot.pause()
+            await form.save()
+            await pilot.pause()
+            text = str(status.render())
+            assert "session key" in text and bad_secret not in text
+            assert secret.value == ""
+        assert manager.account_store.load() == ()
+        assert not manager.credential_store._session
+        secret.value = f"  {OPENAI_SESSION}  "
+        await pilot.pause()
+        await form.save()
+        await pilot.pause()
+        assert pilot.app.screen is manager
+        saved = manager.accounts[0]
+        assert saved.provider == ProviderId.OPENAI_PLATFORM
+        assert saved.credential_kind == CredentialKind.OPENAI_PLATFORM_SESSION
+        assert saved.organization_id == "org-Synthetic01"
+        assert saved.poll_interval_seconds == 300
+        assert saved.credential_ref.startswith("session:")
+        assert manager.credential_store.get(saved.credential_ref) == OPENAI_SESSION
+        config = manager.account_store.path.read_text()
+        assert OPENAI_SESSION not in config
+
+
+async def test_openai_org_edit_invalidates_without_replacing_secret(manager):
+    calls = []
+
+    def changed(updated, invalidate=None):
+        calls.append(invalidate)
+
+    manager.on_changed = changed
+    account_id = str(uuid4())
+    ref = manager.credential_store.put(account_id, OPENAI_SESSION, persist=False)
+    saved = Account(
+        account_id,
+        ProviderId.OPENAI_PLATFORM,
+        "Synthetic",
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+        credential_ref=ref,
+        organization_id="org-Synthetic01",
+        poll_interval_seconds=300,
+    )
+    manager.account_store.save((saved,))
+    async with Host(manager).run_test() as pilot:
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        assert form.query_one("#openai-organization", Input).value == "org-Synthetic01"
+        assert form.query_one("#secret", Input).value == ""
+        form.query_one("#label", Input).value = "Renamed"
+        await form.save()
+        await pilot.pause()
+        assert calls[-1] == frozenset()
+        await pilot.press("e")
+        await pilot.pause()
+        form = pilot.app.screen
+        form.query_one("#openai-organization", Input).value = "org-Synthetic02"
+        await pilot.pause()
+        await form.save()
+        await pilot.pause()
+        # No confirmation is needed: the stored secret is kept, only observations reset.
+        assert pilot.app.screen is manager
+        assert manager.accounts[0].organization_id == "org-Synthetic02"
+        assert manager.accounts[0].credential_ref == ref
+        assert manager.credential_store.get(ref) == OPENAI_SESSION
+        assert calls[-1] == frozenset({saved.id})

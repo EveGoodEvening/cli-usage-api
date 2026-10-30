@@ -10,6 +10,7 @@ from cli_usage_api.providers.claude import ClaudeProvider
 from cli_usage_api.providers.codex import CodexProvider
 from cli_usage_api.providers.console import ConsoleProvider
 from cli_usage_api.providers.grok import GrokProvider
+from cli_usage_api.providers.openai_platform import OpenAIPlatformProvider
 from cli_usage_api.transport import Transport
 
 
@@ -41,4 +42,5 @@ def build_providers(
         ProviderId.CLAUDE_PLATFORM: ConsoleProvider(transport),
         ProviderId.CODEX_SUBSCRIPTION: CodexProvider(transport),
         ProviderId.GROK_SUBSCRIPTION: GrokProvider(transport),
+        ProviderId.OPENAI_PLATFORM: OpenAIPlatformProvider(transport),
     }

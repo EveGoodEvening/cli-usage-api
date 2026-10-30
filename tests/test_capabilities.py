@@ -23,6 +23,7 @@ from cli_usage_api.providers import (
     CodexProvider,
     ConsoleProvider,
     GrokProvider,
+    OpenAIPlatformProvider,
     Provider,
     build_providers,
 )
@@ -40,6 +41,7 @@ ADAPTERS = {
     ProviderId.CLAUDE_PLATFORM: ConsoleProvider,
     ProviderId.CODEX_SUBSCRIPTION: CodexProvider,
     ProviderId.GROK_SUBSCRIPTION: GrokProvider,
+    ProviderId.OPENAI_PLATFORM: OpenAIPlatformProvider,
 }
 
 
@@ -63,7 +65,8 @@ def test_registry_construction_accesses_no_dependencies():
 @pytest.mark.parametrize("provider_id", list(ProviderId))
 async def test_registered_adapters_keep_required_rows_without_credentials(provider_id):
     providers = build_providers(ForbiddenAccess(), ForbiddenAccess())
-    account = replace(ACCOUNT, provider=provider_id)
+    organization = "org-SyntheticOrg0001" if provider_id == ProviderId.OPENAI_PLATFORM else None
+    account = replace(ACCOUNT, provider=provider_id, organization_id=organization)
     snapshot = await providers[provider_id].fetch(account, None, NOW)
     assert snapshot.fetch_state == FetchState.AUTH_REQUIRED
     assert tuple(row.id for row in snapshot.metrics) == REQUIRED_METRIC_IDS[provider_id]

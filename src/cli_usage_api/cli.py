@@ -17,9 +17,11 @@ from cli_usage_api import api as api_server
 from cli_usage_api import debuglog, keepalive
 from cli_usage_api.accounts import (
     CONSOLE_SESSION_WARNING,
+    CREDITS_ORGANIZATION_HELP,
     FILE_KINDS,
     GUIDANCE,
     KINDS,
+    OPENAI_SESSION_WARNING,
     AccountFlowError,
     AccountService,
     allowed_kinds,
@@ -35,10 +37,13 @@ from cli_usage_api.credentials import (
     _read_file,
 )
 from cli_usage_api.domain import (
+    READ_CREDENTIAL_KINDS,
     Account,
     CredentialKind,
     DomainError,
     ProviderId,
+    default_poll_interval_seconds,
+    openai_organization_id,
     sanitize_text,
 )
 from cli_usage_api.operations import AccountOperations
@@ -62,7 +67,20 @@ PROVIDER_NAMES = {
     "claude-platform": ProviderId.CLAUDE_PLATFORM,
     "codex-subscription": ProviderId.CODEX_SUBSCRIPTION,
     "grok-subscription": ProviderId.GROK_SUBSCRIPTION,
+    "openai-platform": ProviderId.OPENAI_PLATFORM,
 }
+
+# Explicit, read-only organization discovery per provider (never during polling).
+_DISCOVERY_PROVIDERS = (ProviderId.CLAUDE_PLATFORM, ProviderId.CLAUDE_SUBSCRIPTION)
+_HIGH_SENSITIVITY_WARNINGS = {
+    CredentialKind.CONSOLE_SESSION: CONSOLE_SESSION_WARNING,
+    CredentialKind.OPENAI_PLATFORM_SESSION: OPENAI_SESSION_WARNING,
+}
+_SECURE_STORE_REQUIRED = (
+    "CLI secrets require encrypted OS-keyring persistence, which is unavailable; no secret "
+    "was requested and no changes were made. Unlock the keyring, or use the TUI (usage, "
+    "then Accounts) for explicit session-only mode."
+)
 
 
 # AccountFlowError codes: exit 2 (config/conflict) and the keyring hint set match
@@ -104,6 +122,11 @@ class LiveFactory:
         self.transport = Transport()
         self.providers = build_providers(self.transport, self.resolver)
         self.console_discovery = self.providers[ProviderId.CLAUDE_PLATFORM].discover_organizations
+        # Per-provider explicit discovery, the shape AccountManagerScreen accepts.
+        self.organization_discovery = {
+            provider: self.providers[provider].discover_organizations
+            for provider in _DISCOVERY_PROVIDERS
+        }
         self._schedulers: list[Scheduler] = []
         self._closed = False
 
@@ -313,10 +336,14 @@ def _choose(prompt: str, choices: list[tuple[str, object]]):
     return choices[int(value) - 1][1]
 
 
-def _secret(kind: CredentialKind) -> str:
+def _secret(kind: CredentialKind, credentials: CredentialStore) -> str:
     _tty()
-    if kind == CredentialKind.CONSOLE_SESSION:
-        print(CONSOLE_SESSION_WARNING)
+    if not credentials.secure_available():
+        # Never collect a secret the CLI cannot persist; no session-only CLI fallback.
+        raise CommandError(_SECURE_STORE_REQUIRED, 3)
+    if kind in _HIGH_SENSITIVITY_WARNINGS:
+        # The sensitivity warning always precedes the hidden input.
+        print(_HIGH_SENSITIVITY_WARNINGS[kind])
     if kind == CredentialKind.API_KEY:
         print("API key: local secure storage only; does not enable subscription or balance reads.")
     print("Stored only in the encrypted OS keyring. No CLI session-only persistence is offered.")
@@ -338,17 +365,88 @@ def _secret(kind: CredentialKind) -> str:
         raise CommandError(str(error)) from None
 
 
-def _source(account: Account, credentials: CredentialStore) -> tuple[Account, str | None]:
+def _openai_organization(current: str | None) -> str:
+    """The user-entered, nonsecret OpenAI organization ID (no discovery is evidenced)."""
+    value = _ask("OpenAI organization ID (org-..., from platform.openai.com settings)", current)
+    try:
+        return openai_organization_id(value)
+    except DomainError:
+        raise CommandError(
+            "Enter the OpenAI organization ID: org- followed by 8-64 letters or digits. "
+            "No changes were made."
+        ) from None
+
+
+def _discover(provider: ProviderId, credential, resolver: CredentialResolver):
+    """One explicit, read-only discovery request; errors are curated, never echoed."""
+    transport = Transport()
+    providers = build_providers(transport, resolver)
+    try:
+        return tuple(asyncio.run(providers[provider].discover_organizations(credential)))
+    except (TransportError, CredentialResolutionError, DomainError):
+        raise CommandError(
+            "Organization discovery failed. Check the credential and reconnect guidance; "
+            "no changes were made.",
+            3,
+        ) from None
+
+
+def _credits_organization(
+    account: Account, credential, resolver: CredentialResolver, *, unchanged: bool
+) -> str | None:
+    """Optional Claude subscription prepaid-credits organization, chosen explicitly.
+
+    Keeping the saved organization is offered only while the login is unchanged
+    (same kind and reference, no newly entered secret), matching HTTP and the TUI.
+    """
+    print(CREDITS_ORGANIZATION_HELP)
+    if not _confirm("Discover the organization for prepaid credits now (read-only profile check)?"):
+        if account.organization_id is not None:
+            if unchanged:
+                if _confirm("Keep the saved prepaid-credits organization?"):
+                    return account.organization_id
+            else:
+                print(
+                    "The login changed: the saved prepaid-credits organization is not kept. "
+                    "Discover and explicitly select it again to read prepaid credits."
+                )
+        print("No prepaid-credits organization; only the usage request will be made.")
+        return None
+    choices = _discover(ProviderId.CLAUDE_SUBSCRIPTION, credential, resolver)
+    if not choices:
+        print(
+            "The profile reported no organization; prepaid credits cannot be read for this "
+            "login. No organization was selected."
+        )
+        return None
+    return _choose(
+        "Select organization explicitly (even for one result), or no organization",
+        [(choice.label, choice.id) for choice in choices]
+        + [("No organization — skip the prepaid credits read", None)],
+    )
+
+
+def _source(
+    account: Account, credentials: CredentialStore, *, ask_organization: bool = True
+) -> tuple[Account, str | None]:
     kind = _choose(
         "Credential source number",
         [("No credential / local profile", None)]
         + [(KINDS[kind], kind) for kind in allowed_kinds(account.provider)],
     )
+    organization = None
+    if account.provider == ProviderId.OPENAI_PLATFORM:
+        # Required for this provider, even without a credential; never discovered.
+        organization = (
+            _openai_organization(account.organization_id)
+            if ask_organization
+            else account.organization_id
+        )
     draft = replace(
         account,
         credential_kind=kind,
         credential_ref=None if kind is None else "default",
-        organization_id=None,
+        organization_id=organization,
         credential_selector=None,
     )
     if kind is None:
@@ -382,23 +480,34 @@ def _source(account: Account, credentials: CredentialStore) -> tuple[Account, st
                 )
                 draft = replace(draft, credential_selector=selector)
         else:
-            secret = _secret(kind)
+            secret = _secret(kind, credentials)
             temporary = credentials.put(account.id, secret, persist=False)
             draft = replace(draft, credential_ref=temporary)
         credential = resolver.resolve(draft)
         if kind == CredentialKind.CONSOLE_SESSION:
             if not _confirm("Discover Console organizations now (read-only connection check)?"):
                 raise Cancelled
-            transport = Transport()
-            providers = build_providers(transport, resolver)
-            choices = asyncio.run(
-                providers[ProviderId.CLAUDE_PLATFORM].discover_organizations(credential)
-            )
+            choices = _discover(ProviderId.CLAUDE_PLATFORM, credential, resolver)
             organization = _choose(
                 "Select organization explicitly (even for one result)",
                 [(choice.label, choice.id) for choice in choices],
             )
             draft = replace(draft, organization_id=organization)
+        elif (
+            account.provider == ProviderId.CLAUDE_SUBSCRIPTION
+            and kind in READ_CREDENTIAL_KINDS[ProviderId.CLAUDE_SUBSCRIPTION]
+        ):
+            unchanged = (
+                secret is None
+                and kind == account.credential_kind
+                and draft.credential_ref == account.credential_ref
+            )
+            draft = replace(
+                draft,
+                organization_id=_credits_organization(
+                    account, credential, resolver, unchanged=unchanged
+                ),
+            )
         return draft, secret
     finally:
         if temporary is not None:
@@ -487,25 +596,40 @@ def _accounts(args) -> int:
             credential_ref=None,
             credential_kind=None,
             credential_selector=None,
-            organization_id=None,
+            # OpenAI's organization is required, nonsecret metadata, not credential state.
+            organization_id=(
+                original.organization_id
+                if original.provider == ProviderId.OPENAI_PLATFORM
+                else None
+            ),
         )
         service.save(draft, original=original)
         print("Credential removed from account.")
         return 0
-    draft = original or Account(
-        id=str(uuid4()),
-        provider=PROVIDER_NAMES[args.provider],
-        label="New account",
-        credential_ref=None,
-    )
-    print(GUIDANCE[draft.provider])
+    if original is None:
+        provider = PROVIDER_NAMES[args.provider]
+        print(GUIDANCE[provider])
+        draft = Account(
+            id=str(uuid4()),
+            provider=provider,
+            label="New account",
+            credential_ref=None,
+            # OpenAI requires its organization before any other field can be drafted.
+            organization_id=(
+                _openai_organization(None) if provider == ProviderId.OPENAI_PLATFORM else None
+            ),
+            poll_interval_seconds=default_poll_interval_seconds(provider),
+        )
+    else:
+        draft = original
+        print(GUIDANCE[draft.provider])
     secret = None
     if args.action in {"add", "edit"}:
         draft = _metadata(draft)
     if args.action in {"add", "key"} or _confirm(
         "Change credential source / organization / scope?"
     ):
-        draft, secret = _source(draft, credentials)
+        draft, secret = _source(draft, credentials, ask_organization=args.action != "add")
     if not _confirm("Save account and replace any changed credential/reference?"):
         raise Cancelled
     service.save(draft, original=original, secret=secret, persist=True)
@@ -869,7 +993,7 @@ def _serve(args) -> int:
                     account_store=store,
                     credential_store=credentials,
                     resolver=factory.resolver,
-                    console_discovery=factory.console_discovery,
+                    console_discovery=factory.organization_discovery,
                 )
         app = plan.create_app(hub, operations)
         try:
@@ -1004,7 +1128,7 @@ def _dashboard(args) -> int:
                     account_store=store,
                     credential_store=credentials,
                     resolver=factory.resolver,
-                    console_discovery=factory.console_discovery,
+                    console_discovery=factory.organization_discovery,
                 )
         if plan is not None:
             api_server.harden_process()

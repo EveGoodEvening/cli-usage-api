@@ -33,6 +33,7 @@ from cli_usage_api.domain import (
     MetricState,
     ProviderId,
     Snapshot,
+    format_two_decimals,
     sanitize_text,
 )
 from cli_usage_api.providers.grok import MISSING_DETAIL as GROK_MISSING
@@ -49,6 +50,9 @@ METRIC_LABELS = {
     "codex.subscription.weekly": "Codex weekly (7d)",
     "codex.subscription.five_hour": "Codex 5h",
     "codex.subscription.credits": "Codex credits",
+    "claude.subscription.credit_balance": "Claude 已购 credits 余额",
+    "openai.platform.available_balance": "OpenAI 可用余额",
+    "openai.platform.paid_available_balance": "OpenAI 付费余额",
     "claude.subscription.extra_usage": "Claude 额外用量",
     "grok.subscription.shared_pool": "Grok 共享池",
     "grok.product.build": "GrokBuild",
@@ -67,14 +71,28 @@ def displayed_metrics(snapshot: Snapshot) -> tuple[Metric, ...]:
     return tuple(m for m in snapshot.metrics if m.id not in PARSE_ONLY_METRIC_IDS)
 
 
+# Shown whenever cents rounding changed an exact server amount (data stays exact).
+ROUNDED_NOTE = "服务端金额已舍入到分 / rounded to cents"
+
+
 def credit_text(metric: Metric) -> str | None:
-    """Non-currency credits as exact fixed-point text, or a positive unlimited report."""
+    """Non-currency credits rounded half-even to two decimals, or a positive unlimited report.
+
+    Display only: snapshots and API JSON keep the exact value.
+    """
     if metric.credits is not None:
-        # Plain fixed-point: no exponent notation, no rounding, never currency.
-        return f"{format(metric.credits, 'f')} credits"
+        # Plain fixed-point, always two decimals, never currency.
+        return f"{format_two_decimals(metric.credits)} credits"
     if metric.unlimited and metric.spent is None:
         return "不限量 / Unlimited"
     return None
+
+
+def exact_balance_text(metric: Metric) -> tuple[str, bool] | None:
+    """An exact money amount at cents (half-even) and whether rounding changed it."""
+    if metric.exact_balance is None:
+        return None
+    return metric.exact_balance.format_cents(), metric.exact_balance.rounded_to_cents()[1]
 
 
 def metric_label(metric_id: str, metric: Metric | None) -> str:
@@ -133,6 +151,8 @@ def metric_value(metric: Metric) -> str:
         }[metric.state]
     if metric.balance is not None:
         return metric.balance.format()
+    if (exact := exact_balance_text(metric)) is not None:
+        return exact[0]
     if (credits := credit_text(metric)) is not None:
         return credits
     if metric.share_percent is not None:
@@ -350,8 +370,9 @@ class InformationScreen(Screen[None]):
 class UsageApp(App[None]):
     """Live factory signature: factory(accounts, *, publish) -> scheduler.
 
-    The callable may expose resolver, console_discovery (the bound
-    ConsoleProvider.discover_organizations method), and async aclose(). The app
+    The callable may expose resolver, organization_discovery (``{ProviderId:
+    bound discover_organizations}``; preferred) or console_discovery (the bound
+    ConsoleProvider.discover_organizations method alone), and async aclose(). The app
     owns the returned scheduler lifecycle and closes factory-owned clients after
     stopping it. A configured live dashboard requires this explicit factory.
 
@@ -689,6 +710,9 @@ class UsageApp(App[None]):
             f"  {value}",
             f"  {STATE_LABELS[snapshot.fetch_state]} ({snapshot.fetch_state}){flags}",
         ]
+        exact = exact_balance_text(metric) if metric and metric.state == MetricState.READY else None
+        if exact is not None and exact[1]:
+            lines.append("  " + ROUNDED_NOTE)
         if metric and metric.detail:
             lines.append("  " + sanitize_text(metric.detail, max_length=1024))
         if metric and metric.reset_at:
@@ -908,7 +932,7 @@ class UsageApp(App[None]):
         used_w, rest_w = 12, 11
         values_w = 1 + used_w + 1 + rest_w + 1
         # Labels shrink only when the row (minimal bar plus a short reset) cannot fit.
-        label_w = min(26, max(20, width - 1 - (6 + 1) - values_w - 10))
+        label_w = min(self._label_cap(), max(20, width - 1 - (6 + 1) - values_w - 10))
         spare = width - label_w - 2 - values_w
         # Spare width grows the bar while the absolute reset time still fits.
         bar_w = (
@@ -919,6 +943,7 @@ class UsageApp(App[None]):
             else max(6, min(24, max(spare - 22, min(8, spare - 10))))
         )
         extra: list[str] = []
+        notes: list[str] = []
         reset = Text()
         amount: Text | None = None
         heads = [Text()]
@@ -936,6 +961,7 @@ class UsageApp(App[None]):
             or (
                 metric.quota is None
                 and metric.balance is None
+                and metric.exact_balance is None
                 and metric.share_percent is None
                 and credit_text(metric) is None
             )
@@ -980,6 +1006,16 @@ class UsageApp(App[None]):
                 cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
             ]
             reset = Text("无周期重置", style="dim")
+        elif (exact := exact_balance_text(metric)) is not None:
+            # Exact server money shown at cents; the data keeps the exact amount.
+            amount = Text(exact[0], style="bold")
+            cells = [
+                cell(Text("余额", style="dim"), bar_w + 1),
+                cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
+            ]
+            reset = Text("无周期重置", style="dim")
+            if exact[1]:
+                notes.append(ROUNDED_NOTE)
         elif metric.quota is None and (credits := credit_text(metric)) is not None:
             # Credits are not money and carry no inferred expiry or reset.
             amount = Text(credits, style="bold")
@@ -1131,9 +1167,25 @@ class UsageApp(App[None]):
             self._append_reset(prompt, resets, width, indent)
         for line in extra:
             prompt.append("\n" + indent, style="dim").append(line, style="dim")
+        for note in notes:
+            # Value notes wrap whole in every tier, independent of hoisted details.
+            prompt.append_text(self._wrapped(note, width, indent, "dim"))
         if detail:
             prompt.append_text(self._wrapped(detail, width, indent, "dim"))
         return prompt
+
+    def _label_cap(self) -> int:
+        """26 cells, widened (to 30 at most) only when a visible known label needs it."""
+        longest = max(
+            (
+                cell_len(METRIC_LABELS.get(metric_id, ""))
+                for account, metric_id in self.rows
+                if account.enabled
+            ),
+            default=0,
+        )
+        # Two cells of row indent precede the label.
+        return min(30, max(26, longest + 2))
 
     @staticmethod
     def _append_reset(prompt: Text, resets: list[Text], width: int, indent: str) -> None:
@@ -1209,6 +1261,10 @@ class UsageApp(App[None]):
             )
             if metric.shared_pool_id:
                 lines.append(f"属于共享池 {metric.shared_pool_id}")
+            if metric.exact_balance is not None:
+                # The row shows cents; the exact server amount stays inspectable here.
+                exact = metric.exact_balance
+                lines.append(f"精确金额 / exact: {format(exact.amount, 'f')} {exact.currency}")
         if snapshot:
             lines.extend(
                 [
@@ -1299,12 +1355,17 @@ class UsageApp(App[None]):
         resolver = getattr(self.scheduler_factory, "resolver", None)
         if resolver is None:
             resolver = CredentialResolver(self.credential_store)
+        # Per-provider explicit discovery when the factory offers it; older
+        # factories expose only the Console callable.
+        discovery = getattr(self.scheduler_factory, "organization_discovery", None)
+        if discovery is None:
+            discovery = getattr(self.scheduler_factory, "console_discovery", None)
         self.push_screen(
             AccountManagerScreen(
                 self.account_store,
                 self.credential_store,
                 resolver,
-                getattr(self.scheduler_factory, "console_discovery", None),
+                discovery,
                 on_changed=self.accounts_changed,
                 on_reconnect=self.reconnect,
             )
@@ -1314,7 +1375,7 @@ class UsageApp(App[None]):
         self.push_screen(
             InformationScreen(
                 "帮助 / Help",
-                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理（Shift+↑↓ 或拖动调整账号顺序）；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 主界面取消选择；弹窗返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
+                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理（Shift+↑↓ 或拖动调整账号顺序）；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 主界面取消选择；弹窗返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。OpenAI Platform 金额按分显示（银行家舍入，舍入时注明）；Codex credits 显示两位小数；API/数据保留精确值。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
             )
         )
 

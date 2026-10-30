@@ -23,6 +23,7 @@ from cli_usage_api.domain import (
     ResolvedCredential,
     Snapshot,
     SourceKind,
+    TransportError,
 )
 from cli_usage_api.providers.claude import ClaudeProvider
 from cli_usage_api.transport import Transport
@@ -751,3 +752,531 @@ async def test_extra_usage_round_trips_through_snapshot_serialization(payload):
     payload["extra_usage"] = capped(currency="eur")
     snapshot = await fetch(payload)
     assert Snapshot.from_dict(json.loads(json.dumps(snapshot.to_dict()))) == snapshot
+
+
+# --- Prepaid credits (explicitly selected organization) and discovery ---
+
+ORG = "0f6a2b7c-1d2e-4f3a-8b9c-0123456789ab"
+OTHER_ORG = "11111111-2222-4333-8444-555555555555"
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CREDITS_URL = f"https://api.anthropic.com/api/oauth/organizations/{ORG}/prepaid/credits"
+PROFILE_URL = "https://api.anthropic.com/api/oauth/profile"
+ORG_ACCOUNT = replace(ACCOUNT, organization_id=ORG)
+ORG_CREDENTIAL = replace(CREDENTIAL, organization_id=ORG)
+CREDITS = {
+    "amount": 13750,
+    "currency": "usd",
+    "auto_reload_settings": {"enabled": False},
+    "expiry_policy_months": 12,
+}
+
+
+def routed(routes):
+    """Real Transport over an in-memory server; each route is (status, body, headers)."""
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        status, body, headers = routes[str(request.url)]
+        content = body if isinstance(body, bytes) else json.dumps(body).encode()
+        return httpx.Response(status, content=content, headers=headers)
+
+    return ClaudeProvider(Transport(http_transport=httpx.MockTransport(handler))), requests
+
+
+def credit_row(snapshot):
+    rows = [row for row in snapshot.metrics if row.id == MetricId.CLAUDE_CREDIT_BALANCE]
+    assert len(rows) <= 1
+    return rows[0] if rows else None
+
+
+async def fetch_credits(payload, credits, *, status=200, headers=None):
+    provider, requests = routed(
+        {USAGE_URL: (200, payload, None), CREDITS_URL: (status, credits, headers)}
+    )
+    return await provider.fetch(ORG_ACCOUNT, ORG_CREDENTIAL, NOW), requests
+
+
+async def test_without_organization_exactly_one_usage_request(payload):
+    provider, requests = routed({USAGE_URL: (200, payload, None)})
+    snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
+    assert [str(request.url) for request in requests] == [USAGE_URL]
+    assert credit_row(snapshot) is None
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.organization_id is None
+
+
+async def test_organization_makes_usage_then_credits_with_exact_headers(payload):
+    snapshot, requests = await fetch_credits(payload, CREDITS)
+    assert [str(request.url) for request in requests] == [USAGE_URL, CREDITS_URL]
+    assert all(request.method == "GET" for request in requests)
+    usage, credits = requests
+    assert usage.headers["anthropic-beta"] == "oauth-2025-04-20"
+    assert "x-organization-uuid" not in usage.headers
+    assert credits.headers["authorization"] == "Bearer synthetic-secret"
+    assert credits.headers["anthropic-version"] == "2023-06-01"
+    assert credits.headers["x-organization-uuid"] == ORG
+    assert credits.headers["accept"] == "application/json"
+    assert credits.headers["user-agent"].startswith("cli-usage-api/")
+    for absent in ("anthropic-beta", "anthropic-client-platform", "cookie", "content-type"):
+        assert absent not in credits.headers
+    assert snapshot.fetch_state == FetchState.OK
+    assert snapshot.diagnostic is None
+    assert snapshot.retry_at is None
+    assert snapshot.organization_id == ORG
+    ids = [row.id for row in snapshot.metrics]
+    assert ids[:3] == list(REQUIRED_METRIC_IDS[ACCOUNT.provider])
+    assert ids[-1] == MetricId.CLAUDE_CREDIT_BALANCE
+    row = credit_row(snapshot)
+    assert row.state == MetricState.READY
+    assert row.label == "Claude 已购 credits 余额"
+    assert row.balance == Money(13750, "USD", 2)
+    assert row.quota is None and row.reset_at is None and row.spent is None
+    assert row.source.contract == "claude.oauth.prepaid.credits"
+    assert row.source.version_sensitive is True
+    assert "Auto-reload off." in row.detail
+    assert "valid for 12 months" in row.detail
+    assert "not a subscription allowance" in row.detail
+    assert snapshot.grants == ()
+
+
+async def test_credits_row_round_trips_through_snapshot_serialization(payload):
+    snapshot, _ = await fetch_credits(payload, CREDITS)
+    assert Snapshot.from_dict(json.loads(json.dumps(snapshot.to_dict()))) == snapshot
+
+
+async def test_credits_are_not_merged_with_extra_usage(payload):
+    payload["extra_usage"] = {
+        "is_enabled": True,
+        "monthly_limit": 50000,
+        "used_credits": 1200,
+        "currency": "USD",
+    }
+    snapshot, _ = await fetch_credits(payload, {**CREDITS, "amount": 7})
+    extra = next(row for row in snapshot.metrics if row.id == MetricId.CLAUDE_EXTRA_USAGE)
+    assert extra.spend_limit == Money(50000, "USD", 2)
+    assert extra.balance is None
+    credits = credit_row(snapshot)
+    assert credits.balance == Money(7, "USD", 2)
+    assert credits.spent is None and credits.spend_limit is None
+
+
+@pytest.mark.parametrize(
+    ("status", "state"),
+    [
+        (401, FetchState.AUTH_REQUIRED),
+        (403, FetchState.PERMISSION_DENIED),
+        (429, FetchState.RATE_LIMITED),
+        (500, FetchState.PROVIDER_ERROR),
+    ],
+)
+async def test_usage_failure_never_requests_credits(status, state):
+    provider, requests = routed(
+        {USAGE_URL: (status, b'{"secret":"body"}', {"Retry-After": "60"}), CREDITS_URL: None}
+    )
+    snapshot = await provider.fetch(ORG_ACCOUNT, ORG_CREDENTIAL, NOW)
+    assert [str(request.url) for request in requests] == [USAGE_URL]
+    assert snapshot.fetch_state == state
+    assert credit_row(snapshot) is None
+
+
+async def test_unusable_usage_payload_never_requests_credits():
+    provider, requests = routed({USAGE_URL: (200, {"unrelated": 1}, None), CREDITS_URL: None})
+    snapshot = await provider.fetch(ORG_ACCOUNT, ORG_CREDENTIAL, NOW)
+    assert len(requests) == 1
+    assert snapshot.fetch_state == FetchState.SCHEMA_ERROR
+
+
+@pytest.mark.parametrize(
+    ("status", "fragment"),
+    [
+        (401, "reconnect"),
+        (403, "No billing permission"),
+        (404, "re-select the organization"),
+        (429, "rate limited"),
+        (500, "Credits request failed"),
+        (502, "Credits request failed"),
+    ],
+)
+async def test_credits_failure_keeps_usage_rows_and_is_partial(payload, status, fragment):
+    snapshot, requests = await fetch_credits(payload, {"secret": "leak"}, status=status)
+    assert len(requests) == 2
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.diagnostic.code == "partial_data"
+    assert snapshot.fetched_at == NOW
+    assert all(row.state == MetricState.READY for row in snapshot.metrics[:3])
+    assert snapshot.metrics[0].quota.used_percent == Decimal("12.5")
+    row = credit_row(snapshot)
+    assert row.state == MetricState.UNKNOWN
+    assert row.balance is None
+    assert fragment in row.detail
+    assert "leak" not in json.dumps(snapshot.to_dict())
+
+
+async def test_credits_429_retry_deadline_is_carried(payload):
+    snapshot, _ = await fetch_credits(payload, b"", status=429, headers={"Retry-After": "900"})
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.retry_at is not None
+    assert snapshot.retry_at >= datetime.now(UTC) + timedelta(seconds=800)
+    assert credit_row(snapshot).state == MetricState.UNKNOWN
+
+
+@pytest.mark.parametrize("headers", [None, {"Retry-After": "not-a-deadline"}])
+async def test_credits_429_without_usable_retry_after_gets_local_embargo(payload, headers):
+    snapshot, requests = await fetch_credits(payload, b"", status=429, headers=headers)
+    assert len(requests) == 2
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    # Conservative no-header cooldown: the Claude 429 base; the scheduler escalates.
+    assert snapshot.retry_at == NOW + timedelta(seconds=180)
+    assert credit_row(snapshot).state == MetricState.UNKNOWN
+    assert snapshot.metrics[0].state == MetricState.READY
+
+
+@pytest.mark.parametrize("status", [403, 404, 500])
+async def test_credits_non_rate_limit_failure_carries_no_embargo(payload, status):
+    snapshot, _ = await fetch_credits(payload, b"", status=status)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.retry_at is None
+
+
+async def test_credits_failure_does_not_mask_worse_usage_detail(payload):
+    del payload["five_hour"]
+    snapshot, _ = await fetch_credits(payload, CREDITS, status=500)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert snapshot.metrics[0].state == MetricState.UNKNOWN
+    assert credit_row(snapshot).state == MetricState.UNKNOWN
+
+
+async def test_credits_network_error_is_unknown_partial(payload):
+    def handler(request):
+        if str(request.url) == CREDITS_URL:
+            raise httpx.ConnectError("synthetic")
+        return httpx.Response(200, content=json.dumps(payload).encode())
+
+    provider = ClaudeProvider(Transport(http_transport=httpx.MockTransport(handler)))
+    snapshot = await provider.fetch(ORG_ACCOUNT, ORG_CREDENTIAL, NOW)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    assert credit_row(snapshot).state == MetricState.UNKNOWN
+
+
+@pytest.mark.parametrize("body", [b"not json", [], [{"amount": 1}], b"[]"])
+async def test_credits_schema_error_is_unknown_partial(payload, body):
+    snapshot, _ = await fetch_credits(payload, body)
+    assert snapshot.fetch_state == FetchState.PARTIAL
+    row = credit_row(snapshot)
+    assert row.state == MetricState.UNKNOWN
+    assert "format is invalid" in row.detail
+
+
+@pytest.mark.parametrize("currency", ["absent", None, "", "US", "XYZ", "usd$", 840, ["USD"]])
+async def test_missing_or_unsupported_currency_is_unknown_not_usd(payload, currency):
+    credits = dict(CREDITS)
+    if currency == "absent":
+        del credits["currency"]
+    else:
+        credits["currency"] = currency
+    snapshot, _ = await fetch_credits(payload, credits)
+    row = credit_row(snapshot)
+    assert row.state == MetricState.UNKNOWN
+    assert row.balance is None
+    assert "Currency is missing or unsupported" in row.detail
+    assert snapshot.fetch_state == FetchState.PARTIAL
+
+
+async def test_zero_exponent_currency_and_zero_balance(payload):
+    snapshot, _ = await fetch_credits(payload, {"amount": 0, "currency": "JPY"})
+    row = credit_row(snapshot)
+    assert row.state == MetricState.READY
+    assert row.balance == Money(0, "JPY", 0)
+
+
+@pytest.mark.parametrize(
+    "amount",
+    ["absent", None, True, False, -1, 12.5, "100", 10**15 + 1, [], {}],
+)
+async def test_invalid_amount_is_unknown_not_zero(payload, amount):
+    credits = dict(CREDITS)
+    if amount == "absent":
+        del credits["amount"]
+    else:
+        credits["amount"] = amount
+    snapshot, _ = await fetch_credits(payload, credits)
+    row = credit_row(snapshot)
+    assert row.state == MetricState.UNKNOWN
+    assert row.balance is None
+    assert snapshot.fetch_state == FetchState.PARTIAL
+
+
+@pytest.mark.parametrize(
+    ("wire", "expected"),
+    [
+        (b"13750", 13750),
+        (b"13750.0", 13750),
+        (b"1.375e4", 13750),
+        (b"1e15", 10**15),
+        (b"1e16", None),
+        (b"1e999999999", None),
+        (b"1e-999999999", None),
+        (b"12.5", None),
+        (b"-0.0", 0),
+        (b"-1", None),
+        (b"Infinity", None),
+        (b"NaN", None),
+    ],
+)
+async def test_raw_json_credit_amounts_through_real_transport(payload, wire, expected):
+    body = b'{"amount": ' + wire + b', "currency": "USD"}'
+    snapshot, _ = await fetch_credits(payload, body)
+    row = credit_row(snapshot)
+    if expected is None:
+        assert row.state == MetricState.UNKNOWN
+        assert row.balance is None
+    else:
+        assert row.balance == Money(expected, "USD", 2)
+
+
+@pytest.mark.parametrize("months", [0, -3, True, "12", 1.5, None])
+async def test_invalid_or_absent_optional_settings_are_omitted(payload, months):
+    snapshot, _ = await fetch_credits(
+        payload,
+        {
+            "amount": 5,
+            "currency": "USD",
+            "auto_reload_settings": {"enabled": "yes"},
+            "expiry_policy_months": months,
+        },
+    )
+    row = credit_row(snapshot)
+    assert row.state == MetricState.READY
+    assert "Auto-reload" not in row.detail
+    assert "valid for" not in row.detail
+    assert snapshot.fetch_state == FetchState.OK
+
+
+def tranche(amount=500, expires="2026-12-01T00:00:00Z", currency="USD", **extra):
+    return {
+        "remaining_amount_minor_units": amount,
+        "expires_at": expires,
+        "currency": currency,
+        **extra,
+    }
+
+
+async def test_promo_summary_is_detail_only_and_excludes_expired(payload):
+    credits = {
+        **CREDITS,
+        "promo_tranches": [
+            tranche(500, "2026-12-01T00:00:00Z", name="Launch"),
+            tranche(250, "2026-11-15T00:00:00Z", "usd"),
+            tranche(900, "2026-10-01T00:00:00Z"),
+            tranche(0, "2026-11-02T00:00:00Z"),
+        ],
+    }
+    snapshot, _ = await fetch_credits(payload, credits)
+    row = credit_row(snapshot)
+    assert row.state == MetricState.READY
+    # Promo remaining is already part of the balance; never added to it.
+    assert row.balance == Money(13750, "USD", 2)
+    assert row.expires_at is None and row.reset_at is None
+    assert snapshot.grants == ()
+    assert "2 active promotional tranche(s) with 7.50 USD remaining" in row.detail
+    assert "included in the balance" in row.detail
+    assert "2026-11-15T00:00:00Z" in row.detail
+    assert "not a reset" in row.detail
+    assert "1 promotional tranche(s) already expired" in row.detail
+    assert "partial" not in row.detail
+    assert snapshot.fetch_state == FetchState.OK
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "not-an-object",
+        tranche(amount=-1),
+        tranche(amount=True),
+        tranche(amount=1.5),
+        tranche(expires="soon"),
+        tranche(expires=None),
+        tranche(currency="EUR"),
+        tranche(currency=None),
+    ],
+)
+async def test_invalid_promo_entries_make_summary_partial_never_zero(payload, bad):
+    credits = {**CREDITS, "promo_tranches": [tranche(300), bad]}
+    snapshot, _ = await fetch_credits(payload, credits)
+    row = credit_row(snapshot)
+    assert row.state == MetricState.READY
+    assert row.balance == Money(13750, "USD", 2)
+    assert "1 active promotional tranche(s) with 3.00 USD remaining" in row.detail
+    assert "promotional summary is partial" in row.detail
+
+
+async def test_only_invalid_promo_entries_do_not_claim_none_active(payload):
+    snapshot, _ = await fetch_credits(payload, {**CREDITS, "promo_tranches": [tranche("x")]})
+    row = credit_row(snapshot)
+    assert "No active promotional" not in row.detail
+    assert "0.00" not in row.detail
+    assert "promotional summary is partial" in row.detail
+
+
+@pytest.mark.parametrize("raw", [{}, "x", 1])
+async def test_malformed_promo_array_is_unknown_summary(payload, raw):
+    snapshot, _ = await fetch_credits(payload, {**CREDITS, "promo_tranches": raw})
+    row = credit_row(snapshot)
+    assert row.balance == Money(13750, "USD", 2)
+    assert "promotional summary unknown" in row.detail
+
+
+async def test_empty_promo_array_reports_none_active(payload):
+    snapshot, _ = await fetch_credits(payload, {**CREDITS, "promo_tranches": []})
+    assert "No active promotional credits reported." in credit_row(snapshot).detail
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        CREDENTIAL,
+        replace(CREDENTIAL, organization_id=OTHER_ORG),
+    ],
+)
+async def test_credential_organization_must_match_saved_selection(credential):
+    provider, requests = routed({})
+    snapshot = await provider.fetch(ORG_ACCOUNT, credential, NOW)
+    assert requests == []
+    assert snapshot.fetch_state == FetchState.AUTH_REQUIRED
+    assert snapshot.diagnostic.code == "credential_mismatch"
+
+
+async def test_credential_organization_without_saved_selection_is_rejected():
+    provider, requests = routed({})
+    snapshot = await provider.fetch(ACCOUNT, ORG_CREDENTIAL, NOW)
+    assert requests == []
+    assert snapshot.diagnostic.code == "credential_mismatch"
+
+
+async def test_failure_snapshot_keeps_organization_and_emits_no_credit_row():
+    provider, _ = routed({USAGE_URL: (401, b"", None)})
+    snapshot = await provider.fetch(ORG_ACCOUNT, ORG_CREDENTIAL, NOW)
+    assert snapshot.organization_id == ORG
+    assert credit_row(snapshot) is None
+
+
+PROFILE = {
+    "account": {"uuid": "a0a0a0a0-0000-4000-8000-000000000000", "email": "x@example.invalid"},
+    "organization": {
+        "uuid": ORG,
+        "name": "Synthetic \x1b[31mOrg[1]",
+        "organization_type": "claude_max",
+        "billing_type": "stripe_subscription",
+    },
+}
+
+
+async def test_discovery_reads_profile_and_returns_unselected_choice():
+    provider, requests = routed({PROFILE_URL: (200, PROFILE, None)})
+    choices = await provider.discover_organizations(CREDENTIAL, now=NOW)
+    assert [(choice.id, choice.label) for choice in choices] == [(ORG, "Synthetic Org1")]
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == "GET"
+    assert str(request.url) == PROFILE_URL
+    assert request.headers["authorization"] == "Bearer synthetic-secret"
+    assert request.headers["cache-control"] == "no-cache"
+    for absent in ("anthropic-beta", "anthropic-version", "x-organization-uuid", "cookie"):
+        assert absent not in request.headers
+
+
+@pytest.mark.parametrize("name", ["absent", None, "", "   ", "\x1b[0m", 42])
+async def test_discovery_label_falls_back_to_uuid(name):
+    profile = copy.deepcopy(PROFILE)
+    if name == "absent":
+        del profile["organization"]["name"]
+    else:
+        profile["organization"]["name"] = name
+    provider, _ = routed({PROFILE_URL: (200, profile, None)})
+    choices = await provider.discover_organizations(CREDENTIAL, now=NOW)
+    assert [(choice.id, choice.label) for choice in choices] == [(ORG, ORG)]
+
+
+async def test_discovery_null_organization_returns_no_choices():
+    provider, _ = routed({PROFILE_URL: (200, {"organization": None}, None)})
+    assert await provider.discover_organizations(CREDENTIAL, now=NOW) == ()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [],
+        {},
+        {"organization": "x"},
+        {"organization": {}},
+        {"organization": {"uuid": ORG.upper()}},
+        {"organization": {"uuid": "not-a-uuid"}},
+        {"organization": {"uuid": 1}},
+        b"not json",
+    ],
+)
+async def test_malformed_profile_is_curated_schema_error(body):
+    provider, _ = routed({PROFILE_URL: (200, body, None)})
+    with pytest.raises(TransportError) as raised:
+        await provider.discover_organizations(CREDENTIAL, now=NOW)
+    assert raised.value.fetch_state == FetchState.SCHEMA_ERROR
+    assert raised.value.code == "schema_error"
+
+
+@pytest.mark.parametrize(
+    ("status", "state"),
+    [(401, FetchState.AUTH_REQUIRED), (403, FetchState.PERMISSION_DENIED)],
+)
+async def test_discovery_http_errors_are_curated(status, state):
+    provider, _ = routed({PROFILE_URL: (status, {"secret": "leak"}, None)})
+    with pytest.raises(TransportError) as raised:
+        await provider.discover_organizations(CREDENTIAL, now=NOW)
+    assert raised.value.fetch_state == state
+    assert "leak" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("credential", "code"),
+    [
+        (None, "credential_unavailable"),
+        (replace(CREDENTIAL, expires_at=NOW), "credential_expired"),
+    ],
+)
+async def test_discovery_rejects_unusable_credentials_without_request(credential, code):
+    provider, requests = routed({})
+    with pytest.raises(TransportError) as raised:
+        await provider.discover_organizations(credential, now=NOW)
+    assert raised.value.code == code
+    assert requests == []
+
+
+async def test_discovery_rejects_other_provider_credential():
+    provider, requests = routed({})
+    foreign = ResolvedCredential(
+        ProviderId.CLAUDE_PLATFORM, CredentialKind.CONSOLE_SESSION, "cookie-value", "g"
+    )
+    with pytest.raises(TransportError) as raised:
+        await provider.discover_organizations(foreign, now=NOW)
+    assert raised.value.code == "credential_mismatch"
+    assert requests == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/api/oauth/organizations/{ORG}/contracts/prepaid/credits",
+        f"/api/oauth/organizations/{ORG}/setup_overage_billing",
+        f"/api/oauth/organizations/{ORG}/overage_spend_limit",
+        f"/api/oauth/organizations/{ORG}/contracts/auto_reload_settings",
+        f"/api/oauth/organizations/{OTHER_ORG}/prepaid/credits",
+        f"/api/oauth/organizations/{ORG.upper()}/prepaid/credits",
+    ],
+)
+async def test_neighbouring_and_foreign_paths_never_reach_http(path):
+    requests = []
+    transport = Transport(http_transport=httpx.MockTransport(lambda r: requests.append(r)))
+    with pytest.raises(TransportError) as raised:
+        await transport.get_json(ACCOUNT.provider, path, credential=ORG_CREDENTIAL)
+    assert raised.value.code == "forbidden_request"
+    assert requests == []

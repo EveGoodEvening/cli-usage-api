@@ -1,7 +1,8 @@
 """Account mutation for the HTTP API: one curated path into ``AccountService``.
 
 ``AccountOperations`` validates whitelisted JSON bodies (never ``Account.from_dict``
-on client input), resolves file references and Console/Grok choices through
+on client input), resolves file references, Grok scopes and discovered organizations (Console,
+and the optional Claude subscription prepaid-credits organization) through
 short-lived prepare records, and commits through the same ``AccountService`` the
 TUI and CLI use. Every writer in the process holds the host's ``account_lock``
 across the commit and the host notification, and the lock is taken inside a
@@ -24,7 +25,7 @@ import re
 import secrets
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from uuid import uuid4
@@ -43,11 +44,14 @@ from cli_usage_api.accounts import (
 )
 from cli_usage_api.credentials import CredentialResolutionError, CredentialResolver, _read_file
 from cli_usage_api.domain import (
+    READ_CREDENTIAL_KINDS,
     Account,
     CredentialKind,
     DomainError,
     ProviderId,
     ResolvedCredential,
+    default_poll_interval_seconds,
+    openai_organization_id,
     sanitize_text,
 )
 from cli_usage_api.providers.console import OrganizationChoice
@@ -59,7 +63,15 @@ UUID_PATTERN = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 _LEGACY_GROK_SCOPE = "https://accounts.x.ai/sign-in"
 _HEX32 = frozenset("0123456789abcdef")
 _SOURCE_KEYS = frozenset(
-    {"credential_kind", "reference", "secret", "persist", "prepare_id", "choice_id"}
+    {
+        "credential_kind",
+        "reference",
+        "secret",
+        "persist",
+        "prepare_id",
+        "choice_id",
+        "organization",
+    }
 )
 _KIND_KEYS = {
     CredentialKind.CLAUDE_CODE_FILE: frozenset({"credential_kind", "reference"}),
@@ -69,8 +81,32 @@ _KIND_KEYS = {
         {"credential_kind", "prepare_id", "choice_id", "persist"}
     ),
     CredentialKind.MANUAL_BEARER: frozenset({"credential_kind", "secret", "persist"}),
+    CredentialKind.OPENAI_PLATFORM_SESSION: frozenset({"credential_kind", "secret", "persist"}),
     CredentialKind.API_KEY: frozenset({"credential_kind", "secret", "persist"}),
 }
+# Claude subscription read kinds may also carry the optional prepaid-credits
+# organization: a prepare record and choice, or ``organization`` "none" / "keep".
+_CREDITS_KEYS = frozenset({"prepare_id", "choice_id", "organization"})
+_SECRET_KINDS = frozenset(
+    {
+        CredentialKind.MANUAL_BEARER,
+        CredentialKind.OPENAI_PLATFORM_SESSION,
+        CredentialKind.API_KEY,
+    }
+)
+OrganizationDiscovery = Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]]
+# Providers whose organization comes from an explicit, read-only discovery.
+_DISCOVERY_PROVIDERS = frozenset({ProviderId.CLAUDE_PLATFORM, ProviderId.CLAUDE_SUBSCRIPTION})
+
+
+def _credits_source(provider: ProviderId, kind: CredentialKind | None) -> bool:
+    """Whether this source may select a Claude subscription prepaid-credits organization."""
+    return (
+        provider == ProviderId.CLAUDE_SUBSCRIPTION
+        and kind in READ_CREDENTIAL_KINDS[ProviderId.CLAUDE_SUBSCRIPTION]
+    )
+
+
 # Uncommitted AccountFlowError codes -> (status, fixed error code).
 _FLOW_ERRORS = {
     "conflict": (409, "conflict"),
@@ -125,6 +161,9 @@ class _Prepare:
     choices: dict[str, str] = field(default_factory=dict)
     temp_ref: str | None = None
     timer: asyncio.TimerHandle | None = None
+    # Claude credits discovery with a typed bearer: a keyed digest binds the choice
+    # to that exact bearer; the bearer itself is not kept after discovery.
+    secret_digest: bytes | None = None
 
 
 @dataclass(slots=True)
@@ -228,6 +267,26 @@ def _reference(kind: CredentialKind, value: object) -> str:
         raise OperationError(422, "invalid_reference") from None
 
 
+def _openai_organization(provider: ProviderId, body: dict, current: str | None) -> str | None:
+    """The user-entered OpenAI organization (required for that provider only).
+
+    No discovery endpoint is evidenced, so it is typed by the user; it is nonsecret
+    but, like every organization ID, never echoed by the API.
+    """
+    if provider != ProviderId.OPENAI_PLATFORM:
+        if "organization_id" in body:
+            raise _invalid()
+        return None
+    if "organization_id" not in body:
+        if current is None:
+            raise OperationError(422, "organization_required")
+        return current
+    try:
+        return openai_organization_id(_string(body["organization_id"]))
+    except DomainError:
+        raise OperationError(422, "invalid_organization") from None
+
+
 def config_view(
     account: Account, *, revision: str | None = None, session_present: bool | None = None
 ) -> dict[str, Any]:
@@ -274,7 +333,7 @@ class AccountOperations:
         credential_store: CredentialStore,
         resolver: CredentialResolver,
         console_discovery: (
-            Callable[[ResolvedCredential], Awaitable[tuple[OrganizationChoice, ...]]] | None
+            OrganizationDiscovery | Mapping[ProviderId, OrganizationDiscovery] | None
         ),
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -286,6 +345,7 @@ class AccountOperations:
         self.service = AccountService(account_store, credential_store)
         self._monotonic = monotonic
         self.revision_key = secrets.token_bytes(32)
+        self._digest_key = secrets.token_bytes(32)
         self.secure_store_available = False
         self._records: dict[str, _Prepare] = {}
         self._commits: set[asyncio.Future] = set()
@@ -293,6 +353,20 @@ class AccountOperations:
         self._discovery_starts: deque[float] = deque()
         self._reconnects: dict[str, float] = {}
         self._file_slots = asyncio.Semaphore(self.FILE_READ_CONCURRENCY)
+
+    def discovery_for(self, provider: ProviderId) -> OrganizationDiscovery | None:
+        """The explicit organization discovery for ``provider``, if the host supplies one.
+
+        ``console_discovery`` is ``{ProviderId: async callable}`` (Claude Platform and
+        Claude subscription), or, for older hosts, the Console callable alone.
+        """
+        discovery = self.console_discovery
+        if isinstance(discovery, Mapping):
+            return discovery.get(provider) if provider in _DISCOVERY_PROVIDERS else None
+        return discovery if provider == ProviderId.CLAUDE_PLATFORM else None
+
+    def _digest(self, secret: str) -> bytes:
+        return hmac.new(self._digest_key, secret.encode("utf-8"), hashlib.sha256).digest()
 
     async def start(self) -> None:
         """Probe the secure backend type once, off the loop; GET polling never re-probes."""
@@ -467,38 +541,136 @@ class AccountOperations:
             return _Source(kind=None, ref=None)
         _keys(source, _SOURCE_KEYS, required=("credential_kind",))
         kind = _kind(source["credential_kind"], provider)
-        if not set(source) <= _KIND_KEYS[kind]:
+        credits = _credits_source(provider, kind)
+        if not set(source) <= (_KIND_KEYS[kind] | _CREDITS_KEYS if credits else _KIND_KEYS[kind]):
             raise _invalid()
         if kind in (CredentialKind.CLAUDE_CODE_FILE, CredentialKind.CODEX_AUTH_FILE):
-            if "reference" not in source:
+            if "reference" in source:
+                reference = _reference(kind, source["reference"])
+            elif credits and existing is not None and existing.credential_kind == kind:
+                # The saved login file (its path is never sent to the page), so a
+                # prepaid-credits organization can change without naming the path.
+                reference = existing.credential_ref
+            else:
                 raise OperationError(422, "invalid_reference")
-            return _Source(kind=kind, ref=_reference(kind, source["reference"]))
-        if kind in (CredentialKind.MANUAL_BEARER, CredentialKind.API_KEY):
-            organization = existing.organization_id if existing is not None else None
-            if "secret" not in source and "persist" not in source:
-                if existing is not None and existing.credential_kind == kind:
-                    # Same kind without a new secret keeps the saved reference.
-                    return _Source(
-                        kind=kind,
-                        ref=existing.credential_ref,
-                        selector=existing.credential_selector,
-                        organization=organization,
-                    )
-                raise OperationError(422, "secret_required")
-            if "secret" not in source:
-                raise OperationError(422, "secret_required")
-            if "persist" not in source:
-                raise OperationError(422, "persist_required")
-            persist = _bool(source["persist"])
-            secret = _secret(kind, source["secret"])
-            # A valid placeholder; AccountService.save replaces it with a fresh ref.
-            return _Source(
-                kind=kind,
-                ref=f"session:{uuid4()}",
-                organization=organization,
-                secret=secret,
-                persist=persist,
-            )
+            result = _Source(kind=kind, ref=reference)
+        elif kind in _SECRET_KINDS:
+            result = self._secret_source(source, kind, existing)
+            if provider == ProviderId.CLAUDE_SUBSCRIPTION and not credits:
+                # Prepaid credits are read only through a Claude login, never an API key.
+                result.organization = None
+        else:
+            return self._choice_source(source, kind, provider, account_id, existing, revision)
+        if credits:
+            try:
+                self._credits_organization(source, result, provider, account_id, existing, revision)
+            except BaseException:
+                result.secret = None
+                raise
+        return result
+
+    @staticmethod
+    def _secret_source(source: dict, kind: CredentialKind, existing: Account | None) -> _Source:
+        organization = existing.organization_id if existing is not None else None
+        if "secret" not in source and "persist" not in source:
+            if existing is not None and existing.credential_kind == kind:
+                # Same kind without a new secret keeps the saved reference.
+                return _Source(
+                    kind=kind,
+                    ref=existing.credential_ref,
+                    selector=existing.credential_selector,
+                    organization=organization,
+                )
+            raise OperationError(422, "secret_required")
+        if "secret" not in source:
+            raise OperationError(422, "secret_required")
+        if "persist" not in source:
+            raise OperationError(422, "persist_required")
+        persist = _bool(source["persist"])
+        secret = _secret(kind, source["secret"])
+        # A valid placeholder; AccountService.save replaces it with a fresh ref.
+        return _Source(
+            kind=kind,
+            ref=f"session:{uuid4()}",
+            organization=organization,
+            secret=secret,
+            persist=persist,
+        )
+
+    def _credits_organization(
+        self,
+        source: dict,
+        result: _Source,
+        provider: ProviderId,
+        account_id: str | None,
+        existing: Account | None,
+        revision: str | None,
+    ) -> None:
+        """Set the optional Claude subscription prepaid-credits organization.
+
+        Only an explicit choice from a prepare record made for this same login sets
+        one; ``"keep"`` (or omission) keeps the saved one only while the login is
+        unchanged, and ``"none"`` clears it. Nothing is ever selected implicitly.
+        """
+        saved = existing.organization_id if existing is not None else None
+        unchanged = (
+            existing is not None
+            and existing.credential_kind == result.kind
+            and existing.credential_ref == result.ref
+            and result.secret is None
+        )
+        if "prepare_id" in source or "choice_id" in source:
+            if "organization" in source:
+                raise _invalid()
+            if "prepare_id" not in source or "choice_id" not in source:
+                raise OperationError(422, "selection_required")
+            record = self._record(source["prepare_id"])
+            choice = _string(source["choice_id"])
+            if (
+                record.provider != provider
+                or record.kind != result.kind
+                or record.original_revision != revision
+                or (account_id is not None and record.account_id != account_id)
+            ):
+                raise OperationError(410, "prepare_expired")
+            # The choice is bound to the exact login that was read.
+            if result.secret is not None:
+                if record.secret_digest is None or not hmac.compare_digest(
+                    record.secret_digest, self._digest(result.secret)
+                ):
+                    raise OperationError(410, "prepare_expired")
+            elif record.secret_digest is not None or record.reference != result.ref:
+                raise OperationError(410, "prepare_expired")
+            if choice not in record.choices:
+                raise OperationError(422, "invalid_choice")
+            result.organization = record.choices[choice]
+            result.record = record
+            return
+        if "organization" in source:
+            mode = _string(source["organization"])
+            if mode == "none":
+                result.organization = None
+                return
+            if mode != "keep":
+                raise _invalid()
+            if saved is None or not unchanged:
+                raise OperationError(422, "organization_reselect_required")
+            result.organization = saved
+            return
+        if saved is not None and not unchanged:
+            # A changed login must re-select (or explicitly clear) the organization.
+            raise OperationError(422, "organization_reselect_required")
+        result.organization = saved
+
+    def _choice_source(
+        self,
+        source: dict,
+        kind: CredentialKind,
+        provider: ProviderId,
+        account_id: str | None,
+        existing: Account | None,
+        revision: str | None,
+    ) -> _Source:
         if "prepare_id" not in source or "choice_id" not in source:
             raise OperationError(422, "selection_required")
         record = self._record(source["prepare_id"])
@@ -624,13 +796,16 @@ class AccountOperations:
         self._sweep()
         _keys(
             body,
-            {"provider", "label", "poll_interval_seconds", "enabled", "source"},
+            {"provider", "label", "poll_interval_seconds", "enabled", "source", "organization_id"},
             required=("provider", "label", "source"),
         )
         provider = _provider(body["provider"])
         label = _label(body["label"])
-        interval = _interval(body.get("poll_interval_seconds", 60))
+        interval = _interval(
+            body.get("poll_interval_seconds", default_poll_interval_seconds(provider))
+        )
         enabled = _bool(body.get("enabled", True))
+        openai_organization = _openai_organization(provider, body, None)
         source = self._source(
             body["source"], provider, account_id=None, existing=None, revision=None
         )
@@ -643,7 +818,11 @@ class AccountOperations:
                 credential_kind=source.kind,
                 credential_ref=source.ref,
                 credential_selector=source.selector,
-                organization_id=source.organization,
+                organization_id=(
+                    openai_organization
+                    if provider == ProviderId.OPENAI_PLATFORM
+                    else source.organization
+                ),
                 poll_interval_seconds=interval,
                 enabled=enabled,
             )
@@ -654,7 +833,7 @@ class AccountOperations:
 
     async def update(self, account_id: str, revision: str, body: dict) -> MutationResult:
         self._sweep()
-        _keys(body, {"label", "poll_interval_seconds", "enabled", "source"})
+        _keys(body, {"label", "poll_interval_seconds", "enabled", "source", "organization_id"})
         account_id = _uuid(account_id)
         revision = _revision(revision)
         fields: dict[str, Any] = {}
@@ -665,6 +844,9 @@ class AccountOperations:
         if "enabled" in body:
             fields["enabled"] = _bool(body["enabled"])
         existing = await self._existing(account_id, revision)
+        openai_organization = _openai_organization(
+            existing.provider, body, existing.organization_id
+        )
         source = None
         if "source" in body:
             source = self._source(
@@ -680,14 +862,19 @@ class AccountOperations:
                 credential_selector=source.selector,
                 organization_id=source.organization,
             )
+        if existing.provider == ProviderId.OPENAI_PLATFORM:
+            # Account metadata, required with or without a credential.
+            fields["organization_id"] = openai_organization
         try:
             draft = replace(existing, **fields)
         except DomainError:
             if source is not None:
                 source.secret = None
             raise _invalid() from None
-        # A rename or toggle keeps scheduler state; any source submission does not.
-        invalidate = frozenset({account_id}) if source is not None else frozenset()
+        # A rename or toggle keeps scheduler state; any source submission (or a new
+        # OpenAI organization, which the read is bound to) does not.
+        rebind = source is not None or draft.organization_id != existing.organization_id
+        invalidate = frozenset({account_id}) if rebind else frozenset()
         return await self._write(draft, existing, source, invalidate)
 
     async def remove(self, account_id: str, revision: str) -> MutationResult:
@@ -741,7 +928,11 @@ class AccountOperations:
             del self._reconnects[account_id]
 
     async def prepare(self, body: dict) -> dict[str, Any]:
-        """Read Grok scopes or discover Console organizations; never auto-selects."""
+        """Read Grok scopes or discover organizations; never auto-selects.
+
+        Organizations are discovered for Claude Platform (Console session) and for
+        the optional Claude subscription prepaid-credits read (its Claude login).
+        """
         self._sweep()
         _keys(
             body,
@@ -777,6 +968,8 @@ class AccountOperations:
             if "reference" in body:
                 raise _invalid()
             return await self._prepare_console(body, provider, account_id, existing, revision)
+        if _credits_source(provider, kind):
+            return await self._prepare_credits(body, provider, kind, account_id, existing, revision)
         raise OperationError(422, "invalid_kind")
 
     def _store_record(self, record: _Prepare) -> dict[str, Any]:
@@ -895,44 +1088,131 @@ class AccountOperations:
             secret = _secret(kind, body["secret"])
         elif existing is None or existing.credential_kind != kind or not existing.credential_ref:
             raise OperationError(422, "secret_required")
-        if self.console_discovery is None:
+        record = self._new_record(provider, kind, account_id, revision)
+        if secret is None:
+            base = existing
+        else:
+            base = Account(
+                id=record.account_id,
+                provider=provider,
+                label="prepare",
+                credential_kind=kind,
+                credential_ref=f"session:{uuid4()}",
+            )
+        # The Console save does not resend the key: the record keeps it as an
+        # unreferenced session entry until save, expiry or eviction.
+        return await self._discover(
+            record, base, existing, secret, keep_secret=True, result_kind="console_organization"
+        )
+
+    async def _prepare_credits(
+        self,
+        body: dict,
+        provider: ProviderId,
+        kind: CredentialKind,
+        account_id: str | None,
+        existing: Account | None,
+        revision: str | None,
+    ) -> dict[str, Any]:
+        """Discover the Claude profile's organization for the optional credits read.
+
+        A typed bearer is resolved through a temporary session entry deleted right
+        after resolution; the record keeps only a keyed digest, so the save must
+        resend the same bearer. The draft carries no organization: the profile read
+        is unscoped.
+        """
+        record = self._new_record(provider, kind, account_id, revision)
+        secret = None
+        same_kind = existing is not None and existing.credential_kind == kind
+        if kind in FILE_KINDS:
+            if "secret" in body:
+                raise _invalid()
+            if "reference" in body:
+                reference = _reference(kind, body["reference"])
+            elif same_kind:
+                reference = existing.credential_ref
+            else:
+                raise OperationError(422, "invalid_reference")
+        else:
+            if "reference" in body:
+                raise _invalid()
+            if "secret" in body:
+                secret = _secret(kind, body["secret"])
+                record.secret_digest = self._digest(secret)
+                reference = None
+            elif same_kind and existing.credential_ref:
+                reference = existing.credential_ref
+            else:
+                raise OperationError(422, "secret_required")
+        record.reference = reference
+        if same_kind and reference is not None and reference == existing.credential_ref:
+            base = replace(existing, organization_id=None)
+        else:
+            base = Account(
+                id=record.account_id,
+                provider=provider,
+                label="prepare",
+                credential_kind=kind,
+                credential_ref=reference if reference is not None else f"session:{uuid4()}",
+            )
+        return await self._discover(
+            record, base, existing, secret, keep_secret=False, result_kind="claude_organization"
+        )
+
+    async def _discover(
+        self,
+        record: _Prepare,
+        base: Account,
+        existing: Account | None,
+        secret: str | None,
+        *,
+        keep_secret: bool,
+        result_kind: str,
+    ) -> dict[str, Any]:
+        """One throttled, explicit discovery; every failure is a curated code."""
+        discovery = self.discovery_for(record.provider)
+        if discovery is None:
             raise OperationError(502, "discovery_failed")
         retry = self._discovery_retry()
         if retry is not None:
             raise OperationError(409, "discovery_busy", retry_after=retry)
-        record = self._new_record(provider, kind, account_id, revision)
         stored = False
         async with self._discovery:
             self._discovery_starts.append(self._monotonic())
+            temporary = None
             try:
+                draft = base
                 if secret is not None:
                     try:
                         # A session put is an in-memory insert with no I/O. Run it on
                         # the loop: a cancelled thread could store the secret after
                         # the ref was lost, leaving it unreachable by cleanup.
-                        record.temp_ref = self.credentials.put(
-                            record.account_id, secret, persist=False
-                        )
+                        temporary = self.credentials.put(record.account_id, secret, persist=False)
                     except Exception:  # noqa: BLE001 - Session puts never contact a keyring.
                         raise OperationError(500, "internal_error") from None
                     finally:
                         secret = None
-                    draft = Account(
-                        id=record.account_id,
-                        provider=provider,
-                        label="prepare",
-                        credential_kind=kind,
-                        credential_ref=record.temp_ref,
-                    )
-                else:
-                    draft = existing
+                    draft = replace(base, credential_ref=temporary)
+                    if keep_secret:
+                        # Deleted by ``_discard`` together with the record.
+                        record.temp_ref = temporary
+                        temporary = None
                 try:
-                    credential = await asyncio.to_thread(self.resolver.resolve, draft)
+                    if draft.credential_kind in FILE_KINDS:
+                        credential = await self._file_read(self.resolver.resolve, draft)
+                    else:
+                        credential = await asyncio.to_thread(self.resolver.resolve, draft)
                 except CredentialResolutionError:
                     raise OperationError(422, "credential_unavailable") from None
+                finally:
+                    if temporary is not None:
+                        # Claude credits: the bearer is needed only for this one read.
+                        with contextlib.suppress(Exception):
+                            self.credentials.delete(temporary)
+                        temporary = None
                 try:
                     async with asyncio.timeout(self.DISCOVERY_SECONDS):
-                        organizations = tuple(await self.console_discovery(credential))
+                        organizations = tuple(await discovery(credential))
                 except Exception:  # noqa: BLE001 - Redact network/auth/schema errors and timeouts.
                     raise OperationError(502, "discovery_failed") from None
                 finally:
@@ -955,14 +1235,13 @@ class AccountOperations:
                             and existing.organization_id == choice.id,
                         }
                     )
-                result = {
-                    **self._store_record(record),
-                    "kind": "console_organization",
-                    "choices": choices,
-                }
+                result = {**self._store_record(record), "kind": result_kind, "choices": choices}
                 stored = True
                 return result
             finally:
+                if temporary is not None:
+                    with contextlib.suppress(Exception):
+                        self.credentials.delete(temporary)
                 if not stored:
                     self._discard(record)
 

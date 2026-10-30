@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from cli_usage_api.domain import Money, ProviderId, Snapshot
+from cli_usage_api.domain import ExactMoney, Money, ProviderId, Snapshot
 
 LOGGER = logging.getLogger("cli_usage_api.debug")
 LOGGER.propagate = False
@@ -41,6 +41,8 @@ _SECRET_PARTS = (
     "session",
     "jwt",
     "refresh",
+    # OpenAI dashboard sessions: ``session.sensitive_id``.
+    "sensitive",
 )
 _JWT = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*")
 # Undecodable text: a quoted key's value (possibly unterminated) or key=value pairs.
@@ -265,6 +267,10 @@ def _money(value: Money | None) -> dict[str, Any] | None:
     return {"minor": value.minor, "currency": value.currency, "exponent": value.exponent}
 
 
+def _exact(value: ExactMoney | None) -> dict[str, Any] | None:
+    return None if value is None else {"amount": value.amount, "currency": value.currency}
+
+
 def snapshot(provider: ProviderId, result: Snapshot) -> None:
     """Summarize what an adapter (or a failed attempt) produced before merging."""
     if not enabled(provider):
@@ -299,6 +305,7 @@ def snapshot(provider: ProviderId, result: Snapshot) -> None:
                 "spend_limit": _money(metric.spend_limit),
                 "credits": metric.credits,
                 "unlimited": metric.unlimited,
+                "exact_balance": _exact(metric.exact_balance),
                 "shared_pool_id": metric.shared_pool_id,
             }
         )

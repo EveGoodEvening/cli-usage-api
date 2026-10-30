@@ -6,9 +6,16 @@ import {
   MAX_LABEL,
   STORAGE_LABELS,
   allowedKinds,
+  canKeepCredits,
   canKeepReference,
   canReuseSecret,
+  creditsSection,
+  creditsUsesSaved,
+  defaultInterval,
   editDraft,
+  formProviders,
+  POLL_FLOORS,
+  providerName,
   isFileKind,
   needsPrepare,
   needsSecret,
@@ -23,11 +30,11 @@ import {
   saveUncertain,
   SAVE_UNCERTAIN_NOTE,
   validateDraft,
+  validReference,
   withKind,
   type Draft,
   type DraftErrors,
 } from "../accountForm";
-import { PROVIDERS, PROVIDER_ORDER } from "../semantics";
 import type { AccountConfig, Capabilities, MutationResult, PrepareChoice, PrepareResult, ProviderId } from "../types";
 
 /** accounts.CONSOLE_SESSION_WARNING, verbatim. */
@@ -36,6 +43,27 @@ export const CONSOLE_SESSION_WARNING =
   "Do not enter your password, a full Cookie header, or a HAR file.";
 export const CONSOLE_SESSION_WARNING_ZH =
   "高敏感度账号会话：只输入 sessionKey 的值。不要输入密码、完整的 Cookie 请求头或 HAR 文件。";
+
+/** accounts.OPENAI_SESSION_WARNING, verbatim. */
+export const OPENAI_SESSION_WARNING =
+  "High-sensitivity account session: this is the platform.openai.com dashboard session key. " +
+  "It grants full dashboard access to the account (billing, purchases, creating API keys); " +
+  "treat it like a password session. Paste only the token value; never your password, a " +
+  "full Cookie or Authorization header, or a HAR file. It expires within days and must be " +
+  "pasted again (no refresh). It is stored only in the encrypted OS store or kept for this " +
+  "session only. This app performs only one read-only GET of the credit balance. " +
+  "API keys (sk-...) do not work here.";
+export const OPENAI_SESSION_WARNING_ZH =
+  "高敏感度账号会话：这是 platform.openai.com 控制台的会话密钥，可完全访问该账号的控制台" +
+  "（账单、购买、创建 API key），请像对待密码会话一样保护它。只粘贴令牌值本身；不要输入密码、" +
+  "完整的 Cookie 或 Authorization 请求头，也不要上传 HAR 文件。它几天内就会过期，之后需要重新粘贴" +
+  "（不会自动续期）。它只保存在服务器的加密系统密钥环中，或只保留到本次会话结束。本工具只发送一个" +
+  "只读的 GET 请求读取余额。API key（sk-…）在这里不能使用。";
+
+/** The Claude subscription prepaid-credits read: optional, explicit, one extra request. */
+export const CREDITS_HELP =
+  "可选：读取 Claude 已购 credits 余额。“发现组织”只读取当前登录的资料（只读），不会自动选择；" +
+  "明确选择组织后，每次刷新会多发一个只读请求。选择“不读取”则只读取用量。";
 
 /** Choice text: Grok scopes and nameless organizations are numbered, never named by id. */
 export function choiceLabel(kind: PrepareResult["kind"], choice: PrepareChoice, index: number): string {
@@ -132,6 +160,15 @@ export function StorageChoice({
       </label>
       {error ? <p className="form-error">{error}</p> : null}
     </fieldset>
+  );
+}
+
+export function OpenAIWarning() {
+  return (
+    <div className="rule-note rule-note--warn">
+      <p>{OPENAI_SESSION_WARNING_ZH}</p>
+      <p lang="en">{OPENAI_SESSION_WARNING}</p>
+    </div>
   );
 }
 
@@ -272,7 +309,13 @@ export function AccountForm({
   };
   const chooseProvider = (provider: ProviderId) => {
     abortPrepare();
-    setDraft((d) => ({ ...newDraft(provider, secureStore), label: d.label, interval: d.interval, enabled: d.enabled }));
+    setDraft((d) => ({
+      ...newDraft(provider, secureStore),
+      label: d.label,
+      // An untouched default follows the provider's own default (its polling floor).
+      interval: d.interval.trim() === String(defaultInterval(d.provider)) ? String(defaultInterval(provider)) : d.interval,
+      enabled: d.enabled,
+    }));
     setConsoleKey("");
     setPrepared(null);
     setDirty(true);
@@ -303,7 +346,7 @@ export function AccountForm({
       setErrors({ reference: referenceError });
       return;
     }
-    const key = draft.kind === "console_session" ? consoleKey : "";
+    const key = draft.kind === "console_session" && !creditsSection(draft, original) ? consoleKey : "";
     const body = prepareBody(draft, original, key);
     if (!body) return;
     // The key leaves page state as soon as it is sent.
@@ -391,6 +434,12 @@ export function AccountForm({
     set && (needsSecret(kind) || (kind === "console_session" && (consoleKey !== "" || draft.preparedSecret)));
   const sameSecretKind = original?.credential_kind === kind && needsSecret(kind);
   const reuseKey = canReuseSecret(kind, original);
+  const credits = creditsSection(draft, original);
+  const creditsSaved = creditsUsesSaved(draft, original);
+  const creditsReady =
+    creditsSaved ||
+    (needsSecret(kind) ? draft.secret !== "" : draft.reference !== "custom" || validReference(kind, draft.path.trim()));
+  const floor = POLL_FLOORS[draft.provider];
 
   return (
     <section className="acct-form" aria-labelledby="acct-form-title">
@@ -407,13 +456,13 @@ export function AccountForm({
         {original ? (
           <p className="field">
             <span className="field__label">服务</span>
-            <span>{PROVIDERS[draft.provider].name}</span>
+            <span>{providerName(draft.provider)}</span>
           </p>
         ) : (
           <fieldset className="field">
             <legend className="field__label">服务</legend>
             <div className="choice-grid">
-              {PROVIDER_ORDER.map((provider) => (
+              {formProviders().map((provider) => (
                 <label key={provider} className="check">
                   <input
                     type="radio"
@@ -421,7 +470,7 @@ export function AccountForm({
                     checked={draft.provider === provider}
                     onChange={() => chooseProvider(provider)}
                   />
-                  <span>{PROVIDERS[provider].name}</span>
+                  <span>{providerName(provider)}</span>
                 </label>
               ))}
             </div>
@@ -593,6 +642,27 @@ export function AccountForm({
           </div>
         ) : null}
 
+        {draft.provider === "openai_platform" ? (
+          <label className="field">
+            <span className="field__label">OpenAI 组织 ID</span>
+            <input
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              autoCapitalize="off"
+              placeholder={original ? "留空保留已保存的组织（不显示）" : "org-…"}
+              value={draft.organizationId}
+              onChange={(e) => update({ organizationId: e.target.value })}
+            />
+            <small className="field__help">
+              在 platform.openai.com 的组织设置中查看（org- 开头）。余额读取绑定到这个组织；服务器不会回显已保存的组织 ID。
+            </small>
+            {errors.organization ? <p className="form-error">{errors.organization}</p> : null}
+          </label>
+        ) : null}
+
+        {set && kind === "openai_platform_session" ? <OpenAIWarning /> : null}
+
         {set && needsSecret(kind) ? (
           <label className="field">
             <span className="field__label">{KIND_LABELS[kind]}</span>
@@ -600,13 +670,64 @@ export function AccountForm({
               {...SECRET_INPUT_PROPS}
               value={draft.secret}
               placeholder={sameSecretKind ? "留空保留现有凭据" : undefined}
-              onChange={(e) => update({ secret: e.target.value })}
+              onChange={(e) => {
+                update({ secret: e.target.value });
+                // A credits discovery read the previous bearer: its choice no longer applies.
+                if (credits) resetPrepare();
+              }}
             />
             {kind === "api_key" ? (
               <small className="field__help">API key 只在本地保存，不会启用订阅额度或余额读取。</small>
             ) : null}
             {errors.secret ? <p className="form-error">{errors.secret}</p> : null}
           </label>
+        ) : null}
+
+        {credits ? (
+          <fieldset className="field">
+            <legend className="field__label">Claude 已购 credits 余额</legend>
+            <p className="field__help">{CREDITS_HELP}</p>
+            <label className="check">
+              <input
+                type="radio"
+                name="credits"
+                checked={draft.credits === "none"}
+                onChange={() => update({ credits: "none", choiceId: null })}
+              />
+              <span>不读取 credits 余额</span>
+            </label>
+            {canKeepCredits(draft, original) ? (
+              <label className="check">
+                <input
+                  type="radio"
+                  name="credits"
+                  checked={draft.credits === "keep"}
+                  onChange={() => update({ credits: "keep", choiceId: null })}
+                />
+                <span>保留已保存的组织（不显示组织 ID）</span>
+              </label>
+            ) : null}
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={runPrepare}
+              disabled={preparing || busy || !creditsReady}
+            >
+              {preparing ? "正在读取…" : creditsSaved ? "发现组织（使用已保存的登录）" : "发现组织"}
+            </button>
+            {needsSecret(kind) && !creditsSaved ? (
+              <small className="field__help">发现时会发送上面输入的令牌；保存时需使用同一个令牌。</small>
+            ) : null}
+            {prepared && prepared.kind === "claude_organization" ? (
+              <ChoiceList
+                prepared={prepared}
+                value={draft.credits === "select" ? draft.choiceId : null}
+                onChange={(id) => update({ credits: "select", choiceId: id })}
+                disabled={busy}
+              />
+            ) : null}
+            {errors.credits ? <p className="form-error">{errors.credits}</p> : null}
+          </fieldset>
         ) : null}
 
         {showPersist ? (
@@ -642,7 +763,7 @@ export function AccountForm({
               onChange={(e) => update({ interval: e.target.value })}
             />
             <small className="field__help">
-              30–3600{draft.provider === "claude_subscription" ? "；Claude 订阅最少按 180 秒刷新" : ""}
+              30–3600{floor ? `；${providerName(draft.provider)} 最少按 ${floor} 秒刷新` : ""}
             </small>
             {errors.interval ? <p className="form-error">{errors.interval}</p> : null}
           </label>

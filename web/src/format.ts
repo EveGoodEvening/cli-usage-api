@@ -1,7 +1,9 @@
-// Pure presentation helpers. Values are shown exactly as the API reports them:
-// decimals stay strings, money stays integer minor units, unknown is "—".
+// Pure presentation helpers. Values are shown as the API reports them: decimals
+// stay strings, money stays integer minor units, unknown is "—". The only
+// display rounding is half-even to two places for Codex credits and OpenAI
+// exact money (user decision, PLAN.md); the data itself is never rounded.
 
-import type { Money } from "./types";
+import type { ExactMoney, Money } from "./types";
 
 export const UNKNOWN = "—";
 
@@ -91,10 +93,67 @@ export function fixedPointText(value: string | null | undefined): string {
   return match[1] ? `-${text}` : text;
 }
 
-/** "<amount> credits"; an unparseable amount is "—", never zero. */
+/** A rounded display amount and whether rounding changed the exact value. */
+export interface Rounded {
+  text: string;
+  changed: boolean;
+}
+
+/**
+ * An exact decimal (Python str(Decimal), possibly negative or in exponent form)
+ * rounded half-even to two places, always with two decimals, like the server's
+ * domain.format_two_decimals: "137.5" -> "137.50", "2.675" -> "2.68",
+ * "0.125" -> "0.12". The sign is kept as written ("-0.001" -> "-0.00"), as
+ * Python's Decimal.quantize does. Display only: the data stays exact. Null when
+ * unsupported, never zero.
+ */
+export function roundTwoDecimals(value: string | null | undefined): Rounded | null {
+  if (typeof value !== "string") return null;
+  const match = SIGNED_DECIMAL_RE.exec(value);
+  if (!match) return null;
+  const parsed = parseDecimal(value.slice(match[1]!.length));
+  if (!parsed) return null;
+  let units: bigint;
+  let changed = false;
+  if (parsed.scale <= 2) {
+    units = parsed.units * 10n ** BigInt(2 - parsed.scale);
+  } else {
+    const divisor = 10n ** BigInt(parsed.scale - 2);
+    units = parsed.units / divisor;
+    const remainder = parsed.units % divisor;
+    changed = remainder !== 0n;
+    const twice = remainder * 2n;
+    if (twice > divisor || (twice === divisor && units % 2n === 1n)) units += 1n;
+  }
+  const text = formatExact({ units, scale: 2 });
+  return { text: match[1] ? `-${text}` : text, changed };
+}
+
+/** "<amount rounded half-even to 2 dp> credits"; an unparseable amount is "—", never zero. */
 export function creditsText(value: string | null | undefined): string {
-  const text = fixedPointText(value);
-  return text === UNKNOWN ? UNKNOWN : `${text} credits`;
+  const rounded = roundTwoDecimals(value);
+  return rounded ? `${rounded.text} credits` : UNKNOWN;
+}
+
+/** Note shown whenever cents rounding changed an exact server amount (app.ROUNDED_NOTE). */
+export const ROUNDED_NOTE = "服务端金额已舍入到分 / rounded to cents";
+
+/**
+ * An exact money amount at cents, e.g. {amount: "3.0700000000000003",
+ * currency: "USD"} -> "3.07 USD", changed. Null when the amount or currency is
+ * unsupported.
+ */
+export function exactMoneyCents(money: ExactMoney | null | undefined): Rounded | null {
+  if (!money || typeof money.currency !== "string" || !/^[A-Z]{3}$/.test(money.currency)) return null;
+  const rounded = roundTwoDecimals(money.amount);
+  return rounded ? { text: `${rounded.text} ${money.currency}`, changed: rounded.changed } : null;
+}
+
+/** The exact server amount in plain fixed point with its currency, or "—". */
+export function exactMoneyText(money: ExactMoney | null | undefined): string {
+  if (!money || typeof money.currency !== "string" || !/^[A-Z]{3}$/.test(money.currency)) return UNKNOWN;
+  const text = fixedPointText(money.amount);
+  return text === UNKNOWN ? UNKNOWN : `${text} ${money.currency}`;
 }
 
 /** Display a percentage string verbatim with a % sign; never rounded or truncated. */

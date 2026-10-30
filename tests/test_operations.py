@@ -944,3 +944,532 @@ async def test_file_reads_are_bounded_to_two(env):
     while state["now"] and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
     assert state["max"] == 2
+
+
+# --- Claude subscription prepaid-credits organization ------------------------------
+
+
+class Recording(Discovery):
+    """Discovery that also records the organization the credential carried."""
+
+    def __init__(self, choices=WORK) -> None:
+        super().__init__(choices)
+        self.organizations = []
+
+    async def __call__(self, credential):
+        self.organizations.append(credential.organization_id)
+        return await super().__call__(credential)
+
+
+def claude_login(env, token="claude-file-token"):
+    later = int((datetime.now(UTC) + timedelta(hours=6)).timestamp() * 1000)
+    return write(
+        env.dirs["CLAUDE_CONFIG_DIR"] / ".credentials.json",
+        {"claudeAiOauth": {"accessToken": token, "expiresAt": later}},
+    )
+
+
+def credits_prepare(**extra):
+    return {
+        "provider": "claude_subscription",
+        "credential_kind": "claude_code_file",
+        "reference": "default",
+        **extra,
+    }
+
+
+def claude_create(**source):
+    return {
+        "provider": "claude_subscription",
+        "label": "Claude",
+        "source": {"credential_kind": "claude_code_file", "reference": "default", **source},
+    }
+
+
+def by_provider(claude=None, console=None):
+    found = {}
+    if claude is not None:
+        found[ProviderId.CLAUDE_SUBSCRIPTION] = claude
+    if console is not None:
+        found[ProviderId.CLAUDE_PLATFORM] = console
+    return found
+
+
+async def test_claude_credits_prepare_is_explicit_and_binds_the_choice(env):
+    claude_login(env)
+    discovery = Recording()
+    ops, host, _ = make(env, discovery=by_provider(claude=discovery))
+    prepared = await ops.prepare(credits_prepare())
+    assert prepared["kind"] == "claude_organization"
+    assert prepared["choices"] == [
+        {"id": "c1", "label": "Work org", "legacy": False, "current": False}
+    ]
+    # The profile read is unscoped and nothing is saved or selected by discovery.
+    assert discovery.seen == ["claude-file-token"] and discovery.organizations == [None]
+    assert ORG not in json.dumps(prepared) and env.store.load() == () and host.calls == []
+    # A save without the choice never auto-selects even the single organization.
+    plain = await ops.create(claude_create())
+    assert plain.account.organization_id is None
+    selected = await ops.create(claude_create(prepare_id=prepared["prepare_id"], choice_id="c1"))
+    assert selected.account.organization_id == ORG
+    assert selected.account.poll_interval_seconds == 180
+    assert host.calls[-1][1] == frozenset({selected.account.id})
+    view = ops.config_view(selected.account)
+    assert view["organization_selected"] is True and ORG not in json.dumps(view)
+    assert ops._records == {}
+
+
+async def test_claude_credits_nameless_org_and_empty_profile(env):
+    claude_login(env)
+    discovery = Recording((OrganizationChoice(ORG, ORG),))
+    clock = Clock()
+    ops, _, _ = make(env, discovery=by_provider(claude=discovery), clock=clock)
+    prepared = await ops.prepare(credits_prepare())
+    assert prepared["choices"][0]["label"] is None and ORG not in json.dumps(prepared)
+    discovery.choices = ()
+    clock.value += 11
+    await fails(ops.prepare(credits_prepare()), 422, "no_choices")
+
+
+async def test_claude_credits_choice_is_bound_to_the_login_that_was_read(env):
+    claude_login(env)
+    other = claude_login(env)  # same default file; a custom path is a different login
+    custom = write(env.tmp / "other" / ".credentials.json", json.loads(other.read_text()))
+    ops, _, _ = make(env, discovery=by_provider(claude=Recording()))
+    prepared = await ops.prepare(credits_prepare())
+    await fails(
+        ops.create(
+            {
+                "provider": "claude_subscription",
+                "label": "Claude",
+                "source": {
+                    "credential_kind": "claude_code_file",
+                    "reference": str(custom),
+                    "prepare_id": prepared["prepare_id"],
+                    "choice_id": "c1",
+                },
+            }
+        ),
+        410,
+        "prepare_expired",
+    )
+    await fails(
+        ops.create(claude_create(prepare_id=prepared["prepare_id"], choice_id="c9")),
+        422,
+        "invalid_choice",
+    )
+    await fails(
+        ops.create(claude_create(prepare_id=prepared["prepare_id"])), 422, "selection_required"
+    )
+    await fails(
+        ops.create(
+            claude_create(prepare_id=prepared["prepare_id"], choice_id="c1", organization="keep")
+        ),
+        400,
+        "invalid_request",
+    )
+
+
+async def test_claude_credits_manual_bearer_digest_binding(env):
+    discovery = Recording()
+    clock = Clock()
+    ops, _, credentials = make(env, discovery=by_provider(claude=discovery), clock=clock)
+    prepared = await ops.prepare(
+        {
+            "provider": "claude_subscription",
+            "credential_kind": "manual_bearer",
+            "secret": BEARER,
+        }
+    )
+    assert discovery.seen == [BEARER]
+    # The typed bearer is not kept after discovery; the record holds only a digest.
+    assert credentials._session == {}
+    (record,) = ops._records.values()
+    assert record.temp_ref is None and BEARER.encode() not in record.secret_digest
+
+    def body(secret):
+        return {
+            "provider": "claude_subscription",
+            "label": "Bearer",
+            "source": {
+                "credential_kind": "manual_bearer",
+                "secret": secret,
+                "persist": False,
+                "prepare_id": prepared["prepare_id"],
+                "choice_id": "c1",
+            },
+        }
+
+    await fails(ops.create(body("different-bearer-value")), 410, "prepare_expired")
+    created = (await ops.create(body(BEARER))).account
+    assert created.organization_id == ORG and credentials.get(created.credential_ref) == BEARER
+    # Rediscovery with the saved bearer (edit, no secret) is bound to the saved ref.
+    clock.value += 11
+    edit = await ops.prepare(
+        {
+            "account_id": created.id,
+            "revision": ops.revision(created),
+            "credential_kind": "manual_bearer",
+        }
+    )
+    assert discovery.seen[-1] == BEARER and discovery.organizations[-1] is None
+    assert edit["choices"][0]["current"] is True
+    await fails(
+        ops.update(
+            created.id,
+            ops.revision(created),
+            {
+                "source": {
+                    "credential_kind": "manual_bearer",
+                    "secret": "another-bearer-value",
+                    "persist": False,
+                    "prepare_id": edit["prepare_id"],
+                    "choice_id": "c1",
+                }
+            },
+        ),
+        410,
+        "prepare_expired",
+    )
+
+
+async def test_claude_credits_changed_login_requires_reselect(env):
+    claude_login(env)
+    custom = write(
+        env.tmp / "other" / ".credentials.json",
+        json.loads((env.dirs["CLAUDE_CONFIG_DIR"] / ".credentials.json").read_text()),
+    )
+    saved = account(
+        credential_kind=CredentialKind.CLAUDE_CODE_FILE,
+        credential_ref="default",
+        organization_id=ORG,
+        poll_interval_seconds=180,
+    )
+    ops, host, _ = make(env, [saved])
+
+    def source(reference, **extra):
+        return {"source": {"credential_kind": "claude_code_file", "reference": reference, **extra}}
+
+    await fails(
+        ops.update(saved.id, ops.revision(saved), source(str(custom))),
+        422,
+        "organization_reselect_required",
+    )
+    await fails(
+        ops.update(saved.id, ops.revision(saved), source(str(custom), organization="keep")),
+        422,
+        "organization_reselect_required",
+    )
+    await fails(
+        ops.update(saved.id, ops.revision(saved), source("default", organization="other")),
+        400,
+        "invalid_request",
+    )
+    assert env.store.load() == (saved,) and host.calls == []
+    # The same login keeps the saved organization, implicitly or explicitly.
+    kept = (await ops.update(saved.id, ops.revision(saved), source("default"))).account
+    assert kept.organization_id == ORG
+    kept = (
+        await ops.update(kept.id, ops.revision(kept), source("default", organization="keep"))
+    ).account
+    assert kept.organization_id == ORG
+    cleared = (
+        await ops.update(kept.id, ops.revision(kept), source(str(custom), organization="none"))
+    ).account
+    assert cleared.organization_id is None
+    # A rename keeps the organization and scheduler state.
+    renamed = (await ops.update(kept.id, ops.revision(cleared), {"label": "Renamed"})).account
+    assert renamed.organization_id is None and host.calls[-1][1] == frozenset()
+
+
+async def test_claude_api_key_never_carries_a_credits_organization(env):
+    saved = account(
+        credential_kind=CredentialKind.CLAUDE_CODE_FILE,
+        credential_ref="default",
+        organization_id=ORG,
+    )
+    ops, _, _ = make(env, [saved])
+    await fails(
+        ops.update(
+            saved.id,
+            ops.revision(saved),
+            {
+                "source": {
+                    "credential_kind": "api_key",
+                    "secret": "sk-ant-api-synthetic",
+                    "persist": False,
+                    "organization": "keep",
+                }
+            },
+        ),
+        400,
+        "invalid_request",
+    )
+    updated = (
+        await ops.update(
+            saved.id,
+            ops.revision(saved),
+            {
+                "source": {
+                    "credential_kind": "api_key",
+                    "secret": "sk-ant-api-synthetic",
+                    "persist": False,
+                }
+            },
+        )
+    ).account
+    assert updated.credential_kind == CredentialKind.API_KEY and updated.organization_id is None
+    await fails(
+        ops.prepare(
+            {
+                "account_id": saved.id,
+                "revision": ops.revision(updated),
+                "credential_kind": "api_key",
+            }
+        ),
+        422,
+        "invalid_kind",
+    )
+
+
+async def test_discovery_mapping_routes_per_provider_and_shares_the_throttle(env):
+    claude_login(env)
+    claude, console = Recording(), Discovery()
+    clock = Clock()
+    ops, _, _ = make(env, discovery=by_provider(claude=claude, console=console), clock=clock)
+    await ops.prepare(credits_prepare())
+    busy = await fails(ops.prepare(console_prepare()), 409, "discovery_busy")
+    assert busy.retry_after == 10
+    clock.value += 11
+    await ops.prepare(console_prepare())
+    assert claude.seen == ["claude-file-token"] and console.seen == [SECRET]
+    # A bare callable is the Console discovery only.
+    legacy, _, _ = make(env, discovery=console)
+    await fails(legacy.prepare(credits_prepare()), 502, "discovery_failed")
+    only_claude, _, _ = make(env, discovery=by_provider(claude=claude))
+    await fails(only_claude.prepare(console_prepare()), 502, "discovery_failed")
+
+
+async def test_claude_credits_prepare_failures_leave_no_secret(env):
+    discovery = Recording()
+    discovery.error = RuntimeError(BEARER)
+    ops, _, credentials = make(env, discovery=by_provider(claude=discovery))
+    error = await fails(
+        ops.prepare(
+            {
+                "provider": "claude_subscription",
+                "credential_kind": "manual_bearer",
+                "secret": BEARER,
+            }
+        ),
+        502,
+        "discovery_failed",
+    )
+    assert BEARER not in repr(error)
+    assert credentials._session == {} and ops._records == {}
+    await fails(ops.prepare(credits_prepare()), 409, "discovery_busy")
+    ops._discovery_starts.clear()
+    # No login file: a curated code, and the reference-less manual kind needs a secret.
+    await fails(ops.prepare(credits_prepare()), 422, "credential_unavailable")
+    ops._discovery_starts.clear()
+    await fails(
+        ops.prepare({"provider": "claude_subscription", "credential_kind": "manual_bearer"}),
+        422,
+        "secret_required",
+    )
+    await fails(ops.prepare(credits_prepare(secret=BEARER)), 400, "invalid_request")
+
+
+# --- OpenAI Platform ------------------------------------------------------------------
+
+
+OPENAI_ORG = "org-SyntheticOrg1234"
+OPENAI_SESSION = "sess-synthetic-dashboard-session-never-echo"
+
+
+def openai_create(**extra):
+    return {
+        "provider": "openai_platform",
+        "label": "OpenAI",
+        "organization_id": OPENAI_ORG,
+        "source": {
+            "credential_kind": "openai_platform_session",
+            "secret": OPENAI_SESSION,
+            "persist": False,
+        },
+        **extra,
+    }
+
+
+async def test_openai_create_session_and_required_organization(env):
+    ops, host, credentials = make(env)
+    created = (await ops.create(openai_create(organization_id=f"  {OPENAI_ORG} "))).account
+    assert created.provider == ProviderId.OPENAI_PLATFORM
+    assert created.credential_kind == CredentialKind.OPENAI_PLATFORM_SESSION
+    assert created.organization_id == OPENAI_ORG
+    assert created.poll_interval_seconds == 300
+    assert credentials.get(created.credential_ref) == OPENAI_SESSION
+    view = ops.config_view(created)
+    assert view["storage"] == "session" and view["organization_selected"] is True
+    text = json.dumps(view)
+    assert OPENAI_ORG not in text and OPENAI_SESSION not in text
+    body = openai_create()
+    del body["organization_id"]
+    await fails(ops.create(body), 422, "organization_required")
+    for bad in ("org-short", "SyntheticOrg1234", "org-has space1234", 7):
+        await fails(
+            ops.create(openai_create(organization_id=bad)),
+            422 if bad != 7 else 400,
+            "invalid_organization" if bad != 7 else "invalid_request",
+        )
+    # Never accepted for another provider.
+    await fails(ops.create({**codex_body(), "organization_id": OPENAI_ORG}), 400, "invalid_request")
+    # Without a credential the organization is still required metadata.
+    bare = (await ops.create(openai_create(source=None))).account
+    assert bare.credential_kind is None and bare.organization_id == OPENAI_ORG
+    assert len(host.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-proj-synthetic-api-key-value-0000",
+        "Bearer sess-synthetic-dashboard-session",
+        "Cookie: a=sess-synthetic-dashboard-session",
+        '{"sensitive_id": "sess-synthetic-dashboard"}',
+        "sess-short",
+        "sess-synthetic\nsecond-line-value-0000",
+    ],
+)
+async def test_openai_rejects_non_session_secrets(env, secret):
+    ops, host, credentials = make(env)
+    body = openai_create()
+    body["source"]["secret"] = secret
+    error = await fails(ops.create(body), 422, "invalid_secret")
+    assert secret not in repr(error)
+    assert env.store.load() == () and host.calls == [] and credentials._session == {}
+
+
+async def test_openai_only_session_kind_and_persist_needs_secure_store(env):
+    ops, _, _ = make(env)
+    for kind in ("api_key", "manual_bearer", "console_session"):
+        body = openai_create()
+        body["source"]["credential_kind"] = kind
+        await fails(ops.create(body), 422, "invalid_kind")
+    body = openai_create()
+    body["source"]["persist"] = True
+    await fails(ops.create(body), 503, "secure_store_unavailable")
+    await fails(
+        ops.prepare({"provider": "openai_platform", "credential_kind": "openai_platform_session"}),
+        422,
+        "invalid_kind",
+    )
+    # The session kind is never accepted for another provider.
+    await fails(
+        ops.create(
+            {
+                "provider": "claude_subscription",
+                "label": "x",
+                "source": {
+                    "credential_kind": "openai_platform_session",
+                    "secret": OPENAI_SESSION,
+                    "persist": False,
+                },
+            }
+        ),
+        422,
+        "invalid_kind",
+    )
+
+
+async def test_openai_update_organization_rebinds_and_keeps_otherwise(env):
+    ops, host, credentials = make(env)
+    created = (await ops.create(openai_create())).account
+    renamed = (await ops.update(created.id, ops.revision(created), {"label": "Renamed"})).account
+    assert renamed.organization_id == OPENAI_ORG and host.calls[-1][1] == frozenset()
+    moved = (
+        await ops.update(
+            renamed.id, ops.revision(renamed), {"organization_id": "org-AnotherOrg5678"}
+        )
+    ).account
+    assert moved.organization_id == "org-AnotherOrg5678"
+    assert moved.credential_ref == created.credential_ref
+    assert host.calls[-1][1] == frozenset({created.id})
+    # Keeping the saved session (no secret) and detaching both keep the organization.
+    kept = (
+        await ops.update(
+            moved.id,
+            ops.revision(moved),
+            {"source": {"credential_kind": "openai_platform_session"}},
+        )
+    ).account
+    assert kept.credential_ref == created.credential_ref
+    assert kept.organization_id == "org-AnotherOrg5678"
+    detached = (await ops.update(kept.id, ops.revision(kept), {"source": None})).account
+    assert detached.credential_kind is None and detached.organization_id == "org-AnotherOrg5678"
+    assert not credentials.session_present(created.credential_ref)
+    await fails(
+        ops.update(detached.id, ops.revision(detached), {"organization_id": "nope"}),
+        422,
+        "invalid_organization",
+    )
+
+
+async def test_claude_credits_change_keeps_a_hidden_saved_file(env):
+    claude_login(env)
+    custom = write(
+        env.tmp / "hidden" / ".credentials.json",
+        json.loads((env.dirs["CLAUDE_CONFIG_DIR"] / ".credentials.json").read_text()),
+    )
+    saved = account(
+        credential_kind=CredentialKind.CLAUDE_CODE_FILE,
+        credential_ref=str(custom),
+        poll_interval_seconds=180,
+    )
+    discovery = Recording()
+    ops, host, _ = make(env, [saved], discovery=by_provider(claude=discovery))
+    # Discovery and save both use the saved path without the page ever naming it.
+    prepared = await ops.prepare(
+        {
+            "account_id": saved.id,
+            "revision": ops.revision(saved),
+            "credential_kind": "claude_code_file",
+        }
+    )
+    selected = (
+        await ops.update(
+            saved.id,
+            ops.revision(saved),
+            {
+                "source": {
+                    "credential_kind": "claude_code_file",
+                    "prepare_id": prepared["prepare_id"],
+                    "choice_id": "c1",
+                }
+            },
+        )
+    ).account
+    assert selected.credential_ref == str(custom) and selected.organization_id == ORG
+    assert host.calls[-1][1] == frozenset({saved.id})
+    cleared = (
+        await ops.update(
+            selected.id,
+            ops.revision(selected),
+            {"source": {"credential_kind": "claude_code_file", "organization": "none"}},
+        )
+    ).account
+    assert cleared.credential_ref == str(custom) and cleared.organization_id is None
+    # Other file kinds still need an explicit reference.
+    codex = account(
+        ProviderId.CODEX_SUBSCRIPTION,
+        credential_kind=CredentialKind.CODEX_AUTH_FILE,
+        credential_ref="default",
+    )
+    ops, _, _ = make(env, [cleared, codex])
+    await fails(
+        ops.update(
+            codex.id, ops.revision(codex), {"source": {"credential_kind": "codex_auth_file"}}
+        ),
+        422,
+        "invalid_reference",
+    )

@@ -18,6 +18,7 @@ from cli_usage_api import transport as transport_module
 from cli_usage_api.domain import (
     Account,
     CredentialKind,
+    ExactMoney,
     FetchState,
     Metric,
     MetricId,
@@ -474,3 +475,123 @@ def test_cli_live_dashboard_logs_selected_providers_then_closes(monkeypatch, tmp
         ("codex-subscription", {"rate_limit": None})
     ]
     assert not debuglog.enabled(ProviderId.CODEX_SUBSCRIPTION)
+
+
+OPENAI_SESSION = "synthetic-openai-session-value"
+OPENAI_ORG = "org-Synthetic0123"
+CLAUDE_ORG = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+
+
+def openai_credential():
+    return ResolvedCredential(
+        ProviderId.OPENAI_PLATFORM,
+        CredentialKind.OPENAI_PLATFORM_SESSION,
+        OPENAI_SESSION,
+        "generation-1",
+        organization_id=OPENAI_ORG,
+    )
+
+
+async def test_openai_credit_grants_log_redacts_the_session(tmp_path):
+    log = tmp_path / "debug.jsonl"
+    debuglog.configure(log)
+    body = json.dumps(
+        {
+            "object": "credit_summary",
+            "total_available": 17.3715455,
+            "echo": OPENAI_SESSION,
+            "session": {"sensitive_id": "leaked-sensitive"},
+            "sensitive_id": "leaked-sensitive",
+        }
+    ).encode()
+    result = await transport(content=body).get_json(
+        ProviderId.OPENAI_PLATFORM,
+        "/v1/dashboard/billing/credit_grants",
+        credential=openai_credential(),
+    )
+    assert result["total_available"] == Decimal("17.3715455")
+    text = log.read_text()
+    for value in (OPENAI_SESSION, "leaked-sensitive", "Bearer", "OpenAI-Organization"):
+        assert value not in text
+    (record,) = records(log)
+    assert record["provider"] == "openai-platform"
+    assert record["path"] == "/v1/dashboard/billing/credit_grants"
+    assert '"total_available": 17.3715455' in text
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_openai_error_classification_is_identical_with_and_without_debug(tmp_path, enabled):
+    log = tmp_path / "debug.jsonl"
+    if enabled:
+        debuglog.configure(log)
+    body = json.dumps({"error": {"code": "expired_session_key", "message": OPENAI_SESSION}})
+    with pytest.raises(TransportError) as caught:
+        await transport(401, body.encode()).get_json(
+            ProviderId.OPENAI_PLATFORM,
+            "/v1/dashboard/billing/credit_grants",
+            credential=openai_credential(),
+        )
+    assert (caught.value.fetch_state, caught.value.code) == (
+        FetchState.AUTH_REQUIRED,
+        "credential_expired",
+    )
+    if enabled:
+        text = log.read_text()
+        assert OPENAI_SESSION not in text
+        assert [record["event"] for record in records(log)] == ["http_response", "http_error"]
+    else:
+        assert not log.exists()
+
+
+async def test_claude_prepaid_credits_log_keeps_organization_path(tmp_path):
+    log = tmp_path / "debug.jsonl"
+    debuglog.configure(log)
+    path = transport_module.claude_credits_path(CLAUDE_ORG)
+    await transport(content=b'{"amount": 1234, "currency": "USD"}').get_json(
+        ProviderId.CLAUDE_SUBSCRIPTION,
+        path,
+        credential=ResolvedCredential(
+            ProviderId.CLAUDE_SUBSCRIPTION,
+            CredentialKind.MANUAL_BEARER,
+            SECRET,
+            "generation-1",
+            organization_id=CLAUDE_ORG,
+        ),
+    )
+    (record,) = records(log)
+    assert record["path"] == path
+    assert record["body"] == {"amount": 1234, "currency": "USD"}
+    assert SECRET not in log.read_text()
+
+
+def test_snapshot_summary_includes_exact_balance(tmp_path):
+    log = tmp_path / "debug.jsonl"
+    debuglog.configure(log)
+    source = SourceRef(SourceKind.OFFLINE_DEMO, "debuglog.test")
+    now = datetime(2026, 10, 28, 12, tzinfo=UTC)
+    debuglog.snapshot(
+        ProviderId.OPENAI_PLATFORM,
+        Snapshot(
+            str(UUID(int=1)),
+            (
+                Metric(
+                    MetricId.OPENAI_AVAILABLE_BALANCE,
+                    "OpenAI 可用余额",
+                    MetricState.READY,
+                    source,
+                    exact_balance=ExactMoney(Decimal("3.0700000000000003"), "USD"),
+                ),
+                Metric(MetricId.OPENAI_PAID_AVAILABLE_BALANCE, "p", MetricState.UNKNOWN, source),
+            ),
+            (),
+            FetchState.OK,
+            now,
+        ),
+    )
+    text = log.read_text()
+    assert '"amount": 3.0700000000000003' in text
+    (summary,) = records(log)
+    ready, unknown = summary["metrics"]
+    assert ready["exact_balance"]["currency"] == "USD"
+    assert ready["balance"] is None and ready["credits"] is None
+    assert unknown["exact_balance"] is None

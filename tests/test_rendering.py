@@ -8,13 +8,15 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from cli_usage_api.app import UsageApp, local_time, metric_value
+from cli_usage_api.app import METRIC_LABELS, UsageApp, local_time, metric_label, metric_value
 from cli_usage_api.demo import DEMO_NOW
 from cli_usage_api.domain import (
     Account,
     CredentialKind,
+    ExactMoney,
     FetchState,
     Metric,
+    MetricId,
     MetricState,
     ProviderId,
     QuotaValue,
@@ -335,3 +337,37 @@ async def test_snapshot_extras_follow_emission_order_and_preserve_unknown_truth(
         assert [metric_id for a, metric_id in app.rows if a == account] == required
         assert all("未知 / no data" in app._row_text(account, metric_id) for metric_id in required)
         await pilot.press("q")
+
+
+def test_exact_money_and_credits_text_round_half_even_for_display_only():
+    source = SourceRef(SourceKind.PRIVATE_HTTP, "synthetic", True)
+    exact = Metric(
+        MetricId.OPENAI_AVAILABLE_BALANCE,
+        "x",
+        MetricState.READY,
+        source,
+        exact_balance=ExactMoney(Decimal("17.3715455"), "USD"),
+    )
+    assert metric_value(exact) == "17.37 USD"
+    assert exact.exact_balance.amount == Decimal("17.3715455")
+    half = replace(exact, exact_balance=ExactMoney(Decimal("2.665"), "USD"))
+    assert metric_value(half) == "2.66 USD"
+    credits = Metric(
+        MetricId.CODEX_CREDITS, "x", MetricState.READY, source, credits=Decimal("137.5")
+    )
+    assert metric_value(credits) == "137.50 credits"
+    assert metric_value(replace(credits, credits=Decimal("1E+3"))) == "1000.00 credits"
+    assert metric_value(replace(credits, credits=Decimal("0.005"))) == "0.00 credits"
+    # Unknown never renders a number.
+    unknown = replace(exact, state=MetricState.UNKNOWN, exact_balance=None)
+    assert metric_value(unknown) == "— 未知 / no data"
+
+
+def test_new_metric_ids_have_dashboard_labels():
+    for metric_id, label in (
+        (MetricId.CLAUDE_CREDIT_BALANCE, "Claude 已购 credits 余额"),
+        (MetricId.OPENAI_AVAILABLE_BALANCE, "OpenAI 可用余额"),
+        (MetricId.OPENAI_PAID_AVAILABLE_BALANCE, "OpenAI 付费余额"),
+    ):
+        assert METRIC_LABELS[metric_id] == label
+        assert metric_label(metric_id, None) == label

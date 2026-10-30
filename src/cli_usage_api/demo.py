@@ -18,6 +18,7 @@ from cli_usage_api.domain import (
     REQUIRED_METRIC_IDS,
     Account,
     Diagnostic,
+    ExactMoney,
     FetchState,
     Grant,
     GrantCategory,
@@ -183,8 +184,13 @@ class DemoSource:
         state = FetchState(profile.get("fetch_state", "ok"))
         unknown_all = profile.get("unknown_all", False)
         unknown_ids = profile.get("unknown_metrics", ())
+        required = REQUIRED_METRIC_IDS[account.provider]
         metrics = []
         for item in template["metrics"]:
+            if unknown_all and item["id"] not in required:
+                # Like a real failed first fetch: required rows become unknown and
+                # optional extras (credit balances, credits) are simply absent.
+                continue
             unknown = unknown_all or item["id"] in unknown_ids
             detail = item.get("detail", "Fictional synthetic demonstration; not live account data.")
             if unknown:
@@ -225,9 +231,15 @@ class DemoSource:
                     ),
                     unlimited=False if unknown else item.get("unlimited", False),
                     detail=detail,
+                    # Any-scale money (OpenAI Platform) stays a decimal string so the
+                    # float-noise demo amount reaches presentation rounding unchanged.
+                    exact_balance=(
+                        ExactMoney(item["exact_balance"], "USD")
+                        if not unknown and "exact_balance" in item
+                        else None
+                    ),
                 )
             )
-        required = REQUIRED_METRIC_IDS[account.provider]
         metric_ids = tuple(metric.id for metric in metrics)
         if metric_ids[: len(required)] != required or len(set(metric_ids)) != len(metric_ids):
             raise ValueError(

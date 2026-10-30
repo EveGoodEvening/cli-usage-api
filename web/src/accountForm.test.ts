@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allowedKinds,
+  canKeepCredits,
   createBody,
   defaultKind,
   editDraft,
@@ -209,7 +210,8 @@ describe("bodies", () => {
     expect(prepareBody({ ...edit, reference: "default" }, original, "")?.reference).toBe("default");
     const fresh = { ...newDraft("grok_subscription", true), reference: "custom" as const, path: "/g/auth.json" };
     expect(prepareBody(fresh, null, "")?.reference).toBe("/g/auth.json");
-    expect(prepareBody(draft({}), null, "")).toBeNull();
+    // Codex has nothing to prepare; a Claude login prepares only its optional credits org.
+    expect(prepareBody(newDraft("codex_subscription", true), null, "")).toBeNull();
   });
 });
 
@@ -259,5 +261,124 @@ describe("form escape and save outcome", () => {
     expect(saveUncertain("invalid_response")).toBe(true);
     expect(saveUncertain("conflict")).toBe(false);
     expect(saveUncertain("invalid")).toBe(false);
+  });
+});
+
+describe("Claude subscription prepaid credits", () => {
+  const saved = () => account({ organization_selected: true });
+
+  it("never selects an organization by itself and sends nothing extra by default", () => {
+    const fresh = draft({ interval: "180" });
+    expect(fresh.credits).toBe("none");
+    expect(createBody(fresh).source).toEqual({ credential_kind: "claude_code_file", reference: "default" });
+    expect(newDraft("claude_subscription", true).interval).toBe("180");
+    expect(newDraft("openai_platform", true).interval).toBe("300");
+    expect(newDraft("codex_subscription", true).interval).toBe("60");
+  });
+
+  it("discovers with the login the save will use", () => {
+    expect(prepareBody(draft({}), null, "")).toEqual({
+      account_id: null,
+      revision: null,
+      provider: "claude_subscription",
+      credential_kind: "claude_code_file",
+      reference: "default",
+    });
+    const bearer = { ...withKind(draft({}), "manual_bearer", null), secret: SECRET, persist: false };
+    expect(prepareBody(bearer, null, "")?.secret).toBe(SECRET);
+    // The saved login is reused without its (hidden) path or secret.
+    const original = account({ reference: "custom" });
+    const kept = prepareBody(editDraft(original, true), original, "");
+    expect(kept).toEqual({
+      account_id: original.id,
+      revision: original.revision,
+      provider: "claude_subscription",
+      credential_kind: "claude_code_file",
+    });
+  });
+
+  it("requires an explicit choice and sends it with the same bearer", () => {
+    const bearer = { ...withKind(draft({}), "manual_bearer", null), secret: SECRET, persist: false };
+    expect(validateDraft({ ...bearer, credits: "select" }).credits).toBeDefined();
+    const chosen = { ...bearer, credits: "select" as const, prepareId: "prep", choiceId: "c1" };
+    expect(validateDraft(chosen)).toEqual({});
+    expect(createBody(chosen).source).toEqual({
+      credential_kind: "manual_bearer",
+      secret: SECRET,
+      persist: false,
+      prepare_id: "prep",
+      choice_id: "c1",
+    });
+  });
+
+  it("keeps the saved organization only for the same login", () => {
+    const original = saved();
+    const unchanged = editDraft(original, true);
+    expect(unchanged.credits).toBe("keep");
+    expect(updateBody(unchanged, original)).toEqual({});
+    // Clearing it resubmits the kept login without naming its file.
+    expect(updateBody({ ...unchanged, credits: "none" }, original)).toEqual({
+      source: { credential_kind: "claude_code_file", organization: "none" },
+    });
+    const custom = { ...withKind(unchanged, "claude_code_file", original), source: "set" as const, reference: "custom" as const };
+    expect(canKeepCredits(custom, original)).toBe(false);
+    expect(validateDraft({ ...custom, path: "/h/.claude/.credentials.json", credits: "keep" }, original).credits).toBeDefined();
+    const sameFile = { ...withKind(unchanged, "claude_code_file", original), source: "set" as const };
+    expect(sameFile.credits).toBe("keep");
+    expect(updateBody(sameFile, original).source).toEqual({
+      credential_kind: "claude_code_file",
+      reference: "default",
+      organization: "keep",
+    });
+    // A new login drops "keep"; an API key has no credits section at all.
+    expect(withKind(unchanged, "manual_bearer", original).credits).toBe("none");
+    const key = { ...withKind(unchanged, "api_key", original), source: "set" as const, secret: SECRET, persist: false };
+    expect(createBody(key).source).toEqual({ credential_kind: "api_key", secret: SECRET, persist: false });
+  });
+});
+
+describe("OpenAI Platform", () => {
+  const openai = () => ({ ...newDraft("openai_platform", false), label: "OpenAI", persist: false });
+
+  it("offers only the dashboard session kind", () => {
+    expect(allowedKinds("openai_platform")).toEqual(["openai_platform_session"]);
+    expect(defaultKind("openai_platform")).toBe("openai_platform_session");
+    expect(needsSecret("openai_platform_session")).toBe(true);
+    expect(needsPrepare("openai_platform_session")).toBe(false);
+  });
+
+  it("requires a well-formed organization and rejects API keys locally", () => {
+    const base = { ...openai(), secret: "sess-synthetic-session-value-0000" };
+    expect(validateDraft(base).organization).toBeDefined();
+    expect(validateDraft({ ...base, organizationId: "org-short" }).organization).toBeDefined();
+    expect(validateDraft({ ...base, organizationId: " org-SyntheticOrg1234 " })).toEqual({});
+    expect(validateDraft({ ...base, organizationId: "org-SyntheticOrg1234", secret: "sk-proj-abc" }).secret).toBeDefined();
+    expect(validateDraft({ ...base, organizationId: "org-SyntheticOrg1234", secret: "" }).secret).toBeDefined();
+  });
+
+  it("sends the organization beside the source and keeps it when left empty on edit", () => {
+    const body = createBody({ ...openai(), organizationId: " org-SyntheticOrg1234 ", secret: "sess-x" });
+    expect(body).toEqual({
+      provider: "openai_platform",
+      label: "OpenAI",
+      poll_interval_seconds: 300,
+      enabled: true,
+      organization_id: "org-SyntheticOrg1234",
+      source: { credential_kind: "openai_platform_session", secret: "sess-x", persist: false },
+    });
+    const original = account({
+      provider: "openai_platform",
+      credential_kind: "openai_platform_session",
+      storage: "keyring",
+      reference: null,
+      organization_selected: true,
+    });
+    const edit = editDraft(original, true);
+    expect(edit.organizationId).toBe("");
+    expect(validateDraft(edit, original)).toEqual({});
+    expect(updateBody(edit, original)).toEqual({});
+    expect(updateBody({ ...edit, organizationId: "org-AnotherOrg5678" }, original)).toEqual({
+      organization_id: "org-AnotherOrg5678",
+    });
   });
 });

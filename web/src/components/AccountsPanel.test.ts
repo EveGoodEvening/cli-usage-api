@@ -6,7 +6,13 @@ import { editDraft, newDraft, withKind } from "../accountForm";
 import { createMockClient } from "../mock/client";
 import css from "../styles.css?raw";
 import type { AccountConfig, Capabilities, PrepareResult } from "../types";
-import { AccountForm, CONSOLE_SESSION_WARNING, CONSOLE_SESSION_WARNING_ZH } from "./AccountForm";
+import {
+  AccountForm,
+  CONSOLE_SESSION_WARNING,
+  CONSOLE_SESSION_WARNING_ZH,
+  OPENAI_SESSION_WARNING,
+  OPENAI_SESSION_WARNING_ZH,
+} from "./AccountForm";
 import { AccountsPanel, LOST_SESSION_NOTE, READ_ONLY_BANNER } from "./AccountsPanel";
 
 const WRITABLE: Capabilities = { writable: true, secure_store_available: true };
@@ -263,5 +269,72 @@ describe("account styles", () => {
     const end = css.indexOf("/* ------------------------------------------------------------ breakpoints */");
     expect(start).toBeGreaterThan(-1);
     expect(css.slice(start, end)).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+  });
+});
+
+describe("AccountForm: OpenAI Platform and Claude credits", () => {
+  it("shows the OpenAI session warning, in Chinese and English, before the masked key input", () => {
+    const html = form({ initialDraft: newDraft("openai_platform", true) });
+    const zh = html.indexOf(OPENAI_SESSION_WARNING_ZH);
+    const en = html.indexOf(OPENAI_SESSION_WARNING);
+    const input = html.indexOf('type="password"');
+    expect(zh).toBeGreaterThan(-1);
+    expect(en).toBeGreaterThan(zh);
+    expect(input).toBeGreaterThan(en);
+    const tag = /<input type="password"[^>]*>/.exec(html)?.[0] ?? "";
+    expect(tag).toMatch(/autocomplete="new-password"/i);
+    expect(tag).toContain('data-1p-ignore="true"');
+    expect(tag).toContain('data-lpignore="true"');
+    expect(tag).toContain('data-bwignore="true"');
+    expect(html).not.toContain('type="submit"');
+    expect(text(html)).toContain("OpenAI 组织 ID");
+    expect(text(html)).toContain("OpenAI Platform 最少按 300 秒刷新");
+    // Only the dashboard session kind is offered (no API key source).
+    expect(text(html)).not.toContain("API key 只在本地保存");
+    expect(html.match(/name="source"/g)).toHaveLength(2);
+    // The Console warning belongs to the Console kind only.
+    expect(html).not.toContain(CONSOLE_SESSION_WARNING_ZH);
+  });
+
+  it("never prefills or echoes a saved OpenAI organization", () => {
+    const original = config("44444444-4444-4444-8444-444444444444", "OpenAI", {
+      provider: "openai_platform",
+      credential_kind: "openai_platform_session",
+      storage: "keyring",
+      reference: null,
+      organization_selected: true,
+    });
+    const html = form({ original, initialDraft: editDraft(original, true) });
+    expect(text(html)).toContain("OpenAI Platform");
+    expect(html).toContain("留空保留已保存的组织（不显示）");
+    expect(/<input type="text"[^>]*placeholder="留空保留已保存的组织（不显示）"[^>]*value=""/.test(html)).toBe(true);
+  });
+
+  it("offers optional credits discovery for a Claude login and preselects nothing", () => {
+    const fresh = form({ initialDraft: newDraft("claude_subscription", true) });
+    expect(text(fresh)).toContain("Claude 已购 credits 余额");
+    expect(/name="credits"[^>]*checked/.test(fresh)).toBe(true);
+    expect(text(fresh)).toContain("不读取 credits 余额");
+    expect(text(fresh)).not.toContain("保留已保存的组织");
+    const prepared: PrepareResult = {
+      prepare_id: "prep",
+      expires_in: 300,
+      kind: "claude_organization",
+      choices: [{ id: "c1", label: null, legacy: false, current: true }],
+    };
+    const original = config("55555555-5555-4555-8555-555555555555", "Claude", {
+      provider: "claude_subscription",
+      credential_kind: "claude_code_file",
+      organization_selected: true,
+    });
+    const html = form({ original, initialDraft: { ...editDraft(original, true), prepareId: "prep" }, initialPrepared: prepared });
+    expect(text(html)).toContain("保留已保存的组织（不显示组织 ID）");
+    expect(text(html)).toContain("发现组织（使用已保存的登录）");
+    expect(text(html)).toContain("组织 1（当前）");
+    expect(/name="prepare-choice"[^>]*checked/.test(html)).toBe(false);
+    expect(html).not.toContain(ORG_ID);
+    // An API key source has no credits section.
+    const key = withKind(newDraft("claude_subscription", true), "api_key", null);
+    expect(text(form({ initialDraft: key }))).not.toContain("Claude 已购 credits 余额");
   });
 });

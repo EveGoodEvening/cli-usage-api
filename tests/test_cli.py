@@ -40,6 +40,17 @@ def isolated_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """No CLI test may reach an upstream: discovery is always injected synthetically."""
+    from cli_usage_api.transport import Transport
+
+    async def refuse(self, *args, **kwargs):
+        pytest.fail("CLI tests must not perform network requests")
+
+    monkeypatch.setattr(Transport, "get_json", refuse)
+
+
+@pytest.fixture(autouse=True)
 def terminal_boundary(monkeypatch):
     real_tty = cli._tty
     # Behavior tests do not depend on pytest's replaceable capture streams.
@@ -191,6 +202,7 @@ def test_list_empty_and_nonsecret_metadata(monkeypatch, capsys, terminal_boundar
     "action",
     [
         ["add", "--provider", "claude-platform"],
+        ["add", "--provider", "openai-platform"],
         ["key", "set", "local-id"],
         ["remove", "local-id"],
         ["migrate-chatgpt-to-codex"],
@@ -229,7 +241,9 @@ def test_profile_add_edit_remove(monkeypatch, credentials):
     assert AccountStore().load() == ()
 
 
-@pytest.mark.parametrize("provider", list(cli.PROVIDER_NAMES))
+@pytest.mark.parametrize(
+    "provider", [name for name in cli.PROVIDER_NAMES if name != "openai-platform"]
+)
 def test_explicit_provider_spellings(monkeypatch, credentials, provider):
     answers(monkeypatch, "Fictional", "60", "yes", "1", "yes")
     assert cli.main(["accounts", "add", "--provider", provider]) == 0
@@ -256,7 +270,8 @@ def test_cancel_before_commit_changes_nothing(monkeypatch, credentials, cancel):
 def test_cancel_secret_form_does_not_persist(monkeypatch, credentials):
     item = account()
     seed(item)
-    answers(monkeypatch, "3", "no")  # Claude manual bearer; decline final replacement.
+    # Claude manual bearer; decline optional discovery, then the final replacement.
+    answers(monkeypatch, "3", "no", "no")
     assert cli.main(["accounts", "key", "set", item.id]) == 0
     assert AccountStore().load() == (item,)
     assert credentials.values == {} and credentials.persisted == []
@@ -266,7 +281,7 @@ def test_secret_set_replace_delete_never_reveals(monkeypatch, credentials, capsy
     item = account()
     seed(item)
     for _ in range(2):
-        answers(monkeypatch, "3", "yes")
+        answers(monkeypatch, "3", "no", "yes")
         assert cli.main(["accounts", "key", "set", item.id]) == 0
     (updated,) = AccountStore().load()
     assert updated.credential_kind == CredentialKind.MANUAL_BEARER
@@ -344,6 +359,351 @@ def test_console_single_result_is_not_autoselected(monkeypatch, credentials):
     assert credentials.values == {}
 
 
+CREDITS_ORG = "0f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b"
+OPENAI_ORG = "org-Synthetic0rg1234"
+OPENAI_SESSION = "sess-SyntheticDashboardSession0123456789"
+
+
+def subscription_discovery(monkeypatch, result, observed=None):
+    """Inject a synthetic Claude subscription profile discovery; nothing else is reachable."""
+
+    async def discover(credential):
+        if observed is not None:
+            observed.append(credential)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    monkeypatch.setattr(
+        cli,
+        "build_providers",
+        lambda transport, resolver: {
+            ProviderId.CLAUDE_SUBSCRIPTION: SimpleNamespace(discover_organizations=discover)
+        },
+    )
+
+
+def test_claude_credits_organization_is_explicitly_selected(monkeypatch, credentials, capsys):
+    item = account()
+    seed(item)
+    observed = []
+    subscription_discovery(
+        monkeypatch, (OrganizationChoice(CREDITS_ORG, "Synthetic team"),), observed
+    )
+    answers(monkeypatch, "3", "yes", "1", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id == CREDITS_ORG
+    assert updated.credential_kind == CredentialKind.MANUAL_BEARER
+    # The profile read is unscoped: no saved organization travels with discovery.
+    (credential,) = observed
+    assert credential.provider == ProviderId.CLAUDE_SUBSCRIPTION
+    assert credential.organization_id is None and credential.secret == SECRET
+    output = capsys.readouterr().out
+    assert "Optional prepaid credits" in output and "Synthetic team" in output
+    assert "No organization — skip the prepaid credits read" in output
+    assert SECRET not in output
+    # The temporary discovery session secret is gone; only the keyring copy remains.
+    assert list(credentials.values) == [updated.credential_ref]
+
+
+def test_claude_credits_single_result_is_not_autoselected(monkeypatch, credentials):
+    item = account()
+    seed(item)
+    subscription_discovery(monkeypatch, (OrganizationChoice(CREDITS_ORG, "Synthetic"),))
+    answers(monkeypatch, "3", "yes", "")
+    assert cli.main(["accounts", "key", "set", item.id]) == 2
+    assert AccountStore().load() == (item,)
+    assert credentials.values == {} and not credentials.persisted
+
+
+def test_claude_credits_no_organization_choice_skips_credits(monkeypatch, credentials):
+    item = account()
+    seed(item)
+    subscription_discovery(monkeypatch, (OrganizationChoice(CREDITS_ORG, "Synthetic"),))
+    answers(monkeypatch, "3", "yes", "2", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id is None
+    assert updated.credential_kind == CredentialKind.MANUAL_BEARER
+
+
+def test_claude_credits_declined_discovery_makes_no_request(monkeypatch, credentials, capsys):
+    item = account()
+    seed(item)
+    subscription_discovery(monkeypatch, AssertionError("discovery must not run"))
+    answers(monkeypatch, "3", "no", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id is None
+    assert "only the usage request" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("keep", "expected"), [("yes", CREDITS_ORG), ("no", None)])
+def test_claude_saved_credits_organization_is_kept_only_explicitly(
+    monkeypatch, credentials, keep, expected
+):
+    # Same kind and reference, no new secret: the login is unchanged.
+    item = account(
+        organization_id=CREDITS_ORG,
+        credential_kind=CredentialKind.CLAUDE_CODE_FILE,
+        credential_ref="default",
+    )
+    seed(item)
+    subscription_discovery(monkeypatch, AssertionError("discovery must not run"))
+    monkeypatch.setattr(cli.CredentialResolver, "resolve", lambda self, draft: object())
+    answers(monkeypatch, "2", "default", "no", keep, "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id == expected
+    assert updated.credential_kind == CredentialKind.CLAUDE_CODE_FILE
+
+
+@pytest.mark.parametrize(
+    ("original", "kind_answer", "reference"),
+    [
+        # A newly entered bearer is always a new login.
+        (
+            {
+                "credential_kind": CredentialKind.MANUAL_BEARER,
+                "credential_ref": "KEYRING",
+            },
+            "3",
+            None,
+        ),
+        # File -> manual bearer: the kind changed.
+        (
+            {"credential_kind": CredentialKind.CLAUDE_CODE_FILE, "credential_ref": "default"},
+            "3",
+            None,
+        ),
+        # Same file kind, different login file.
+        (
+            {"credential_kind": CredentialKind.CLAUDE_CODE_FILE, "credential_ref": "default"},
+            "2",
+            "/srv/other/.credentials.json",
+        ),
+    ],
+)
+def test_claude_credits_organization_is_not_kept_across_a_login_change(
+    monkeypatch, credentials, capsys, original, kind_answer, reference
+):
+    item = account(organization_id=CREDITS_ORG, **original)
+    if item.credential_ref == "KEYRING":
+        item = replace(item, credential_ref=f"keyring:{item.id}:{uuid4()}")
+    seed(item)
+    subscription_discovery(monkeypatch, AssertionError("discovery must not run"))
+    monkeypatch.setattr(cli.CredentialResolver, "resolve", lambda self, draft: object())
+    prompts = []
+
+    def ask(prompt):
+        prompts.append(prompt)
+        return next(iterator)
+
+    iterator = iter([kind_answer, *([reference] if reference else []), "no", "yes", "yes", "yes"])
+    monkeypatch.setattr(builtins, "input", ask)
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id is None
+    assert not any("Keep the saved prepaid-credits organization" in p for p in prompts)
+    assert "The login changed" in capsys.readouterr().out
+
+
+def test_claude_edit_without_source_change_keeps_credits_organization(monkeypatch, credentials):
+    item = account(organization_id=CREDITS_ORG)
+    seed(item)
+    subscription_discovery(monkeypatch, AssertionError("discovery must not run"))
+    answers(monkeypatch, "Renamed", "", "yes", "no", "yes")
+    assert cli.main(["accounts", "edit", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id == CREDITS_ORG and updated.label == "Renamed"
+
+
+def test_claude_credits_empty_profile_selects_nothing(monkeypatch, credentials, capsys):
+    item = account()
+    seed(item)
+    subscription_discovery(monkeypatch, ())
+    answers(monkeypatch, "3", "yes", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id is None
+    assert "reported no organization" in capsys.readouterr().out
+
+
+def test_claude_credits_discovery_failure_is_curated(monkeypatch, credentials, capsys):
+    from cli_usage_api.domain import FetchState
+    from cli_usage_api.transport import TransportError
+
+    item = account()
+    seed(item)
+    subscription_discovery(
+        monkeypatch, TransportError(FetchState.AUTH_REQUIRED, "credential_expired")
+    )
+    answers(monkeypatch, "3", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 3
+    assert AccountStore().load() == (item,)
+    assert credentials.values == {} and not credentials.persisted
+    captured = capsys.readouterr()
+    assert "Organization discovery failed" in captured.err
+    assert SECRET not in captured.out + captured.err
+
+
+def test_claude_api_key_offers_no_credits_discovery(monkeypatch, credentials, capsys):
+    item = account()
+    seed(item)
+    subscription_discovery(monkeypatch, AssertionError("discovery must not run"))
+    answers(monkeypatch, "4", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    assert "Optional prepaid credits" not in capsys.readouterr().out
+
+
+def test_live_factory_exposes_per_provider_discovery():
+    factory = cli.LiveFactory(CredentialStore())
+    discovery = factory.organization_discovery
+    assert set(discovery) == {ProviderId.CLAUDE_PLATFORM, ProviderId.CLAUDE_SUBSCRIPTION}
+    assert discovery[ProviderId.CLAUDE_PLATFORM] == factory.console_discovery
+    assert (
+        discovery[ProviderId.CLAUDE_SUBSCRIPTION]
+        == factory.providers[ProviderId.CLAUDE_SUBSCRIPTION].discover_organizations
+    )
+    asyncio.run(factory.aclose())
+
+
+def warned_getpass(monkeypatch, capsys, value=OPENAI_SESSION):
+    """A hidden prompt that records whether the warning was already printed."""
+    seen = []
+
+    def prompt(text):
+        seen.append(capsys.readouterr().out)
+        return value
+
+    monkeypatch.setattr(cli.getpass, "getpass", prompt)
+    return seen
+
+
+def test_openai_add_prints_warning_before_hidden_input(monkeypatch, credentials, capsys):
+    seen = warned_getpass(monkeypatch, capsys)
+    answers(monkeypatch, f"  {OPENAI_ORG}  ", "Fictional platform", "", "yes", "2", "yes")
+    assert cli.main(["accounts", "add", "--provider", "openai-platform"]) == 0
+    (item,) = AccountStore().load()
+    assert item.provider == ProviderId.OPENAI_PLATFORM
+    assert item.organization_id == OPENAI_ORG
+    assert item.credential_kind == CredentialKind.OPENAI_PLATFORM_SESSION
+    assert item.poll_interval_seconds == 300
+    assert item.credential_ref in credentials.persisted
+    assert credentials.get(item.credential_ref) == OPENAI_SESSION
+    (before,) = seen
+    assert "platform.openai.com dashboard session key" in before
+    assert "full dashboard access" in before and "HAR file" in before
+    assert "API keys (sk-...) do not work" in before
+    assert "sessionKey value" not in before
+    after = capsys.readouterr().out
+    assert OPENAI_SESSION not in before + after
+    assert OPENAI_SESSION not in AccountStore().path.read_text()
+
+
+def test_openai_without_credential_still_requires_organization(monkeypatch, credentials):
+    answers(monkeypatch, OPENAI_ORG, "Fictional", "300", "yes", "1", "yes")
+    assert cli.main(["accounts", "add", "--provider", "openai-platform"]) == 0
+    (item,) = AccountStore().load()
+    assert item.organization_id == OPENAI_ORG and item.credential_kind is None
+
+
+@pytest.mark.parametrize(
+    "organization", ["", "org-short", "sk-proj-abcdefghijkl", "org_abcdefghij"]
+)
+def test_openai_invalid_organization_is_refused_before_secret(
+    monkeypatch, credentials, capsys, organization
+):
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: pytest.fail("No secret read"))
+    answers(monkeypatch, organization)
+    assert cli.main(["accounts", "add", "--provider", "openai-platform"]) == 2
+    assert AccountStore().load() == ()
+    assert "org- followed by 8-64" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        f"Bearer {OPENAI_SESSION}",
+        f"Cookie: session={OPENAI_SESSION}",
+        f'{{"sensitive_id": "{OPENAI_SESSION}"}}',
+        "sess-short",
+        "sess-has internal-space-0123456789",
+        OPENAI_SESSION + "\r\nX-Injected: 1",
+    ],
+)
+def test_openai_invalid_session_input_is_rejected(monkeypatch, credentials, capsys, value):
+    item = account(ProviderId.OPENAI_PLATFORM, organization_id=OPENAI_ORG)
+    seed(item)
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: value)
+    answers(monkeypatch, "2", "")
+    assert cli.main(["accounts", "key", "set", item.id]) == 2
+    assert AccountStore().load() == (item,)
+    assert credentials.values == {}
+    captured = capsys.readouterr()
+    assert OPENAI_SESSION not in captured.out + captured.err
+
+
+def test_openai_unavailable_keyring_fails_before_secret_prompt(monkeypatch, capsys):
+    item = account(ProviderId.OPENAI_PLATFORM, organization_id=OPENAI_ORG)
+    seed(item)
+    store = CredentialStore()
+    monkeypatch.setattr(cli, "CredentialStore", lambda: store)
+    monkeypatch.setattr(
+        store, "_secure_backend", lambda: (_ for _ in ()).throw(CredentialError(SECRET))
+    )
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: pytest.fail("No secret read"))
+    answers(monkeypatch, "2", "")
+    assert cli.main(["accounts", "key", "set", item.id]) == 3
+    assert AccountStore().load() == (item,)
+    captured = capsys.readouterr()
+    assert "TUI" in captured.err and "session-only" in captured.err
+    assert SECRET not in captured.out + captured.err
+
+
+def test_openai_key_set_can_change_organization(monkeypatch, credentials, capsys):
+    item = account(ProviderId.OPENAI_PLATFORM, organization_id=OPENAI_ORG)
+    seed(item)
+    warned_getpass(monkeypatch, capsys)
+    answers(monkeypatch, "2", "org-AnotherSynthetic9", "yes")
+    assert cli.main(["accounts", "key", "set", item.id]) == 0
+    (updated,) = AccountStore().load()
+    assert updated.organization_id == "org-AnotherSynthetic9"
+    assert credentials.get(updated.credential_ref) == OPENAI_SESSION
+
+
+def test_openai_key_delete_keeps_required_organization(monkeypatch, credentials):
+    account_id = str(uuid4())
+    ref = credentials.put(account_id, OPENAI_SESSION, persist=True)
+    item = Account(
+        id=account_id,
+        provider=ProviderId.OPENAI_PLATFORM,
+        label="Synthetic",
+        organization_id=OPENAI_ORG,
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+        credential_ref=ref,
+    )
+    seed(item)
+    answers(monkeypatch, "yes")
+    assert cli.main(["accounts", "key", "delete", item.id]) == 0
+    (cleared,) = AccountStore().load()
+    assert cleared.credential_kind is None and cleared.credential_ref is None
+    assert cleared.organization_id == OPENAI_ORG
+    assert ref not in credentials.values
+
+
+def test_openai_offers_only_its_session_kind(monkeypatch, credentials, capsys):
+    item = account(ProviderId.OPENAI_PLATFORM, organization_id=OPENAI_ORG)
+    seed(item)
+    answers(monkeypatch, "3")
+    assert cli.main(["accounts", "key", "set", item.id]) == 2
+    output = capsys.readouterr().out
+    assert "OpenAI Platform dashboard session key" in output
+    for other in ("Manual bearer", "API key —", "Console session", "External"):
+        assert other not in output
+
+
 def test_grok_scope_is_explicit_and_external_file_survives(isolated_home, monkeypatch, credentials):
     # Custom references must name the login file itself (auth.json for Grok).
     (isolated_home / "grok-login").mkdir()
@@ -406,7 +766,7 @@ def test_committed_warning_retains_new_and_old_credentials(monkeypatch, credenti
         raise ConfigCommittedError(updated)
 
     monkeypatch.setattr(AccountStore, "mutate", committed)
-    answers(monkeypatch, "3", "yes")
+    answers(monkeypatch, "3", "no", "yes")
     assert cli.main(["accounts", "key", "set", item.id]) == 2
     (updated,) = AccountStore().load()
     assert updated.credential_ref != old
@@ -795,6 +1155,7 @@ def test_api_serve_live_composes_factory_and_origins(monkeypatch, capsys):
             built.append(credentials)
             self.resolver = SimpleNamespace(store=credentials)
             self.console_discovery = None
+            self.organization_discovery = None
 
         async def aclose(self):
             pass
@@ -878,7 +1239,11 @@ def test_real_live_factory_shares_credentials_with_operations(monkeypatch):
     operations = capture.app.operations
     assert operations.resolver._store is operations.credentials
     assert operations.service.credentials is operations.credentials
-    assert operations.console_discovery is not None
+    # The web host receives every explicit discovery, not only the Console's.
+    assert set(operations.console_discovery) == {
+        ProviderId.CLAUDE_PLATFORM,
+        ProviderId.CLAUDE_SUBSCRIPTION,
+    }
 
 
 @pytest.mark.parametrize(

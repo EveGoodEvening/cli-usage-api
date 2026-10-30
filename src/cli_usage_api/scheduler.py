@@ -21,6 +21,7 @@ from cli_usage_api import debuglog
 from cli_usage_api.accounts import credential_identity
 from cli_usage_api.credentials import CredentialResolutionError, CredentialResolver
 from cli_usage_api.domain import (
+    POLL_FLOOR_SECONDS,
     Account,
     Diagnostic,
     FetchState,
@@ -104,6 +105,9 @@ class _AccountState:
     due: float
     retry_deadline: float = 0.0
     failures: int = 0
+    # Consecutive partial observations carrying a secondary request's embargo
+    # (e.g. Claude prepaid credits 429); drives a conservative escalating floor.
+    embargoes: int = 0
     suspended: bool = False
     pending: bool = False
     snapshot: Snapshot | None = None
@@ -216,6 +220,7 @@ class Scheduler:
             if old.account.provider == state.account.provider:
                 state.retry_deadline = old.retry_deadline
                 state.failures = old.failures
+                state.embargoes = old.embargoes
                 if old.account == state.account:
                     state.snapshot = old.snapshot
         self._states = states
@@ -327,6 +332,7 @@ class Scheduler:
                 spend_limit=None,
                 credits=None,
                 unlimited=False,
+                exact_balance=None,
             )
             if key in previous
             else Metric(key, key, MetricState.UNKNOWN, source)
@@ -389,17 +395,38 @@ class Scheduler:
         if result.fetch_state in _SUCCESS:
             present = {metric.id for metric in result.metrics}
             missing = tuple(row for row in self._unknown_metrics(state) if row.id not in present)
+            # A partial observation may carry a secondary request's server retry
+            # deadline (e.g. Claude prepaid credits 429): keep the fresh rows but
+            # honour it as an embargo for the whole refresh, never shortened.
+            embargo = result.retry_at if result.fetch_state == FetchState.PARTIAL else None
             result = replace(
-                result, metrics=result.metrics + missing, fetched_at=now, retry_at=None
+                result, metrics=result.metrics + missing, fetched_at=now, retry_at=embargo
             )
             state.failures = 0
             state.retry_deadline = 0.0
+            if embargo is None:
+                state.embargoes = 0
+            else:
+                # Repeated secondary rate limits escalate like a primary 429
+                # (Claude 180, 360, 720, 900 s); a longer server deadline wins.
+                base = 180 if account.provider == ProviderId.CLAUDE_SUBSCRIPTION else 60
+                local = min(base * 2 ** min(state.embargoes, 3), 900)
+                state.embargoes += 1
+                wall = self._clock.now()
+                delay = max(float(local), (embargo - wall).total_seconds())
+                state.retry_deadline = current + delay
+                try:
+                    shown = wall + timedelta(seconds=delay)
+                except OverflowError:
+                    shown = datetime.max.replace(tzinfo=UTC)
+                result = replace(result, retry_at=max(embargo, shown))
             # The current account: an interval edit may have landed mid-fetch.
             seconds = state.account.effective_poll_interval_seconds
             offset = self._rng.uniform(-seconds * 0.1, seconds * 0.1)
-            floor = seconds if account.provider == ProviderId.CLAUDE_SUBSCRIPTION else 30
+            floor = seconds if account.provider in POLL_FLOOR_SECONDS else 30
             interval = max(float(floor), seconds + offset)
             state.due = current if state.pending else current + interval
+            state.due = max(state.due, state.retry_deadline)
         elif result.fetch_state == FetchState.UPSTREAM_CONTRACT_MISSING:
             state.capability_done = True
         else:
@@ -417,9 +444,12 @@ class Scheduler:
                 result = replace(result, retry_at=None)
             else:
                 base = min(60 * 2 ** min(state.failures, 4), 900)
-                if account.provider == ProviderId.CLAUDE_SUBSCRIPTION:
-                    if result.fetch_state == FetchState.RATE_LIMITED:
-                        base = min(180 * 2 ** min(state.failures, 3), 900)
+                if (
+                    account.provider == ProviderId.CLAUDE_SUBSCRIPTION
+                    and result.fetch_state == FetchState.RATE_LIMITED
+                ):
+                    base = min(180 * 2 ** min(state.failures, 3), 900)
+                if account.provider in POLL_FLOOR_SECONDS:
                     base = max(base, account.effective_poll_interval_seconds)
                 state.failures += 1
                 delay = base + self._rng.uniform(0.0, base * 0.1)

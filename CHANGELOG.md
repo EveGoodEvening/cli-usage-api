@@ -6,14 +6,52 @@
 with `--read-only`; writes no longer return 405; custom login-file paths must end in
 `auth.json`/`.credentials.json`.
 
+### Added — Claude prepaid credits balance and OpenAI Platform balance
+
+- Claude subscription: an optional organization, chosen explicitly when adding or
+  editing the account (Discover reads `GET /api/oauth/profile`, which reports one
+  organization; it is never selected automatically). With an organization saved,
+  each refresh reads usage first and, only after a successful usage response, makes
+  one read-only `GET /api/oauth/organizations/{org}/prepaid/credits` request. The new
+  optional `claude.subscription.credit_balance` row ("Claude 已购 credits 余额") is a
+  regular money balance; auto-reload, expiry policy and promotional tranches appear
+  only as detail. A failed credits request keeps the fresh usage rows, marks the
+  credit row unknown and the account partial, and a 429 retry deadline is honored.
+  Accounts without an organization behave exactly as before.
+- New provider **OpenAI Platform** (`openai-platform`) with a new credential kind,
+  the platform.openai.com **dashboard session key** (OS keyring or session-only; no
+  file, argument or environment input; API keys rejected). A required organization
+  ID (`org-…`) is entered by hand. One read-only `GET
+  https://api.openai.com/v1/dashboard/billing/credit_grants` per refresh yields the
+  required `openai.platform.available_balance` row and, when reported,
+  `openai.platform.paid_available_balance`. USD is assumed (the payload has no
+  currency); available is never computed from granted minus used. Polling floor and
+  default: 5 minutes. A high-sensitivity warning precedes the session input in the
+  TUI, CLI and web forms.
+- New `ExactMoney` value and nullable metric field `exact_balance`
+  (`{"amount": "<exact decimal>", "currency": "USD"}`) in snapshot/API JSON; older
+  snapshots still load. The TUI and web round it half-even to cents and note
+  `服务端金额已舍入到分 / rounded to cents` when that changed the value. The
+  reported granted/used totals in OpenAI detail text are likewise shown in cents.
+- `usage --demo` adds a synthetic Claude credits balance row and a fictional OpenAI
+  Platform card with a float-noise amount; `--scenario errors` adds a failed
+  credits request and an expired OpenAI session.
+
+### Changed
+
+- Codex credits are now displayed rounded half-even to two decimals (`137.50
+  credits`) in the TUI and web; the API JSON still carries the exact amount.
+- The scheduler treats `retry_at` on a partial snapshot as a retry embargo.
+
 ### Added — Codex credits row and parse-only Claude extra usage
 
 - Codex: an optional `codex.subscription.credits` row from the existing
   `wham/usage` response's `credits` object (no new request). The TUI and web show
-  `<amount> credits` as exact fixed-point text, or `不限量` / Unlimited; accounts
+  `<amount> credits` (rounded half-even to two decimals; see Changed), or `不限量` /
+  Unlimited; accounts
   without credits get no row, matching the official Codex client. Credits are never
   converted to money, treated as quota, or given an expiry. `usage --demo` includes
-  a synthetic `137.5 credits` row.
+  a synthetic row shown as `137.50 credits`.
 - Claude subscription: `extra_usage` from the existing `/api/oauth/usage` response
   becomes an optional `claude.subscription.extra_usage` metric (spend in the current
   billing period, the monthly cap or "no cap", and cap utilization; no reset time).

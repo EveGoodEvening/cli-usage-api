@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ApiError, READ_ONLY, type UsageClient } from "../api";
-import { STORAGE_LABELS, KIND_LABELS } from "../accountForm";
+import { STORAGE_LABELS, KIND_LABELS, providerName } from "../accountForm";
 import { endsSession } from "../hooks";
 import { dropIndex, isMoveKey, keyMove, move, positionLabel, reconcilePending, sameOrder } from "../reorder";
-import { providerInfo } from "../semantics";
 import type { AccountConfig, AccountList, Capabilities, MutationResult } from "../types";
 import { AccountForm, WARNING_MESSAGES } from "./AccountForm";
 import { GripIcon } from "./icons";
@@ -627,16 +626,18 @@ function ActionButton({
 }
 
 export function AccountSummary({ account }: { account: AccountConfig }) {
-  const provider = providerInfo(account.provider);
   const kind = account.credential_kind ? KIND_LABELS[account.credential_kind] : null;
   return (
     <div className="acct__main">
       <p className="acct__label">{account.label}</p>
       <p className="acct__meta">
-        <span>{provider.name}</span>
+        <span>{providerName(account.provider)}</span>
         <span className="acct__badge" title={kind ?? undefined}>
           {STORAGE_LABELS[account.storage]}
         </span>
+        {account.provider === "claude_subscription" && account.organization_selected ? (
+          <span>读取 credits 余额</span>
+        ) : null}
         <span className={account.enabled ? undefined : "is-warn"}>{account.enabled ? "已启用" : "已停用"}</span>
         <span>
           每 <span className="num">{account.effective_poll_interval_seconds}</span> 秒

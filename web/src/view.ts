@@ -2,6 +2,7 @@
 // which repeated explanation is shown once for the whole group.
 
 import type { AccountView, Metric } from "./types";
+import { ROUNDED_NOTE } from "./format";
 import { displayedMetrics, hoistedDetail, metricValue, nestedMetricIds, orderedMetrics } from "./semantics";
 
 export const TOTAL_BALANCE_ID = "claude.platform.total_balance";
@@ -22,15 +23,22 @@ export function isCreditsRowId(id: string): boolean {
   return id === "codex.subscription.credits";
 }
 
+/** The Claude subscription's prepaid credits: a money balance, not a quota window. */
+export const CLAUDE_CREDIT_BALANCE_ID = "claude.subscription.credit_balance";
+
 /** Subscription quota rows whose reset is part of their meaning. */
 export function isQuotaRowId(id: string): boolean {
-  if (isCreditsRowId(id)) return false;
+  if (isCreditsRowId(id) || isBalanceRowId(id)) return false;
   return id.startsWith("claude.subscription.") || id.startsWith("codex.subscription.");
 }
 
-/** Console money rows: a balance, never a percentage quota, even when unknown. */
+/**
+ * Money rows (Console, OpenAI Platform, Claude prepaid credits): a balance,
+ * never a percentage quota and never a reset, even when unknown.
+ */
 export function isBalanceRowId(id: string): boolean {
-  return id.startsWith("claude.platform.") && id.endsWith("_balance");
+  if (id === CLAUDE_CREDIT_BALANCE_ID) return true;
+  return (id.startsWith("claude.platform.") || id.startsWith("openai.platform.")) && id.endsWith("_balance");
 }
 
 /**
@@ -75,6 +83,11 @@ export function planRows(view: AccountView): { rows: RowPlan[]; groupNote: strin
       // note (server period, non-unified caveat) still shows, as in the TUI.
       if (grok && missing) detail = detail.replace(GROK_MISSING_DETAIL, "").trim() || null;
       if (!(base || missing) || detail === hoisted) detail = null;
+    }
+    // Cents rounding of an exact server amount is always stated (data stays exact).
+    const value = metric ? metricValue(metric) : null;
+    if (value?.kind === "exact" && value.changed) {
+      detail = detail ? `${detail} · ${ROUNDED_NOTE}` : ROUNDED_NOTE;
     }
     return { id, metric, branch, detail };
   });

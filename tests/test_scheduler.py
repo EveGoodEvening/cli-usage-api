@@ -17,6 +17,7 @@ from cli_usage_api.domain import (
     Account,
     CredentialKind,
     Diagnostic,
+    ExactMoney,
     FetchState,
     Metric,
     MetricState,
@@ -98,7 +99,11 @@ class Resolver:
     def resolve(self, item):
         self.calls.append(item)
         return ResolvedCredential(
-            item.provider, item.credential_kind, "synthetic-secret", "generation.one"
+            item.provider,
+            item.credential_kind,
+            "synthetic-secret",
+            "generation.one",
+            organization_id=item.organization_id,
         )
 
 
@@ -393,6 +398,7 @@ async def test_unknown_rows_clear_prior_product_share():
         {"spent": Money(1250, "USD", 2), "unlimited": True},
         {"unlimited": True},
         {"credits": Decimal("12.5")},
+        {"exact_balance": ExactMoney(Decimal("3.0700000000000003"), "USD")},
     ],
 )
 async def test_unknown_rows_clear_prior_spend_credits_and_unlimited(fields):
@@ -429,6 +435,7 @@ async def test_unknown_rows_clear_prior_spend_credits_and_unlimited(fields):
     assert missing.spend_limit is None
     assert missing.credits is None
     assert missing.unlimited is False
+    assert missing.exact_balance is None
     await scheduler.stop()
 
 
@@ -1171,3 +1178,171 @@ async def test_same_provider_embargo_survives_fresh_generation_with_invalidate()
     await clock.advance(1)
     assert len(provider.calls) == 2
     await scheduler.stop()
+
+
+# --- Partial snapshots carrying a secondary request's retry deadline -----------------
+
+
+def partial_with_retry(seconds):
+    def result(item, now):
+        snapshot = observation(item, now, optional=False, state=FetchState.PARTIAL)
+        return replace(
+            snapshot,
+            retry_at=now + timedelta(seconds=seconds),
+            diagnostic=Diagnostic("partial_data"),
+        )
+
+    return result
+
+
+async def test_partial_retry_deadline_is_an_embargo_that_keeps_fresh_rows():
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [partial_with_retry(3600)]
+    await scheduler.start()
+    try:
+        await settle()
+        shown = published[-1]
+        assert shown.fetch_state == FetchState.PARTIAL
+        assert shown.fetched_at == clock.now()
+        assert shown.retry_at == clock.now() + timedelta(seconds=3600)
+        usage = {row.id: row for row in shown.metrics}["test.usage"]
+        assert usage.state == MetricState.READY
+        assert usage.quota.used_percent == Decimal("23.5")
+        # Neither an explicit refresh nor a same-provider replacement shortens it.
+        await scheduler.refresh()
+        await scheduler.update_accounts((account(),))
+        await clock.advance(3599)
+        assert len(provider.calls) == 1
+        await clock.advance(1)
+        assert len(provider.calls) == 2
+        # The next full observation clears the embargo and resumes the floor cadence.
+        assert published[-1].fetch_state == FetchState.OK
+        assert published[-1].retry_at is None
+        await clock.advance(180)
+        assert len(provider.calls) == 3
+    finally:
+        await scheduler.stop()
+
+
+async def test_short_partial_retry_deadline_cannot_shorten_the_poll_interval():
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [partial_with_retry(60)]
+    await scheduler.start()
+    try:
+        await settle()
+        # The conservative local floor (Claude's 180 s 429 base) outlasts it.
+        assert published[-1].retry_at == clock.now() + timedelta(seconds=180)
+        await clock.advance(179)
+        assert len(provider.calls) == 1
+        await clock.advance(1)
+        assert len(provider.calls) == 2
+    finally:
+        await scheduler.stop()
+
+
+async def test_repeated_partial_rate_limits_escalate_and_reset_after_full_read():
+    # A credits 429 without Retry-After yields the provider's 180 s local deadline;
+    # repeats must back off like a primary Claude 429 (180, 360, 720, 900, 900).
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [partial_with_retry(180) for _ in range(5)]
+    await scheduler.start()
+    try:
+        await settle()
+        for number, delay in enumerate((180, 360, 720, 900, 900), start=1):
+            assert len(provider.calls) == number
+            shown = published[-1]
+            assert shown.fetch_state == FetchState.PARTIAL
+            assert shown.retry_at == clock.now() + timedelta(seconds=delay)
+            assert {row.id: row for row in shown.metrics}["test.usage"].state == (MetricState.READY)
+            await clock.advance(delay - 1)
+            assert len(provider.calls) == number
+            await clock.advance(1)
+        # A full read clears the embargo and the escalation.
+        assert published[-1].fetch_state == FetchState.OK
+        assert published[-1].retry_at is None
+        provider.results = [partial_with_retry(180)]
+        await clock.advance(180)
+        assert len(provider.calls) == 7
+        assert published[-1].retry_at == clock.now() + timedelta(seconds=180)
+    finally:
+        await scheduler.stop()
+
+
+async def test_ok_snapshot_retry_at_is_not_an_embargo():
+    def ok_with_retry(item, now):
+        return replace(observation(item, now), retry_at=now + timedelta(hours=5))
+
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [ok_with_retry]
+    await scheduler.start()
+    try:
+        await settle()
+        assert published[-1].retry_at is None
+        await clock.advance(180)
+        assert len(provider.calls) == 2
+    finally:
+        await scheduler.stop()
+
+
+async def test_maximum_partial_retry_deadline_keeps_rows_and_never_polls():
+    def far(item, now):
+        snapshot = observation(item, now, state=FetchState.PARTIAL)
+        return replace(snapshot, retry_at=datetime.max.replace(tzinfo=UTC))
+
+    scheduler, clock, provider, _, published = setup()
+    provider.results = [far]
+    await scheduler.start()
+    try:
+        await settle()
+        assert published[-1].retry_at == datetime.max.replace(tzinfo=UTC)
+        assert published[-1].metrics[0].state == MetricState.READY
+        await scheduler.refresh()
+        await clock.advance(10**9)
+        assert len(provider.calls) == 1
+    finally:
+        await scheduler.stop()
+
+
+def openai_account(number=1, **kwargs):
+    return Account(
+        id=str(UUID(int=number)),
+        provider=ProviderId.OPENAI_PLATFORM,
+        label=f"OpenAI {number}",
+        credential_ref="synthetic",
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+        organization_id="org-Synthetic0123",
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize(("interval", "expected"), [(60, 300), (300, 300), (900, 900)])
+async def test_openai_platform_poll_floor_applies_to_saved_intervals(interval, expected):
+    item = openai_account(poll_interval_seconds=interval)
+    scheduler, clock, provider, resolver, _ = setup((item,), FixedRng(0))
+    await scheduler.start()
+    try:
+        await settle()
+        assert resolver.calls[0].organization_id == "org-Synthetic0123"
+        await clock.advance(expected - 0.01)
+        assert len(provider.calls) == 1
+        await clock.advance(0.01)
+        assert len(provider.calls) == 2
+        assert item.poll_interval_seconds == interval
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.parametrize("state", [FetchState.NETWORK_ERROR, FetchState.RATE_LIMITED])
+async def test_openai_platform_error_retry_observes_the_poll_floor(state):
+    scheduler, clock, provider, _, published = setup((openai_account(),))
+    provider.results = [TransportError(state, state.value)]
+    await scheduler.start()
+    try:
+        await settle()
+        assert (published[-1].retry_at - clock.now()).total_seconds() == 300
+        await clock.advance(299)
+        assert len(provider.calls) == 1
+        await clock.advance(1)
+        assert len(provider.calls) == 2
+    finally:
+        await scheduler.stop()

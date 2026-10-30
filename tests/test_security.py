@@ -18,6 +18,8 @@ from cli_usage_api.domain import (
 from cli_usage_api.transport import MAX_RESPONSE_BYTES, Transport
 
 SECRET = "synthetic-never-real-secret"
+OPENAI_ORG = "org-Synthetic0123"
+CLAUDE_ORG = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 
 
 def source(provider=ProviderId.CLAUDE_SUBSCRIPTION, kind=CredentialKind.MANUAL_BEARER, **kwargs):
@@ -27,6 +29,17 @@ def source(provider=ProviderId.CLAUDE_SUBSCRIPTION, kind=CredentialKind.MANUAL_B
             provider, CredentialKind.CODEX_AUTH_FILE, SECRET, "synthetic-generation", **kwargs
         )
         # Bypass the domain only to exercise Transport's independent kind guard.
+        object.__setattr__(credential, "credential_kind", kind)
+        return credential
+    if provider == ProviderId.OPENAI_PLATFORM:
+        kwargs.setdefault("organization_id", OPENAI_ORG)
+        credential = ResolvedCredential(
+            provider,
+            CredentialKind.OPENAI_PLATFORM_SESSION,
+            SECRET,
+            "synthetic-generation",
+            **kwargs,
+        )
         object.__setattr__(credential, "credential_kind", kind)
         return credential
     return ResolvedCredential(provider, kind, SECRET, "synthetic-generation", **kwargs)
@@ -126,11 +139,10 @@ async def test_other_provider_path_guards(provider, path, kind):
     ],
 )
 async def test_cross_provider_credentials_never_reach_http(provider, bound_provider):
-    kind = (
-        CredentialKind.CONSOLE_SESSION
-        if bound_provider == ProviderId.CLAUDE_PLATFORM
-        else CredentialKind.MANUAL_BEARER
-    )
+    kind = {
+        ProviderId.CLAUDE_PLATFORM: CredentialKind.CONSOLE_SESSION,
+        ProviderId.OPENAI_PLATFORM: CredentialKind.OPENAI_PLATFORM_SESSION,
+    }.get(bound_provider, CredentialKind.MANUAL_BEARER)
 
     def handler(_):
         pytest.fail("Cross-provider credential reached HTTP boundary")

@@ -1538,3 +1538,107 @@ async def test_write_gate_is_evaluated_per_request(tmp_path, token_store, token,
         session = (await client.get("/api/v1/session")).json()
     assert session["capabilities"]["writable"] is False
     assert len(writable.store.load()) == 1
+
+
+async def test_openai_platform_account_over_http_never_echoes_org_or_session(
+    tmp_path, token_store, token, no_keyring
+):
+    writable = Writable(tmp_path, token_store)
+    session = "sess-synthetic-dashboard-session-never-echo"
+    organization = "org-SyntheticOrg1234"
+    body = {
+        "provider": "openai_platform",
+        "label": "OpenAI",
+        "organization_id": organization,
+        "source": {
+            "credential_kind": "openai_platform_session",
+            "secret": session,
+            "persist": False,
+        },
+    }
+    async with client_for(writable.app) as client:
+        missing = await client.post(
+            "/api/v1/accounts",
+            headers=auth(token),
+            json={key: value for key, value in body.items() if key != "organization_id"},
+        )
+        assert (missing.status_code, missing.json()) == (422, {"error": "organization_required"})
+        api_key = await client.post(
+            "/api/v1/accounts",
+            headers=auth(token),
+            json={**body, "source": {**body["source"], "secret": "sk-proj-synthetic-key-0000"}},
+        )
+        assert (api_key.status_code, api_key.json()) == (422, {"error": "invalid_secret"})
+        assert "sk-proj" not in api_key.text
+        created = await client.post("/api/v1/accounts", headers=auth(token), json=body)
+        assert created.status_code == 201
+        view = created.json()["account"]
+        assert view["provider"] == "openai_platform"
+        assert view["credential_kind"] == "openai_platform_session"
+        assert view["storage"] == "session" and view["organization_selected"] is True
+        assert view["poll_interval_seconds"] == 300
+        listed = await client.get("/api/v1/accounts", headers=auth(token))
+        for text in (created.text, listed.text):
+            assert organization not in text and session not in text
+        patched = await client.patch(
+            f"/api/v1/accounts/{view['id']}",
+            headers={**auth(token), "If-Match": f'"{view["revision"]}"'},
+            json={"organization_id": "org-AnotherOrg5678"},
+        )
+        assert patched.status_code == 200 and "org-AnotherOrg5678" not in patched.text
+    (saved,) = writable.store.load()
+    assert saved.organization_id == "org-AnotherOrg5678"
+    await writable.hub.stop()
+
+
+async def test_claude_credits_prepare_over_http_is_explicit(
+    tmp_path, token_store, token, no_keyring
+):
+    writable = Writable(tmp_path, token_store)
+    organization = "11111111-aaaa-4bbb-8ccc-222222222222"
+    seen = []
+
+    async def discovery(credential):
+        seen.append(credential.organization_id)
+        return (OrganizationChoice(organization, organization),)
+
+    writable.ops.console_discovery = {ProviderId.CLAUDE_SUBSCRIPTION: discovery}
+    bearer = "synthetic-claude-bearer-never-echo"
+    async with client_for(writable.app) as client:
+        prepared = await client.post(
+            "/api/v1/accounts/prepare",
+            headers=auth(token),
+            json={
+                "provider": "claude_subscription",
+                "credential_kind": "manual_bearer",
+                "secret": bearer,
+            },
+        )
+        assert prepared.status_code == 200
+        result = prepared.json()
+        assert result["kind"] == "claude_organization"
+        # A nameless organization is never labelled by its ID.
+        assert result["choices"] == [{"id": "c1", "label": None, "legacy": False, "current": False}]
+        assert organization not in prepared.text and bearer not in prepared.text
+        created = await client.post(
+            "/api/v1/accounts",
+            headers=auth(token),
+            json={
+                "provider": "claude_subscription",
+                "label": "Claude",
+                "source": {
+                    "credential_kind": "manual_bearer",
+                    "secret": bearer,
+                    "persist": False,
+                    "prepare_id": result["prepare_id"],
+                    "choice_id": "c1",
+                },
+            },
+        )
+        assert created.status_code == 201
+        assert created.json()["account"]["organization_selected"] is True
+        assert organization not in created.text and bearer not in created.text
+    assert seen == [None]
+    (saved,) = writable.store.load()
+    assert saved.organization_id == organization
+    await writable.hub.stop()

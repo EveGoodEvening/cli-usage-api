@@ -27,6 +27,7 @@ from cli_usage_api.domain import (
 from cli_usage_api.providers.claude import ClaudeProvider
 from cli_usage_api.providers.codex import CodexProvider
 from cli_usage_api.providers.grok import GrokProvider
+from cli_usage_api.providers.openai_platform import OpenAIPlatformProvider
 from cli_usage_api.reorder import ReorderableOptionList
 from cli_usage_api.transport import Transport
 
@@ -602,3 +603,146 @@ async def test_real_codex_credits_shown_and_claude_extra_usage_parse_only():
         assert "不限量 / Unlimited" in unlimited and "未知" not in unlimited
         await pilot.press("q")
     assert factory.closed and factory.scheduler.stopped
+
+
+async def test_factory_per_provider_discovery_reaches_account_manager():
+    """A factory offering per-provider discovery hands that mapping to the manager."""
+    factory = InjectedFactory()
+    factory.organization_discovery = {
+        ProviderId.CLAUDE_PLATFORM: Mock(),
+        ProviderId.CLAUDE_SUBSCRIPTION: Mock(),
+    }
+    app = UsageApp(
+        mode="live", scheduler_factory=factory, account_store=Mock(), credential_store=Mock()
+    )
+    app.account_store.load.return_value = ()
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        assert isinstance(app.screen, AccountManagerScreen)
+        screen = app.screen
+        assert (
+            screen.discovery_for(ProviderId.CLAUDE_SUBSCRIPTION)
+            is (factory.organization_discovery[ProviderId.CLAUDE_SUBSCRIPTION])
+        )
+        assert (
+            screen.discovery_for(ProviderId.CLAUDE_PLATFORM)
+            is (factory.organization_discovery[ProviderId.CLAUDE_PLATFORM])
+        )
+        # No discovery exists for OpenAI Platform; the organization is user-entered.
+        assert screen.discovery_for(ProviderId.OPENAI_PLATFORM) is None
+        await pilot.press("ctrl+c")
+
+
+async def test_real_claude_credits_and_openai_balance_rows_display_rounded_values():
+    org = "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d"
+    openai_org = "org-SyntheticOrg1234"
+    claude = Account(
+        id="55555555-5555-4555-8555-555555555555",
+        provider=ProviderId.CLAUDE_SUBSCRIPTION,
+        label="Synthetic Claude",
+        credential_kind=CredentialKind.MANUAL_BEARER,
+        credential_ref="memory:synthetic",
+        organization_id=org,
+    )
+    openai = Account(
+        id="66666666-6666-4666-8666-666666666666",
+        provider=ProviderId.OPENAI_PLATFORM,
+        label="Synthetic OpenAI",
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+        credential_ref="memory:synthetic",
+        organization_id=openai_org,
+    )
+    fixtures = Path(__file__).parent / "fixtures"
+    claude_body = (fixtures / "claude_usage.json").read_bytes()
+    credits_body = json.dumps(
+        {"amount": 123456, "currency": "usd", "auto_reload_settings": {"enabled": False}}
+    ).encode()
+    # Community-sampled shape with binary-float artifacts (4.9 stays 4.90; 3.07000…03 rounds).
+    openai_body = json.dumps(
+        {
+            "object": "credit_summary",
+            "total_granted": 23.0,
+            "total_used": 3.0700000000000003,
+            "total_available": 17.3715455,
+            "total_paid_available": 4.9,
+        }
+    ).encode()
+    seen = []
+
+    def respond(request):
+        seen.append((request.method, str(request.url)))
+        url = str(request.url)
+        if url == "https://api.anthropic.com/api/oauth/usage":
+            return httpx.Response(200, content=claude_body)
+        if url == f"https://api.anthropic.com/api/oauth/organizations/{org}/prepaid/credits":
+            return httpx.Response(200, content=credits_body)
+        assert url == "https://api.openai.com/v1/dashboard/billing/credit_grants"
+        return httpx.Response(200, content=openai_body)
+
+    transport = Transport(http_transport=httpx.MockTransport(respond))
+    claude_provider, openai_provider = ClaudeProvider(transport), OpenAIPlatformProvider(transport)
+    claude_credential = ResolvedCredential(
+        claude.provider,
+        CredentialKind.MANUAL_BEARER,
+        "synthetic-secret",
+        "generation-1",
+        organization_id=org,
+    )
+    openai_credential = ResolvedCredential(
+        openai.provider,
+        CredentialKind.OPENAI_PLATFORM_SESSION,
+        "synthetic-session-value-0123456789",
+        "generation-1",
+        organization_id=openai_org,
+    )
+
+    class ProviderScheduler(InjectedScheduler):
+        async def start(self):
+            await super().start()
+            now = datetime.now(UTC)
+            factory.publish(await claude_provider.fetch(claude, claude_credential, now))
+            factory.publish(await openai_provider.fetch(openai, openai_credential, now))
+
+    factory = InjectedFactory()
+    factory.scheduler = ProviderScheduler()
+    app = UsageApp(mode="live", accounts=(claude, openai), scheduler_factory=factory)
+    async with app.run_test(size=(120, 50)) as pilot:
+        await pilot.pause()
+        assert all(method == "GET" for method, _ in seen) and len(seen) == 3
+        claude_rows = [m for a, m in app.rows if a == claude]
+        # The credits row follows the required usage rows; extra usage stays hidden.
+        assert claude_rows == [
+            *REQUIRED_METRIC_IDS[claude.provider],
+            MetricId.CLAUDE_CREDIT_BALANCE,
+        ]
+        credit = str(
+            app.listing.get_option_at_index(app.option_index((claude, claude_rows[-1]))).prompt
+        )
+        assert "Claude 已购 credits 余额" in credit and "1234.56 USD" in credit
+        assert "未知" not in credit and "舍入" not in credit
+
+        openai_rows = [m for a, m in app.rows if a == openai]
+        assert openai_rows == [
+            MetricId.OPENAI_AVAILABLE_BALANCE,
+            MetricId.OPENAI_PAID_AVAILABLE_BALANCE,
+        ]
+        available, paid = (
+            str(app.listing.get_option_at_index(app.option_index((openai, m))).prompt)
+            for m in openai_rows
+        )
+        assert "OpenAI 可用余额" in available and "17.37 USD" in available
+        assert "服务端金额已舍入到分 / rounded to cents" in available
+        assert "17.3715455" not in available
+        assert "OpenAI 付费余额" in paid and "4.90 USD" in paid
+        assert "舍入" not in paid
+        # Data keeps the exact wire value; only presentation rounds.
+        metric = app.snapshots[openai.id].metrics[0]
+        assert str(metric.exact_balance.amount) == "17.3715455"
+        app.listing.highlighted = app.option_index((openai, openai_rows[0]))
+        await pilot.press("enter")
+        assert isinstance(app.screen, InformationScreen)
+        assert "17.37 USD" in app.screen.content
+        assert "精确金额 / exact: 17.3715455 USD" in app.screen.content
+        assert "服务端金额已舍入到分 / rounded to cents" in app.screen.content
+        await pilot.press("escape")
+        await pilot.press("q")

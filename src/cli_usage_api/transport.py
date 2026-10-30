@@ -20,6 +20,7 @@ from cli_usage_api.domain import (
     ProviderId,
     ResolvedCredential,
     TransportError,
+    openai_session_key,
     validate_credential_binding,
 )
 
@@ -28,6 +29,16 @@ TOTAL_TIMEOUT_SECONDS = 10.0
 DEBUG_BODY_TIMEOUT_SECONDS = 2.0
 CONNECT_TIMEOUT_SECONDS = 5.0
 _ORGANIZATION_PATH = re.compile(r"/api/organizations/[A-Za-z0-9-]{1,64}/prepaid/credits")
+CLAUDE_USAGE_PATH = "/api/oauth/usage"
+CLAUDE_PROFILE_PATH = "/api/oauth/profile"
+# Read-only prepaid balance; ``contracts/prepaid/credits`` (a purchase) never matches.
+_CLAUDE_CREDITS_PATH = re.compile(
+    r"/api/oauth/organizations/"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/prepaid/credits"
+)
+# GET only: POST on this same path purchases credits and is never callable here.
+OPENAI_CREDIT_GRANTS_PATH = "/v1/dashboard/billing/credit_grants"
+_ANTHROPIC_VERSION = "2023-06-01"
 # Release-pinned from https://x.ai/cli/stable; never fetched at runtime.
 _GROK_CLIENT_VERSION = "1.0.70"
 _ORIGINS = {
@@ -35,7 +46,13 @@ _ORIGINS = {
     ProviderId.CLAUDE_PLATFORM: "https://platform.claude.com",
     ProviderId.GROK_SUBSCRIPTION: "https://cli-chat-proxy.grok.com",
     ProviderId.CODEX_SUBSCRIPTION: "https://chatgpt.com",
+    ProviderId.OPENAI_PLATFORM: "https://api.openai.com",
 }
+
+
+def claude_credits_path(organization_id: str) -> str:
+    """The prepaid-credits read path for an explicitly selected organization."""
+    return f"/api/oauth/organizations/{organization_id}/prepaid/credits"
 
 
 def _user_agent() -> str:
@@ -46,11 +63,17 @@ def _user_agent() -> str:
     return f"cli-usage-api/{installed_version}"
 
 
-def _allowed_path(provider: ProviderId, path: str) -> bool:
+def _allowed_path(provider: ProviderId, path: str, credential: ResolvedCredential) -> bool:
     if not isinstance(path, str):
         return False
     if provider == ProviderId.CLAUDE_SUBSCRIPTION:
-        return path == "/api/oauth/usage"
+        if path in (CLAUDE_USAGE_PATH, CLAUDE_PROFILE_PATH):
+            return True
+        match = _CLAUDE_CREDITS_PATH.fullmatch(path)
+        # The path organization is bound to the account's saved selection.
+        return match is not None and match[1] == credential.organization_id
+    if provider == ProviderId.OPENAI_PLATFORM:
+        return path == OPENAI_CREDIT_GRANTS_PATH
     if provider == ProviderId.CODEX_SUBSCRIPTION:
         return path == "/backend-api/wham/usage"
     if provider == ProviderId.GROK_SUBSCRIPTION:
@@ -99,6 +122,24 @@ def _retry_at(value: str | None, now: datetime) -> datetime | None:
     return None
 
 
+def _openai_error(decoded: object, status: int) -> TransportError | None:
+    """Curated classification of an OpenAI dashboard error body; never echoes it.
+
+    Session expiry is signalled by ``error.code``, not by status alone; an API key
+    is rejected with a "must be made with a session key" message.
+    """
+    error = decoded.get("error") if isinstance(decoded, dict) else None
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    message = error.get("message")
+    if code == "expired_session_key":
+        return TransportError(FetchState.AUTH_REQUIRED, "credential_expired", status=status)
+    if isinstance(message, str) and "must be made with a session key" in message[:4096]:
+        return TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch", status=status)
+    return None
+
+
 def _reject_json_constant(value: str) -> None:
     raise ValueError("Non-JSON numeric constant.")
 
@@ -129,12 +170,20 @@ class Transport:
             binding_valid = False
         if not binding_valid:
             raise TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch")
-        if not _allowed_path(provider, path):
+        if not _allowed_path(provider, path, credential):
             raise TransportError(FetchState.PERMISSION_DENIED, "forbidden_request")
         if not _header_token(credential.secret) or (
             provider == ProviderId.CLAUDE_PLATFORM and not _cookie_value(credential.secret)
         ):
             raise TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch")
+        if provider == ProviderId.OPENAI_PLATFORM:
+            try:
+                bare = openai_session_key(credential.secret) == credential.secret
+            except DomainError:
+                bare = False
+            organization = credential.organization_id
+            if not bare or not isinstance(organization, str) or not _header_token(organization):
+                raise TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch")
         if credential.user_id is not None and not _header_token(credential.user_id):
             raise TransportError(FetchState.AUTH_REQUIRED, "credential_mismatch")
         if provider == ProviderId.CODEX_SUBSCRIPTION:
@@ -156,7 +205,17 @@ class Transport:
             headers["ChatGPT-Account-Id"] = credential.codex_account_id
         elif provider == ProviderId.CLAUDE_SUBSCRIPTION:
             headers["Authorization"] = f"Bearer {credential.secret}"
-            headers["anthropic-beta"] = "oauth-2025-04-20"
+            if path == CLAUDE_USAGE_PATH:
+                headers["anthropic-beta"] = "oauth-2025-04-20"
+            elif path == CLAUDE_PROFILE_PATH:
+                headers["Cache-Control"] = "no-cache"
+            else:
+                # Same organization as the (already bound) path; no beta header.
+                headers["anthropic-version"] = _ANTHROPIC_VERSION
+                headers["x-organization-uuid"] = credential.organization_id
+        elif provider == ProviderId.OPENAI_PLATFORM:
+            headers["Authorization"] = f"Bearer {credential.secret}"
+            headers["OpenAI-Organization"] = credential.organization_id
         elif provider == ProviderId.GROK_SUBSCRIPTION:
             headers["Authorization"] = f"Bearer {credential.secret}"
             headers["x-xai-token-auth"] = "xai-grok-cli"
@@ -180,13 +239,19 @@ class Transport:
                 ) as client,
                 client.stream("GET", _ORIGINS[provider] + path, headers=headers) as response,
             ):
-                if not 200 <= response.status_code < 300 and debuglog.enabled(provider):
-                    # Classify from headers first; the diagnostic read cannot replace it.
+                classify = provider == ProviderId.OPENAI_PLATFORM and (
+                    400 <= response.status_code < 500 and response.status_code != 429
+                )
+                if not 200 <= response.status_code < 300 and (
+                    classify or debuglog.enabled(provider)
+                ):
+                    # Classify from headers first; a failed body read cannot replace it.
                     try:
                         self._check_status(provider, path, response)
                     except TransportError as status_error:
-                        await self._debug_error_body(provider, path, response, scrub, deadline)
-                        raise status_error from None
+                        decoded = await self._error_body(provider, path, response, scrub, deadline)
+                        refined = _openai_error(decoded, response.status_code) if classify else None
+                        raise (refined or status_error) from None
                 self._check_status(provider, path, response)
                 # Do not allow a compressed chunk to expand without a
                 # bound inside httpx's automatic content decoder.
@@ -236,15 +301,16 @@ class Transport:
         raise error from None
 
     @staticmethod
-    async def _debug_error_body(
+    async def _error_body(
         provider: ProviderId,
         path: str,
         response: httpx.Response,
         scrub: tuple,
         deadline: asyncio.Timeout,
-    ) -> None:
-        """Debug-only bounded read of a non-2xx body; failures keep the status error.
+    ) -> dict | list | None:
+        """Bounded best-effort read of a non-2xx body; failures keep the status error.
 
+        Used for debug logging and OpenAI's curated error-code classification only.
         The read has its own deadline ending before the request's, so a slow body
         times out here instead of cancelling the request into a network error.
         """
@@ -273,6 +339,7 @@ class Transport:
         debuglog.http_response(
             provider, path, response.status_code, body, decoded=decoded, scrub=scrub
         )
+        return decoded
 
     def _check_status(self, provider: ProviderId, path: str, response: httpx.Response) -> None:
         status = response.status_code

@@ -22,7 +22,12 @@ from cli_usage_api.accounts import (
     validate_secret,
 )
 from cli_usage_api.credentials import CredentialResolver
-from cli_usage_api.domain import Account, CredentialKind, ProviderId
+from cli_usage_api.domain import (
+    Account,
+    CredentialKind,
+    ProviderId,
+    default_poll_interval_seconds,
+)
 from cli_usage_api.storage import AccountStore, ConfigError, CredentialError, CredentialStore
 
 
@@ -455,10 +460,69 @@ def test_hundred_and_first_account_is_rejected(services):
 
 def test_allowed_kinds_follow_display_order_and_exclude_codex_keys():
     assert allowed_kinds(ProviderId.CODEX_SUBSCRIPTION) == (CredentialKind.CODEX_AUTH_FILE,)
+    assert allowed_kinds(ProviderId.OPENAI_PLATFORM) == (CredentialKind.OPENAI_PLATFORM_SESSION,)
+    no_keys = {ProviderId.CODEX_SUBSCRIPTION, ProviderId.OPENAI_PLATFORM}
     for provider in ProviderId:
         kinds = allowed_kinds(provider)
         assert list(kinds) == [kind for kind in KINDS if kind in kinds]
-        assert (CredentialKind.API_KEY in kinds) == (provider != ProviderId.CODEX_SUBSCRIPTION)
+        assert (CredentialKind.API_KEY in kinds) == (provider not in no_keys)
+        # The OpenAI session is never offered for (or accepted by) another provider.
+        assert (CredentialKind.OPENAI_PLATFORM_SESSION in kinds) == (
+            provider == ProviderId.OPENAI_PLATFORM
+        )
+
+
+def test_openai_session_secret_rules_reject_keys_headers_and_har_text():
+    token = "sess-" + "A1b2C3d4" * 4
+    kind = CredentialKind.OPENAI_PLATFORM_SESSION
+    assert validate_secret(kind, token) == token
+    # Surrounding whitespace is the only thing removed.
+    assert validate_secret(kind, f"  {token}\n") == token
+    for value in (
+        None,
+        "",
+        "short-token",
+        "x" * 4097,
+        "sk-proj-" + "a" * 40,
+        "Bearer " + token,
+        "bearer" + token,
+        "Cookie: __Secure-next-auth=" + token,
+        "Authorization: Bearer " + token,
+        token[:10] + " " + token[10:],
+        token[:10] + "\r\n" + token[10:],
+        '{"sensitive_id": "' + token + '"}',
+        '{"log": {"entries": []}}',
+        token + ";other=1",
+    ):
+        with pytest.raises(AccountFlowError) as error:
+            validate_secret(kind, value)
+        assert error.value.code == "invalid_secret"
+        assert token not in str(error.value)
+    with pytest.raises(AccountFlowError):
+        validate_secret(kind, token, maximum=len(token) - 1)
+
+
+def test_openai_session_account_keeps_secret_out_of_config(services):
+    store, credentials, service = services
+    secret = "sess-" + "s" * 30
+    openai = Account(
+        id=str(uuid4()),
+        provider=ProviderId.OPENAI_PLATFORM,
+        label="Synthetic OpenAI",
+        credential_kind=CredentialKind.OPENAI_PLATFORM_SESSION,
+        credential_ref=f"session:{uuid4()}",
+        organization_id="org-Synthetic01",
+        poll_interval_seconds=default_poll_interval_seconds(ProviderId.OPENAI_PLATFORM),
+    )
+    saved = service.save(openai, secret=secret)[0]
+    assert saved.poll_interval_seconds == 300
+    assert saved.organization_id == "org-Synthetic01"
+    assert credentials.get(saved.credential_ref) == secret
+    assert secret not in store.path.read_text()
+    assert storage_class(saved) == "session"
+    # Changing only the organization is a new connection identity.
+    moved = replace(saved, organization_id="org-Synthetic02")
+    assert credential_identity(moved) != credential_identity(saved)
 
 
 @pytest.mark.parametrize(

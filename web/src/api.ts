@@ -57,6 +57,9 @@ export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
   "selection_required",
   "invalid_choice",
   "no_choices",
+  "organization_required",
+  "invalid_organization",
+  "organization_reselect_required",
   "credential_unavailable",
   "too_many_accounts",
   "precondition_required",
@@ -76,9 +79,13 @@ export const ERROR_CODE_MESSAGES: Readonly<Record<string, string>> = {
   secure_store_unavailable: "服务器没有可用的加密密钥环，未保存任何更改。可改选“仅本次会话”。",
   config_unavailable: "服务器无法读写账号配置（权限或旧版配置需在终端迁移），未做任何更改。",
   prepare_expired: "读取结果已过期或登录已变化，请重新读取。",
-  discovery_failed: "连接失败：检查 sessionKey 或登录状态后重试。",
+  discovery_failed: "连接失败：检查 sessionKey、登录状态（Claude 登录需要 user:profile 权限）后重试。",
   discovery_busy: "读取请求过于频繁，请稍后重试。",
   no_choices: "没有找到可选的组织。请重新登录后重试。",
+  organization_required: "请填写 OpenAI 组织 ID（org-…）。",
+  invalid_organization: "OpenAI 组织 ID 格式无效：应为 org- 加 8–64 个字母或数字。",
+  organization_reselect_required:
+    "登录已变化：请重新发现并明确选择 credits 余额组织，或选择“不读取 credits 余额”。",
   credential_unavailable:
     "服务器读不到这个凭据：确认文件存在、属于服务进程用户且权限为 0600，或重新登录对应 CLI。",
   invalid_secret: "凭据格式无效：只输入值本身，不要包含请求头或 HAR。",
@@ -153,7 +160,7 @@ export interface UsageClient {
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
-/** Console organization discovery may take up to 30 s on the server. */
+/** Organization discovery (Console, Claude profile) may take up to 30 s on the server. */
 export const PREPARE_TIMEOUT_MS = 40_000;
 /** Error bodies are read only this far, and only on account-management calls. */
 export const MAX_ERROR_BODY_BYTES = 4096;
@@ -343,7 +350,9 @@ export function isPrepareResult(value: unknown): value is PrepareResult {
     isObject(value) &&
     typeof value.prepare_id === "string" &&
     typeof value.expires_in === "number" &&
-    (value.kind === "grok_scope" || value.kind === "console_organization") &&
+    (value.kind === "grok_scope" ||
+      value.kind === "console_organization" ||
+      value.kind === "claude_organization") &&
     Array.isArray(value.choices) &&
     value.choices.every(
       (c) =>

@@ -35,7 +35,7 @@ persistence through the API is claimed.
 
 **Assets.** Usage/balance snapshots and account labels (personal data), API bearer
 tokens, account configuration, secrets submitted for accounts (manual bearers, API
-keys, Console `sessionKey`s), and, on a host, the first-party CLI login files.
+keys, Console `sessionKey`s, OpenAI Platform dashboard session keys), and, on a host, the first-party CLI login files.
 
 **Boundaries and controls.**
 
@@ -533,6 +533,49 @@ keys, Console `sessionKey`s), and, on a host, the first-party CLI login files.
   balance. A synthetic parser fixture does not establish live billing permission,
   session validity, or compatibility; those require separate authenticated acceptance.
 
+## Claude prepaid credits and OpenAI Platform session boundary (PLAN.md §20)
+
+Offline implementation only; no authenticated Claude credits read, OpenAI dashboard
+read or real-keyring persistence is claimed. PLAN.md §20 records the contract,
+sources and pending live steps.
+
+- **Claude prepaid credits** reuse the Claude subscription OAuth bearer. Organization
+  discovery (`GET /api/oauth/profile`) runs only as an explicit add/edit operation,
+  throttled and locked like Console discovery, and its single result is never
+  auto-selected. The credits read is GET-only to the exact path for the saved
+  canonical-UUID organization; the path organization and `x-organization-uuid` must
+  equal the credential's bound organization before any request. Neighbouring write
+  endpoints (purchase, auto-reload, overage limit, overage billing setup) are not
+  reachable. The second request is made only after a 2xx usage response, so it adds
+  no request after auth failure or rate limiting; its retry deadline becomes an
+  embargo. No `anthropic-client-platform` header is sent: the app does not claim to
+  be the Claude Code CLI.
+- **The OpenAI Platform dashboard session key is a high-sensitivity session**, not a
+  scoped API key: it grants whatever the platform.openai.com dashboard can do for the
+  user and organization, including billing changes, credit purchases and API-key
+  creation. The TUI, CLI and web forms show a warning before the masked input; only
+  the bare token is accepted (no `Bearer ` prefix, Cookie/Authorization header text,
+  JSON/HAR text, internal whitespace, or lengths outside 20–4096), never through
+  arguments or environment variables. Storage is the exact-policy OS keyring or
+  explicit session-only memory; there is no file kind and no fallback.
+- The `openai_platform_session` kind is bound to the OpenAI Platform provider in both
+  resolver and transport; no other provider accepts it and OpenAI accepts no other
+  kind. Transport sends it only as `GET https://api.openai.com/v1/dashboard/billing/credit_grants`
+  with the saved `OpenAI-Organization`; POST on that same path (a purchase) and every
+  other path/method are rejected before any request, including through an injected
+  transport. No redirects, persisted cookies or environment proxy/netrc. Error bodies
+  are read bounded for classification only and never echoed; the debug log redacts
+  the session and `sensitive_id`.
+- The session cannot be refreshed by this app (refresh needs the dashboard's login
+  POST, which is never called). Expiry surfaces as authentication required; the user
+  pastes a new key. Local removal does not revoke the remote session; log out of
+  platform.openai.com to revoke it. The organization ID is nonsecret metadata, but
+  the HTTP API still never returns it.
+- OpenAI amounts stay exact in snapshots and API JSON; only presentation rounds to
+  cents (with a visible note). Missing or invalid values stay unknown, never zero.
+- Containers have no OS keyring: an OpenAI session there is session-only in the
+  serving process, lost on restart, and readable by anyone with process access.
+
 ## Implemented C06 Grok provider boundary
 
 - `GrokProvider(transport)` performs no construction-time I/O. Async
@@ -706,7 +749,7 @@ verification does not establish authenticated provider or real-keyring acceptanc
 - Codex accepts only its file-backed login and selected account; no manual/API-key
   substitution. Other providers' API-key storage does not enable subscription/balance reads.
 - Require explicit organization/profile selection and warn before accepting only a
-  Console `sessionKey` value. Provider adapters validate response semantics.
+  Console `sessionKey` value or an OpenAI Platform dashboard session key value. Provider adapters validate response semantics.
 - Present secure persistence versus session-only choices honestly and provide
   actionable errors. CLI manual secrets require the secure keyring; session-only
   entry is an explicit TUI choice and is never described as persistent storage.

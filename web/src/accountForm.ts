@@ -1,7 +1,9 @@
 // Pure account-form logic: allowed credential kinds per provider, client-side
 // validation (the server validates again), and minimal request bodies. Secrets
-// appear only in manual bearer / API key sources and in Console prepare bodies;
-// a Console save carries the prepare record and choice, never the key itself.
+// appear only in manual bearer / OpenAI session / API key sources and in prepare
+// bodies; a Console save carries the prepare record and choice, never the key.
+// A Claude subscription may add an optional prepaid-credits organization, chosen
+// explicitly from a discovery; an OpenAI Platform account needs a typed org ID.
 
 import type {
   AccountConfig,
@@ -13,7 +15,7 @@ import type {
   StorageClass,
   UpdateAccountBody,
 } from "./types";
-import { CREDENTIAL_LABELS } from "./semantics";
+import { CREDENTIAL_LABELS, PROVIDER_ORDER, providerInfo } from "./semantics";
 
 /** Display order (accounts.KINDS). */
 const KIND_ORDER: CredentialKind[] = [
@@ -21,22 +23,52 @@ const KIND_ORDER: CredentialKind[] = [
   "grok_auth_file",
   "codex_auth_file",
   "console_session",
+  "openai_platform_session",
   "manual_bearer",
   "api_key",
 ];
 
-/** domain.READ_CREDENTIAL_KINDS; API keys are added for every provider except Codex. */
+/** domain.READ_CREDENTIAL_KINDS; API keys are added except for Codex and OpenAI Platform. */
 const READ_KINDS: Record<ProviderId, CredentialKind[]> = {
   claude_subscription: ["claude_code_file", "manual_bearer"],
   claude_platform: ["console_session"],
   codex_subscription: ["codex_auth_file"],
   grok_subscription: ["grok_auth_file", "manual_bearer"],
+  openai_platform: ["openai_platform_session"],
 };
+
+const NO_API_KEY: ReadonlySet<ProviderId> = new Set(["codex_subscription", "openai_platform"]);
 
 export function allowedKinds(provider: ProviderId): CredentialKind[] {
   const allowed = new Set(READ_KINDS[provider]);
-  if (provider !== "codex_subscription") allowed.add("api_key");
+  if (!NO_API_KEY.has(provider)) allowed.add("api_key");
   return KIND_ORDER.filter((kind) => allowed.has(kind));
+}
+
+/** Providers offered when adding an account (the dashboard order, plus any it lacks). */
+export function formProviders(): ProviderId[] {
+  const all: ProviderId[] = [...PROVIDER_ORDER];
+  for (const provider of Object.keys(READ_KINDS) as ProviderId[]) {
+    if (!all.includes(provider)) all.push(provider);
+  }
+  return all;
+}
+
+const PROVIDER_FALLBACK_NAMES: Partial<Record<ProviderId, string>> = { openai_platform: "OpenAI Platform" };
+
+export function providerName(provider: ProviderId): string {
+  const name = providerInfo(provider).name;
+  return name === provider ? (PROVIDER_FALLBACK_NAMES[provider] ?? provider) : name;
+}
+
+/** domain.POLL_FLOOR_SECONDS: the runtime minimum, and the default for a new account. */
+export const POLL_FLOORS: Partial<Record<ProviderId, number>> = {
+  claude_subscription: 180,
+  openai_platform: 300,
+};
+
+export function defaultInterval(provider: ProviderId): number {
+  return Math.max(60, POLL_FLOORS[provider] ?? 0);
 }
 
 export function defaultKind(provider: ProviderId): CredentialKind {
@@ -49,6 +81,8 @@ export function defaultKind(provider: ProviderId): CredentialKind {
       return "codex_auth_file";
     case "grok_subscription":
       return "grok_auth_file";
+    case "openai_platform":
+      return "openai_platform_session";
   }
 }
 
@@ -63,10 +97,21 @@ export function needsPrepare(kind: CredentialKind | null): kind is "grok_auth_fi
 
 /** Kinds whose secret travels in the save body itself. */
 export function needsSecret(kind: CredentialKind | null): boolean {
-  return kind === "manual_bearer" || kind === "api_key";
+  return kind === "manual_bearer" || kind === "api_key" || kind === "openai_platform_session";
 }
 
-export const KIND_LABELS: Record<CredentialKind, string> = CREDENTIAL_LABELS as Record<CredentialKind, string>;
+/** Claude subscription logins that can also read prepaid credits for a chosen organization. */
+export function creditsApply(provider: ProviderId, kind: CredentialKind | null): boolean {
+  return provider === "claude_subscription" && (kind === "claude_code_file" || kind === "manual_bearer");
+}
+
+export const KIND_LABELS: Record<CredentialKind, string> = {
+  openai_platform_session: "OpenAI Platform 会话密钥",
+  ...CREDENTIAL_LABELS,
+} as Record<CredentialKind, string>;
+
+/** Local format check; the server applies the same rule (domain.openai_organization_id). */
+export const OPENAI_ORGANIZATION_PATTERN = /^org-[A-Za-z0-9]{8,64}$/;
 
 export const STORAGE_LABELS: Record<StorageClass, string> = {
   external_file: "外部登录文件",
@@ -111,6 +156,14 @@ export interface Draft {
   choiceId: string | null;
   /** Whether the prepare record holds a newly entered Console key. */
   preparedSecret: boolean;
+  /**
+   * Claude subscription prepaid credits: "none" skips the extra read, "keep" keeps
+   * the saved organization (same login only), "select" sends the explicit choice
+   * (`prepareId`/`choiceId`) from a discovery of this login.
+   */
+  credits: "none" | "keep" | "select";
+  /** OpenAI Platform organization ID; on edit, empty keeps the saved (hidden) one. */
+  organizationId: string;
 }
 
 export function newDraft(provider: ProviderId, secureStore: boolean): Draft {
@@ -118,7 +171,7 @@ export function newDraft(provider: ProviderId, secureStore: boolean): Draft {
     editing: false,
     provider,
     label: "",
-    interval: "60",
+    interval: String(defaultInterval(provider)),
     enabled: true,
     source: "set",
     kind: defaultKind(provider),
@@ -129,6 +182,8 @@ export function newDraft(provider: ProviderId, secureStore: boolean): Draft {
     prepareId: null,
     choiceId: null,
     preparedSecret: false,
+    credits: "none",
+    organizationId: "",
   };
 }
 
@@ -141,12 +196,50 @@ export function editDraft(account: AccountConfig, secureStore: boolean): Draft {
     enabled: account.enabled,
     source: "keep",
     kind: account.credential_kind ?? defaultKind(account.provider),
+    credits: account.provider === "claude_subscription" && account.organization_selected ? "keep" : "none",
   };
+}
+
+/** The credential kind the saved account will have: the kept one, or the chosen one. */
+export function effectiveKind(draft: Draft, original: AccountConfig | null): CredentialKind | null {
+  if (draft.source === "none") return null;
+  if (draft.source === "keep") return original?.credential_kind ?? null;
+  return draft.kind;
+}
+
+/** Whether the prepaid-credits section applies to this draft. */
+export function creditsSection(draft: Draft, original: AccountConfig | null): boolean {
+  return creditsApply(draft.provider, effectiveKind(draft, original));
+}
+
+/**
+ * "Keep the saved organization" is offered only while the login plausibly stays the
+ * same; the server re-checks (a different custom path answers organization_reselect_required).
+ */
+export function canKeepCredits(draft: Draft, original: AccountConfig | null): boolean {
+  if (!original || original.provider !== "claude_subscription" || !original.organization_selected) return false;
+  if (draft.source === "keep") return true;
+  if (draft.source !== "set" || draft.kind !== original.credential_kind) return false;
+  if (needsSecret(draft.kind)) return draft.secret === "";
+  return draft.reference === "custom" ? original.reference === "custom" : original.reference === "default";
+}
+
+/** Whether a Claude credits discovery runs on the saved login (no secret or path sent). */
+export function creditsUsesSaved(draft: Draft, original: AccountConfig | null): boolean {
+  if (!original || original.credential_kind === null) return false;
+  if (draft.source === "keep") return true;
+  return needsSecret(draft.kind) && draft.kind === original.credential_kind && draft.secret === "";
+}
+
+function creditsChanged(draft: Draft, original: AccountConfig): boolean {
+  const saved = original.provider === "claude_subscription" && original.organization_selected;
+  if (draft.credits === "select") return true;
+  return saved ? draft.credits === "none" : false;
 }
 
 /** A different provider or kind resets everything that belonged to the old one. */
 export function withKind(draft: Draft, kind: CredentialKind, original: AccountConfig | null): Draft {
-  return {
+  const next: Draft = {
     ...draft,
     kind,
     reference: canKeepReference(kind, original) ? "current" : "default",
@@ -156,6 +249,9 @@ export function withKind(draft: Draft, kind: CredentialKind, original: AccountCo
     choiceId: null,
     preparedSecret: false,
   };
+  // A discovery choice belongs to the old login; "keep" survives only an unchanged one.
+  const keep = draft.credits === "keep" && canKeepCredits({ ...next, source: "set" }, original);
+  return { ...next, credits: keep ? "keep" : "none" };
 }
 
 /** Grok can re-read its saved login file without the page ever learning the path. */
@@ -178,7 +274,15 @@ export function validReference(kind: CredentialKind, path: string): boolean {
   return path.endsWith(`/${referenceBasename(kind)}`);
 }
 
-export type DraftField = "label" | "interval" | "reference" | "choice" | "secret" | "persist";
+export type DraftField =
+  | "label"
+  | "interval"
+  | "reference"
+  | "choice"
+  | "secret"
+  | "persist"
+  | "organization"
+  | "credits";
 export type DraftErrors = Partial<Record<DraftField, string>>;
 
 function secretRequired(draft: Draft, original: AccountConfig | null): boolean {
@@ -195,6 +299,19 @@ export function validateDraft(draft: Draft, original: AccountConfig | null = nul
   if (!/^\d+$/.test(interval) || seconds < MIN_INTERVAL || seconds > MAX_INTERVAL) {
     errors.interval = "刷新间隔必须是 30 到 3600 之间的整数。";
   }
+  if (draft.provider === "openai_platform") {
+    const organization = draft.organizationId.trim();
+    if (organization === "" ? !draft.editing : !OPENAI_ORGANIZATION_PATTERN.test(organization)) {
+      errors.organization = "请填写 OpenAI 组织 ID：org- 加 8–64 个字母或数字。";
+    }
+  }
+  if (creditsSection(draft, original)) {
+    if (draft.credits === "select" && (draft.prepareId === null || draft.choiceId === null)) {
+      errors.credits = "请先发现组织并明确选择，或选择“不读取 credits 余额”。";
+    } else if (draft.credits === "keep" && !canKeepCredits(draft, original)) {
+      errors.credits = "登录已变化：请重新发现并选择组织，或选择“不读取 credits 余额”。";
+    }
+  }
   if (draft.source !== "set") return errors;
   if (isFileKind(draft.kind) && !needsPrepare(draft.kind) && draft.reference === "custom") {
     if (!validReference(draft.kind, draft.path.trim())) {
@@ -206,6 +323,9 @@ export function validateDraft(draft: Draft, original: AccountConfig | null = nul
   }
   if (needsSecret(draft.kind)) {
     if (draft.secret === "" && secretRequired(draft, original)) errors.secret = "请输入凭据。";
+    else if (draft.kind === "openai_platform_session" && /^\s*sk-/i.test(draft.secret)) {
+      errors.secret = "API key（sk-…）不能读取余额：请粘贴 platform.openai.com 的会话密钥。";
+    }
   }
   if (secretStored(draft) && draft.persist === null) errors.persist = "请选择凭据保存方式。";
   return errors;
@@ -226,11 +346,26 @@ export function prepareReferenceError(draft: Draft): string | null {
     : "请填写服务器上 auth.json 的绝对路径（不含 .. 或 //）。";
 }
 
+/** The prepaid-credits part of a Claude subscription source; nothing when none was or will be set. */
+function creditsFields(draft: Draft, original: AccountConfig | null): Partial<SourceBody> {
+  if (draft.credits === "select") return { prepare_id: draft.prepareId ?? "", choice_id: draft.choiceId ?? "" };
+  if (draft.credits === "keep") return { organization: "keep" };
+  const saved = original?.provider === "claude_subscription" && original.organization_selected;
+  return saved ? { organization: "none" } : {};
+}
+
 /** The source to send: undefined means "keep" (no key), null means none/detach. */
-export function sourceBody(draft: Draft): SourceBody | null | undefined {
-  if (draft.source === "keep") return undefined;
+export function sourceBody(draft: Draft, original: AccountConfig | null = null): SourceBody | null | undefined {
+  if (draft.source === "keep") {
+    // A kept login whose prepaid-credits organization changes is resubmitted
+    // without its secret or path: the server keeps the saved reference.
+    const kind = original?.credential_kind ?? null;
+    if (!original || !creditsApply(original.provider, kind) || !creditsChanged(draft, original)) return undefined;
+    return { credential_kind: kind as CredentialKind, ...creditsFields(draft, original) };
+  }
   if (draft.source === "none") return null;
   const kind = draft.kind;
+  const credits = creditsApply(draft.provider, kind) ? creditsFields(draft, original) : {};
   if (needsPrepare(kind)) {
     const body: SourceBody = {
       credential_kind: kind,
@@ -241,20 +376,26 @@ export function sourceBody(draft: Draft): SourceBody | null | undefined {
     return body;
   }
   if (isFileKind(kind)) {
-    return { credential_kind: kind, reference: draft.reference === "custom" ? draft.path.trim() : "default" };
+    return {
+      credential_kind: kind,
+      reference: draft.reference === "custom" ? draft.path.trim() : "default",
+      ...credits,
+    };
   }
-  if (draft.secret === "") return { credential_kind: kind };
-  return { credential_kind: kind, secret: draft.secret, persist: draft.persist ?? false };
+  if (draft.secret === "") return { credential_kind: kind, ...credits };
+  return { credential_kind: kind, secret: draft.secret, persist: draft.persist ?? false, ...credits };
 }
 
 export function createBody(draft: Draft): CreateAccountBody {
-  return {
+  const body: CreateAccountBody = {
     provider: draft.provider,
     label: draft.label.trim(),
     poll_interval_seconds: Number(draft.interval.trim()),
     enabled: draft.enabled,
     source: sourceBody(draft) ?? null,
   };
+  if (draft.provider === "openai_platform") body.organization_id = draft.organizationId.trim();
+  return body;
 }
 
 /** Only the fields that differ; `{}` is a valid, revision-checked no-op. */
@@ -265,8 +406,10 @@ export function updateBody(draft: Draft, original: AccountConfig): UpdateAccount
   const seconds = Number(draft.interval.trim());
   if (seconds !== original.poll_interval_seconds) body.poll_interval_seconds = seconds;
   if (draft.enabled !== original.enabled) body.enabled = draft.enabled;
-  const source = sourceBody(draft);
+  const source = sourceBody(draft, original);
   if (source !== undefined) body.source = source;
+  const organization = draft.organizationId.trim();
+  if (original.provider === "openai_platform" && organization !== "") body.organization_id = organization;
   return body;
 }
 
@@ -276,6 +419,7 @@ export function sourceChanged(draft: Draft, original: AccountConfig | null): boo
 }
 
 export function prepareBody(draft: Draft, original: AccountConfig | null, secret: string): PrepareBody | null {
+  if (creditsSection(draft, original)) return creditsPrepareBody(draft, original);
   if (!needsPrepare(draft.kind)) return null;
   const body: PrepareBody = {
     account_id: original?.id ?? null,
@@ -293,6 +437,25 @@ export function prepareBody(draft: Draft, original: AccountConfig | null, secret
 }
 
 /**
+ * The Claude profile read for the prepaid-credits organization. It names the login
+ * the save will use: the saved one (no path or secret), a file reference, or the
+ * typed bearer, which the save must then resend unchanged.
+ */
+function creditsPrepareBody(draft: Draft, original: AccountConfig | null): PrepareBody {
+  const kind = effectiveKind(draft, original) as "claude_code_file" | "manual_bearer";
+  const body: PrepareBody = {
+    account_id: original?.id ?? null,
+    revision: original?.revision ?? null,
+    provider: draft.provider,
+    credential_kind: kind,
+  };
+  if (creditsUsesSaved(draft, original)) return body;
+  if (kind === "claude_code_file") body.reference = draft.reference === "custom" ? draft.path.trim() : "default";
+  else body.secret = draft.secret;
+  return body;
+}
+
+/**
  * Rebase an open edit onto a reloaded account (after a revision conflict).
  * `before` and `after` are `editDraft` of the old and the reloaded account: a field
  * the user left untouched follows the server, so a retry cannot silently revert
@@ -303,7 +466,14 @@ export function rebaseDraft(draft: Draft, before: Draft, after: Draft): Draft {
   for (const key of Object.keys(after) as (keyof Draft)[]) {
     if (draft[key] === before[key]) next[key] = after[key];
   }
-  return { ...(next as unknown as Draft), prepareId: null, choiceId: null, preparedSecret: false };
+  const rebased = next as unknown as Draft;
+  return {
+    ...rebased,
+    prepareId: null,
+    choiceId: null,
+    preparedSecret: false,
+    credits: rebased.credits === "select" ? after.credits : rebased.credits,
+  };
 }
 
 /** Escape inside an open form, innermost first: a save in flight, then the inline confirm. */

@@ -26,7 +26,7 @@ describe("http client", () => {
     const fetchMock = respond(200, fixture.healthy);
     const client = createHttpClient(creds, fetchMock as unknown as typeof fetch);
     const data = await client.dashboard();
-    expect(data.accounts).toHaveLength(4);
+    expect(data.accounts).toHaveLength(5);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api.example.com/api/v1/dashboard");
     expect(url).not.toContain(creds.token);
@@ -375,6 +375,33 @@ describe("account management calls", () => {
     });
     expect(call(update).url).toBe(`${creds.baseUrl}/api/v1/accounts/a%2Fb`);
     expect(call(update).url).not.toContain(SECRET);
+  });
+
+  it("accepts a Claude credits discovery and names the organization error codes", async () => {
+    const fetchMock = respond(200, {
+      prepare_id: "p",
+      expires_in: 300,
+      kind: "claude_organization",
+      choices: [{ id: "c1", label: null, legacy: false, current: false }],
+    });
+    const client = createHttpClient(creds, fetchMock as unknown as typeof fetch);
+    const result = await client.prepare({
+      account_id: null,
+      revision: null,
+      provider: "claude_subscription",
+      credential_kind: "manual_bearer",
+      secret: SECRET,
+    });
+    expect(result.kind).toBe("claude_organization");
+    expect(call(fetchMock).url).not.toContain(SECRET);
+    for (const code of ["organization_required", "invalid_organization", "organization_reselect_required"]) {
+      const failing = createHttpClient(creds, respond(422, { error: code }) as unknown as typeof fetch);
+      const error = (await failing
+        .createAccount({ provider: "openai_platform", label: "x", source: null })
+        .catch((e: unknown) => e)) as ApiError;
+      expect(error).toMatchObject({ kind: "invalid", code });
+      expect(error.message).toBe(ERROR_CODE_MESSAGES[code]);
+    }
   });
 
   it("names only whitelisted error codes and falls back to the kind message", async () => {

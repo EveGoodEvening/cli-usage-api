@@ -1,7 +1,7 @@
 # CLIUsageAPI
 
-A local terminal dashboard for subscription usage and Claude Platform credit
-balances, with an optional token-protected HTTP API (usage data plus account
+A local terminal dashboard for subscription usage and prepaid credit balances
+(Claude subscription, Claude Platform, OpenAI Platform), with an optional token-protected HTTP API (usage data plus account
 management) and a separate web frontend. Provider reads are read-only. No statusline.
 
 **Status:** Offline demo and local account workflows are verified. Authenticated
@@ -53,10 +53,11 @@ theme produce a warning and fall back to nord; save failures are also reported.
 
 | Provider | Displayed metrics |
 |---|---|
-| Claude subscription | 5-hour, weekly, and model-scoped Fable weekly usage |
+| Claude subscription | 5-hour, weekly, and model-scoped Fable weekly usage; optional prepaid credits balance (Claude 已购 credits 余额) when an organization is selected |
 | Claude Platform | Purchased, promotional, and authoritative total credit balances; grant expiry |
 | Codex | Weekly (7-day) quota, plus reported optional windows such as 5-hour usage, and a Codex credits balance (or Unlimited) when reported |
 | Grok | Shared-pool usage and GrokBuild / GrokChat consumption shares |
+| OpenAI Platform | Available prepaid credit balance, plus paid-available balance when reported |
 
 Codex quota is **not ordinary ChatGPT chat usage**. Fable is a weekly subset, not
 extra capacity. Grok product shares are not independent allowances; remaining and
@@ -69,18 +70,33 @@ shares need not sum to the aggregate. Codex hides `plan_type`, `allowed`, and
 `limit_reached`; quota percentages and reset times remain visible.
 
 Codex credits come from the same usage response: a non-currency amount shown as
-`<amount> credits` (exact, never converted to money or given an expiry), or
+`<amount> credits` rounded half-even to two decimals (e.g. `137.50 credits`; the API
+JSON keeps the exact value; never converted to money or given an expiry), or
 `不限量` / Unlimited. Like the official client, no row appears when the account has no
 credits. Claude subscription extra usage (spend in the current billing period
 against an optional monthly cap) is parsed from the existing usage response into
 snapshots, the debug log and the HTTP API (`claude.subscription.extra_usage`), but
 is deliberately **not displayed** in the TUI or web UI for now.
 
+The Claude prepaid credits balance is read only for an account whose organization
+was explicitly selected: each refresh then reads usage first and, only after a
+successful usage response, makes one read-only prepaid-credits request. A failed
+credits request leaves the usage rows fresh, marks the credit row unknown and the
+account partial; its retry deadline is honored. Promotional credit is already part
+of that balance (expiry is shown as detail, not a reset), and it is never combined
+with Claude Platform balances or derived from extra usage.
+
+OpenAI Platform shows the dashboard's reported `total_available` (and
+`total_paid_available` when present), never granted minus used. The payload names no
+currency; USD is an assumption matching the official dashboard. The TUI and web round
+OpenAI amounts half-even to cents and note `服务端金额已舍入到分 / rounded to cents`
+when that changed the value; the API JSON keeps the exact amount.
+
 Failed reads retain last-known values with freshness/error indicators; passing a
 reset does not invent new allowance. Claude subscription automatically polls no
-more often than every **3 minutes**, including existing 60-second configurations;
-longer configured intervals are honored. Other providers retain the 60-second
-default and configurable 30–3600-second interval. Claude 429 retries start at
+more often than every **3 minutes** and OpenAI Platform no more often than every
+**5 minutes**, including existing shorter configurations; longer configured
+intervals are honored. Other providers retain the 60-second default and configurable 30–3600-second interval. Claude 429 retries start at
 3 minutes, then 6, 12, and 15 minutes (plus jitter); longer configured intervals or
 server `Retry-After` win. `r` requests an earlier observation, but never bypasses
 retry deadlines. Restart a running dashboard to use the new policy.
@@ -92,6 +108,9 @@ dashboard, use the `usage accounts` commands below, or add accounts in the
 [web UI](#account-management-over-http) when the API runs with writes enabled:
 
 - **Claude:** run `claude`, then `/login`. Choose **External Claude Code file**.
+  Optionally press Discover to read your profile's organization and explicitly
+  select it to add the prepaid credits balance (one extra read-only request per
+  refresh); it is never selected automatically. Choose no organization to skip it.
 - **Claude Platform:** choose **Console session (not an API key)**. A `sessionKey`
   is a **high-sensitivity account session**: enter only your own cookie value in
   the masked prompt, never a password, full Cookie header, or HAR file. Discover
@@ -102,6 +121,14 @@ dashboard, use the `usage accounts` commands below, or add accounts in the
   login. See the [Codex authentication guide](https://developers.openai.com/codex/auth).
 - **Grok:** run `grok login`. Choose **External Grok auth file** and explicitly
   select the intended identity/scope.
+- **OpenAI Platform:** enter your organization ID (`org-…`, from platform.openai.com
+  settings), then choose **OpenAI Platform dashboard session key (not an API key)**.
+  This is a **high-sensitivity account session**: it grants full dashboard access
+  (billing, purchases, creating API keys). Paste only the token value in the masked
+  prompt — never a password, full Cookie/Authorization header, or HAR file. It
+  expires within days and cannot be refreshed by this app: paste a new one when the
+  account shows authentication required. API keys (`sk-…`) do not work. Stored only
+  in the OS keyring or kept for the session; the app makes one read-only GET.
 
 For file sources, use `default` or a normalized absolute path to a private,
 user-owned `0600` regular file named `.credentials.json` (Claude Code) or
@@ -111,7 +138,7 @@ refreshes tokens. Renew expired credentials through the first-party tool; on an
 unattended host, the separate opt-in `usage-keepalive` loop invokes each official CLI
 shortly before its stored expiry so that CLI renews its own file (see
 [docs/deploy-railway.md](docs/deploy-railway.md)).
-API keys do not enable subscription metrics or Console balances.
+API keys do not enable subscription metrics, Console balances, or OpenAI Platform balances.
 
 In the account manager (`a`), Shift+↑/↓ (or Ctrl+↑/↓) moves the selected account and
 mouse drag reorders; the order is saved to `accounts.json` and the dashboard, the API
@@ -129,11 +156,12 @@ uv run usage accounts key delete ACCOUNT_ID
 ```
 
 Use the ID from `accounts list`. Other provider choices are `claude-subscription`,
-`claude-platform`, and `grok-subscription`. Mutating commands require an interactive
+`claude-platform`, `grok-subscription`, and `openai-platform`. Mutating commands require an interactive
 TTY; credentials are entered through masked prompts, never command arguments.
 Run `uv run usage --help` for command help.
 `accounts list` shows the effective polling interval; saved values below Claude's
-3-minute floor are preserved in configuration but do not shorten automatic polls.
+3-minute or OpenAI Platform's 5-minute floor are preserved in configuration but do not
+shorten automatic polls.
 
 Legacy ChatGPT profiles require `uv run usage accounts migrate-chatgpt-to-codex`.
 After explicit confirmation, replacements are disabled and credentials detached;
@@ -300,8 +328,8 @@ Node.js 22 and pinned Claude Code, Codex and Grok Build CLIs, then runs
 `railway ssh` in to log in to each CLI and create a token. The recommended flow then
 sets the service's custom start command to
 `/usr/bin/tini -- /usr/local/bin/usage-entrypoint usage api serve --host 0.0.0.0 --port 8787 --allow-origin https://<frontend> --trust-proxy --keepalive`,
-redeploys, and adds accounts in the web UI (Claude Platform only as session-only,
-re-entered after each redeploy). One-process `usage --api` in tmux remains an
+redeploys, and adds accounts in the web UI (Claude Platform and OpenAI Platform only
+as session-only, re-entered after each redeploy). One-process `usage --api` in tmux remains an
 alternative.
 Step-by-step instructions (Chinese) and sources are in
 [docs/deploy-railway.md](docs/deploy-railway.md). The image has been built and
