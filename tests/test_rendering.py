@@ -262,6 +262,9 @@ async def test_saturated_retry_response_renders_without_local_overflow(saturated
     assert snapshot.fetch_state == FetchState.RATE_LIMITED
     assert snapshot.retry_at == datetime.max.replace(tzinfo=UTC)
     app = UsageApp(mode="live", accounts=(account,), scheduler_factory=lambda *a, **kw: None)
+    # Pin the countdown clock: the remaining days otherwise shrink as real time passes.
+    app.now = lambda: DEMO_NOW
+    days = (snapshot.retry_at - DEMO_NOW).days
     async with app.run_test() as pilot:
         app.publish_snapshot(snapshot)
         app._tick()
@@ -269,7 +272,7 @@ async def test_saturated_retry_response_renders_without_local_overflow(saturated
         assert "rate_limited" in row and "重试 / retry" in row
         assert local_time(snapshot.retry_at) in row
         header = str(app.listing.get_option_at_index(0).prompt)
-        assert "限流" in header and "重试 / retry 9999-12-31" in header and "2912141天" in header
+        assert "限流" in header and "重试 / retry 9999-12-31" in header and f"{days}天" in header
         assert snapshot.retry_at.isoformat() in app.details(account, snapshot.metrics[0].id)
         assert app.metric_option_count() == 3
         await pilot.press("q")

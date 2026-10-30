@@ -415,3 +415,5 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   Claude's `/api/oauth/profile` returns one organization (discovery still needs explicit
   confirmation); its prepaid-credits read sends `x-organization-uuid` and no
   `anthropic-beta`. Round money only at display; label width drives TUI reset tiers.
+- Live-mode `UsageApp.now()` is the real clock. Tests asserting countdown/relative text
+  must pin `app.now` (and derive expected days from it), or they rot as dates pass.
