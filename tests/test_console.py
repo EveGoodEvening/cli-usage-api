@@ -88,7 +88,7 @@ async def test_complete_all_grants_single_selected_org_read(payload):
     assert snapshot.grants[3].remaining.minor == 999
     assert snapshot.grants[4].category == GrantCategory.PROMOTIONAL
     assert snapshot.grants[4].program_id == "subscription_api_credit"
-    assert "not subscription usage windows" in snapshot.metrics[1].detail
+    assert snapshot.metrics[1].detail == "含订阅赠送的 API credits。"
 
 
 @pytest.mark.parametrize("raw", [None, "missing"])
@@ -157,7 +157,7 @@ async def test_unknown_expiry_retains_reported_money_with_uncertainty(payload, e
     assert snapshot.fetch_state == FetchState.PARTIAL
     assert snapshot.metrics[0].balance.minor == 1200
     assert snapshot.grants[0].expires_at is None
-    assert "uncertain" in snapshot.metrics[0].detail
+    assert "部分赠款到期时间未知" in snapshot.metrics[0].detail
     assert snapshot.metrics[0].expires_at == datetime(2026, 11, 2, 12, tzinfo=UTC)
 
 

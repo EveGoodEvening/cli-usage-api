@@ -207,7 +207,8 @@ async def test_invalid_reset_keeps_valid_quota_and_flags_partial(payload, raw):
     assert snapshot.metrics[0].state == MetricState.READY
     assert snapshot.metrics[0].quota.used_percent == Decimal("12.5")
     assert snapshot.metrics[0].reset_at is None
-    assert "invalid" in snapshot.metrics[0].detail
+    # The row's "重置 — 未知" and the partial diagnostic say it; no extra note.
+    assert snapshot.metrics[0].detail is None
     assert snapshot.fetched_at == NOW
 
 
@@ -274,7 +275,7 @@ async def test_duplicate_bad_reset_preserves_equal_quota_and_siblings(payload, m
     assert fable.state == MetricState.READY
     assert fable.quota.used_percent == Decimal("23.75")
     assert fable.reset_at is None
-    assert "invalid" in fable.detail
+    assert fable.detail is None
     assert [row.quota.used_percent for row in snapshot.metrics[:2]] == [
         Decimal("12.5"),
         Decimal("110.25"),

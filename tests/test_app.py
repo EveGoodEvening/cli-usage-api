@@ -296,7 +296,7 @@ async def test_real_grok_extra_product_mount_details_filter_and_refresh():
         assert "Other" in app.screen.content and "10%" in app.screen.content
         assert "private_http" in app.screen.content
         assert "grok.cli.billing.credits" in app.screen.content
-        assert "consumption share: 10%" in app.screen.content
+        assert "已用 10%" in app.screen.content and "占共享池额度。" in app.screen.content
         assert "剩余 90%" not in app.screen.content
         assert f"属于共享池 {app.snapshots[grok.id].metrics[0].id}" in app.screen.content
         await pilot.press("escape")

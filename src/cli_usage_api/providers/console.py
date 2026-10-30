@@ -113,18 +113,16 @@ def _category(
             total += remaining.minor
             if expiry is not None:
                 expiries.append(expiry)
-    details = ["Sum of all grants excluding known expired grants; credits expire, not reset."]
+    details = []
     if uncertain:
-        details.append(
-            "Unknown expiry: included reported remaining amounts; active status is uncertain."
-        )
+        details.append("部分赠款到期时间未知，已计入。")
     if any(grant.program_id == "subscription_api_credit" for grant in grants):
-        details.append("Includes subscription-origin API credits, not subscription usage windows.")
+        details.append("含订阅赠送的 API credits。")
     return (
         Money(total, currency, exponent),
         tuple(grants),
         min(expiries, default=None),
-        " ".join(details),
+        " ".join(details) or None,
         uncertain,
     )
 

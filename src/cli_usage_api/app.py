@@ -562,7 +562,7 @@ class UsageApp(App[None]):
         banner = (
             "DEMO 离线合成演示 — 不代表真实账号或已验证的 Codex 实时额度"
             if demo
-            else "LIVE 实时账号用量（有界轮询）"
+            else "LIVE 实时用量"
         )
         # Service notes (e.g. "API 127.0.0.1:8787") follow the mode banner.
         notes = [note for service in self.services if (note := getattr(service, "note", None))]
@@ -702,7 +702,7 @@ class UsageApp(App[None]):
             snapshot, self.now(), account.effective_poll_interval_seconds, metric=metric
         )
         flags = (" LAST KNOWN 上次已知" if state.last_known else "") + (
-            " STALE 过期" if state.stale else " fresh 新鲜"
+            " STALE 过期" if state.stale else ""
         )
         value = metric_value(metric) if metric else "— 未知 / no data"
         lines = [
@@ -892,12 +892,15 @@ class UsageApp(App[None]):
             if shown
             else int(state.stale)
         )
-        chips.append(" · ")
+        # Fresh is the normal state, so only staleness is flagged; a fresh
+        # header reserves the widest stale chip so ticks never re-wrap it.
         if stale:
             count = f" {stale}/{len(shown)}" if shown else ""
+            chips.append(" · ")
             chips.append(f"STALE 过期{count}", style=f"bold {self._color('warning')}")
         else:
-            chips.append("fresh 新鲜", style=self._color("success"))
+            count = f" {len(shown)}/{len(shown)}" if shown else ""
+            chips.append(" " * cell_len(f" · STALE 过期{count}"))
         return chips
 
     def _widest_chips(self, tier: str, now: datetime) -> int:

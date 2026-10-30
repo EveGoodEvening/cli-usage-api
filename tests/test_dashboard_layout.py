@@ -249,7 +249,7 @@ async def test_unproven_pool_is_a_flat_aggregate_without_remaining_or_lectures()
         await pilot.pause()
         pool_row = row(app, "grok.subscription.shared_pool")
         snapshot = app.snapshots[pool_row[0].id]
-        caveat = "Pool relationship unknown; remaining/reset unavailable."
+        caveat = "与共享池关系未知。"
         metrics = tuple(
             replace(
                 metric,
@@ -273,7 +273,7 @@ async def test_unproven_pool_is_a_flat_aggregate_without_remaining_or_lectures()
             # Not nested under a pool that was never proven; still one line.
             assert text.startswith(label) and "├" not in text and "└" not in text
             assert f"已用 {share}%" in text and "剩余" not in text
-            assert "Pool relationship" not in text and "\n" not in text.rstrip()
+            assert caveat not in text and "\n" not in text.rstrip()
         # The caveat remains available on request.
         assert caveat in app.details(*pool_row)
         assert "Grok 汇总" in app.details(*pool_row)

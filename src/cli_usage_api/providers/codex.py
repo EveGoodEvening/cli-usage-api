@@ -99,13 +99,12 @@ def _metric(metric_id: str, label: str, windows: list[_Window]) -> tuple[Metric,
     partial = not windows or any(window.used is None or window.reset is None for window in windows)
     if len(usages) > 1 or len(resets) > 1:
         partial = True
-        details.append("Conflicting duplicate window values; conflicting fields are unknown.")
+        details.append("重复窗口数值冲突")
     if used is None:
         partial = True
         details.append(_MISSING)
     if reset is None:
         partial = True
-        details.append("Absolute reset is unavailable; relative reset is not used as a timestamp.")
     return (
         Metric(
             id=metric_id,
@@ -272,20 +271,6 @@ class CodexProvider:
             metric, incomplete = _metric(metric_id, label, windows)
             metrics.append(metric)
             partial |= incomplete
-        if partial:
-            # A malformed unclassifiable sibling has no invented identity/row.
-            # Preserve its existence safely on the always-present weekly row.
-            weekly = metrics[0]
-            metrics[0] = Metric(
-                id=weekly.id,
-                label=weekly.label,
-                state=weekly.state,
-                source=weekly.source,
-                quota=weekly.quota,
-                reset_at=weekly.reset_at,
-                detail=(weekly.detail + "; " if weekly.detail else "")
-                + "Response is partial; some windows or fields are unavailable or malformed.",
-            )
         # Recognized identities remain partial even when reconciliation leaves
         # no usable quota; only an unrecognizable response is a schema error.
         state = FetchState.PARTIAL if partial else FetchState.OK

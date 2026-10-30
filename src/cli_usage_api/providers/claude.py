@@ -466,8 +466,8 @@ class ClaudeProvider:
                     else _MISSING
                 )
             elif window[2]:
+                # The row already reads "重置 — 未知"; partial_data covers the rest.
                 partial = True
-                detail = "Usage is valid, but the reported reset timestamp is invalid."
             metrics.append(
                 Metric(
                     id=metric_id,

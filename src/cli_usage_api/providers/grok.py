@@ -31,6 +31,7 @@ _PROVIDER = ProviderId.GROK_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "grok.cli.billing.credits", version_sensitive=True)
 _LABELS = ("Grok 共享池", "GrokBuild", "GrokChat")
 MISSING_DETAIL = "Usage is unavailable in this response; missing does not mean zero."
+_POOL_UNKNOWN = "与共享池关系未知。"
 
 
 def _percent(value: object) -> Decimal:
@@ -143,23 +144,17 @@ class GrokProvider:
         unified = config.get("isUnifiedBillingUser") is True
         # The informational breakdown has no documented sum-to-total invariant.
         products = _products(config, aggregate, omitted_zero=omitted_zero)
-        detail = [
-            f"Reported aggregate consumption: {aggregate}%."
-            if aggregate is not None
-            else MISSING_DETAIL
-        ]
-        detail.append(f"Server period: {period}.")
+        detail = [] if aggregate is not None else [MISSING_DETAIL]
+        detail.append(f"周期 {period}。")
         if not unified:
-            detail.append("Pool relationship unknown; remaining/reset unavailable.")
+            detail.append(_POOL_UNKNOWN)
         elif bad_period:
-            detail.append("Period reset is missing, invalid, or has reversed bounds.")
+            detail.append("周期重置时间无效。")
         tier = config.get("subscriptionTier", config.get("subscription_tier"))
         if tier is None:
             tier = payload.get("subscriptionTier", payload.get("subscription_tier"))
         if isinstance(tier, str):
-            detail.append(
-                f"Reported plan: {sanitize_text(tier, max_length=120)}; no assumed quota."
-            )
+            detail.append(f"方案 {sanitize_text(tier, max_length=120)}。")
         metrics = [
             Metric(
                 self.metric_ids[0],
@@ -187,12 +182,7 @@ class GrokProvider:
             linked = unified and aggregate is not None and used is not None
             product_detail = MISSING_DETAIL
             if used is not None:
-                product_detail = f"Reported consumption share: {used}%. Not an independent quota. "
-                product_detail += (
-                    "剩余/重置：共享池 (remaining/reset: shared pool)."
-                    if linked
-                    else "Pool relationship unknown; remaining/reset unavailable."
-                )
+                product_detail = "占共享池额度。" if linked else _POOL_UNKNOWN
             metrics.append(
                 Metric(
                     metric_id,

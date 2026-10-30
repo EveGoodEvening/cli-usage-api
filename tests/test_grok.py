@@ -93,12 +93,12 @@ async def test_fixture_exact_single_read(payload):
     assert "weekly" in pool.detail
     assert "Synthetic plan" in pool.detail
     assert all(row.reset_at == RESET for row in snapshot.metrics)
-    assert "32.5%" in build.detail and "10%" in chat.detail
+    assert build.detail == chat.detail == "占共享池额度。"
     assert build.share_percent == Decimal("32.5") and chat.share_percent == Decimal(10)
     assert pool.share_percent is None
     for row in (build, chat):
         assert row.shared_pool_id == pool.id
-        assert "剩余/重置：共享池" in row.detail
+        assert row.detail == "占共享池额度。"
 
 
 @pytest.mark.parametrize("kind", [CredentialKind.MANUAL_BEARER, CredentialKind.GROK_AUTH_FILE])
@@ -128,7 +128,7 @@ async def test_aggregate_exact_overage_and_explicit_product_zero(payload, value)
     if Decimal(str(value)) >= 100:
         assert pool.quota.remaining_percent == 0
     assert build.state == chat.state == MetricState.READY
-    assert "0%" in chat.detail
+    assert chat.share_percent == 0
 
 
 @pytest.mark.parametrize(
@@ -186,12 +186,12 @@ async def test_only_boolean_true_proves_unified_semantics(payload, value):
     assert all(row.state == MetricState.READY for row in snapshot.metrics)
     assert all(row.quota is None for row in snapshot.metrics)
     assert all(row.shared_pool_id is None and row.reset_at is None for row in snapshot.metrics)
-    assert "42.5%" in snapshot.metrics[0].detail
-    assert "Pool relationship unknown" in snapshot.metrics[0].detail
+    assert snapshot.metrics[0].share_percent == Decimal("42.5")
+    assert "与共享池关系未知" in snapshot.metrics[0].detail
     # The aggregate is reported consumption only, never a derived remaining.
     assert snapshot.metrics[0].share_percent == Decimal("42.5")
     assert all(row.share_percent is not None for row in snapshot.metrics[1:])
-    assert "32.5%" in snapshot.metrics[1].detail
+    assert snapshot.metrics[1].share_percent == Decimal("32.5")
 
 
 async def test_absence_is_unknown_not_zero(payload):
@@ -260,7 +260,7 @@ async def test_informational_products_need_not_reconcile_with_total(payload, sha
     assert snapshot.fetch_state == FetchState.OK
     assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
     assert all(row.state == MetricState.READY for row in snapshot.metrics)
-    assert f"{Decimal(share)}%" in snapshot.metrics[1].detail
+    assert snapshot.metrics[1].share_percent == Decimal(share)
     # Raw wire numbers stay exact Decimals in the structured share.
     assert type(snapshot.metrics[1].share_percent) is Decimal
     assert str(snapshot.metrics[1].share_percent) == str(Decimal(share))
@@ -295,7 +295,7 @@ async def test_unknown_products_retained_sanitized_and_informational(payload):
     assert extra.id.startswith("grok.product.other.")
     assert "Other" in extra.label
     assert "\u001b" not in extra.label and "[" not in extra.label and "\n" not in extra.label
-    assert "7.5%" in extra.detail
+    assert extra.share_percent == Decimal("7.5")
     assert extra.shared_pool_id == snapshot.metrics[0].id
     assert extra.quota is None
     # Repeat payload and order changes retain the same nonsecret stable extra ID.
@@ -310,7 +310,7 @@ async def test_period_type_does_not_infer_plan_or_quota(payload, period_type):
     provider, _ = provider_for(payload)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     expected = "monthly" if period_type == "USAGE_PERIOD_TYPE_MONTHLY" else "period"
-    assert f"Server period: {expected}." in snapshot.metrics[0].detail
+    assert f"周期 {expected}。" in snapshot.metrics[0].detail
     assert snapshot.metrics[0].reset_at == RESET
 
 
@@ -463,7 +463,7 @@ async def test_plan_metadata_sanitized_not_assumed_quota(payload):
     provider, _ = provider_for(payload)
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     detail = snapshot.metrics[0].detail
-    assert "Unknown plan" in detail and "no assumed quota" in detail
+    assert "方案 Unknown plan" in detail and "quota" not in detail
     assert "\u001b" not in detail and "[" not in detail and "\n" not in detail
     assert snapshot.metrics[0].quota.limit_count is None
 
@@ -488,7 +488,7 @@ async def test_no_current_period_can_use_explicit_fallback(payload):
     snapshot = await provider.fetch(ACCOUNT, CREDENTIAL, NOW)
     assert snapshot.fetch_state == FetchState.OK
     assert all(row.reset_at == RESET for row in snapshot.metrics)
-    assert "Server period: period." in snapshot.metrics[0].detail
+    assert "周期 period。" in snapshot.metrics[0].detail
 
 
 async def test_empty_array_does_not_prove_build_chat_zero(payload):
@@ -553,7 +553,7 @@ async def test_raw_http_protojson_omitted_zero_with_weekly_context():
     assert snapshot.metrics[0].quota.remaining_percent == Decimal(100)
     assert all(row.reset_at == RESET for row in snapshot.metrics)
     assert all(row.state == MetricState.READY for row in snapshot.metrics)
-    assert all("0%" in row.detail for row in snapshot.metrics)
+    assert all(row.share_percent == 0 for row in snapshot.metrics[1:])
     assert all(row.shared_pool_id == snapshot.metrics[0].id for row in snapshot.metrics[1:])
 
 
@@ -606,7 +606,7 @@ async def test_present_product_omitted_percent_requires_weekly_context(payload, 
     assert snapshot.metrics[0].quota.used_percent == Decimal("42.5")
     assert snapshot.metrics[1].state == (MetricState.READY if weekly else MetricState.UNKNOWN)
     if weekly:
-        assert "0%" in snapshot.metrics[1].detail
+        assert snapshot.metrics[1].share_percent == 0
     assert snapshot.metrics[2].state == MetricState.UNKNOWN
     assert snapshot.metrics[2].shared_pool_id is None
 
