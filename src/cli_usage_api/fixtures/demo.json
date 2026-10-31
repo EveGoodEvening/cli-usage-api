@@ -7,7 +7,7 @@
         {"id": "claude.subscription.five_hour", "label": "Claude 5h · SYNTHETIC", "used_percent": "37.5", "reset_offset": 7200},
         {"id": "claude.subscription.weekly", "label": "Claude weekly · SYNTHETIC", "used_percent": "62.25", "reset_offset": 259200},
         {"id": "claude.subscription.fable_weekly", "label": "Fable weekly · SYNTHETIC", "used_percent": "110.25", "reset_offset": 259200},
-        {"id": "claude.subscription.credit_balance", "label": "Claude 已购 credits 余额 · SYNTHETIC", "balance_minor": 2500}
+        {"id": "claude.subscription.credit_balance", "label": "Claude credits 余额 · SYNTHETIC", "balance_minor": 2500}
       ]
     },
     "claude_platform": {
@@ -26,7 +26,7 @@
       "metrics": [
         {"id": "codex.subscription.weekly", "label": "Codex weekly (7d) · SYNTHETIC", "used_percent": "24", "reset_offset": 345600},
         {"id": "codex.subscription.five_hour", "label": "Codex 5h · SYNTHETIC", "used_percent": "12.5", "reset_offset": 10800},
-        {"id": "codex.subscription.credits", "label": "Codex credits · SYNTHETIC", "credits": "137.5"}
+        {"id": "codex.subscription.credits", "label": "Codex credits 余额 · SYNTHETIC", "credits": "137.5"}
       ]
     },
     "grok_subscription": {

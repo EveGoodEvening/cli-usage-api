@@ -424,3 +424,7 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   it is not shown at all. Diagnostic messages read "<web label>：<action>" so the web
   drops the repeated label while the TUI line stays self-contained; expiry text is
   just "到期 …" and only the main rounded amount carries "已舍入到分".
+- Displayed amounts (credits, cents-rounded and exact money, minor-unit Money, grants,
+  provider detail text) group integer digits via `domain.group_thousands` / web
+  `groupThousands`; keep Python and web text identical. Data/API JSON stays ungrouped.
+  Credit row labels follow `<Provider> credits 余额`.

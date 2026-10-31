@@ -625,7 +625,7 @@ async def test_currency_is_uppercased_and_zero_exponent_respected(payload):
     row = extra_row(await fetch(payload))
     assert row.spent == Money(1500, "JPY", 0)
     assert row.spend_limit == Money(10000, "JPY", 0)
-    assert row.spent.format() == "1500 JPY"
+    assert row.spent.format() == "1,500 JPY"
 
 
 @pytest.mark.parametrize("raw", [-1, True, False, 12.5, "100", 10**15 + 1, [], {}])
@@ -830,7 +830,7 @@ async def test_organization_makes_usage_then_credits_with_exact_headers(payload)
     assert ids[-1] == MetricId.CLAUDE_CREDIT_BALANCE
     row = credit_row(snapshot)
     assert row.state == MetricState.READY
-    assert row.label == "Claude 已购 credits 余额"
+    assert row.label == "Claude credits 余额"
     assert row.balance == Money(13750, "USD", 2)
     assert row.quota is None and row.reset_at is None and row.spent is None
     assert row.source.contract == "claude.oauth.prepaid.credits"

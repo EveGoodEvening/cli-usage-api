@@ -33,7 +33,7 @@ _PROVIDER = ProviderId.CODEX_SUBSCRIPTION
 _SOURCE = SourceRef(SourceKind.PRIVATE_HTTP, "codex.wham.usage.v1", version_sensitive=True)
 _WEEKLY_LABEL = "Codex weekly (7d)"
 _MISSING = "本次未返回"
-_CREDITS_LABEL = "Codex credits"
+_CREDITS_LABEL = "Codex credits 余额"
 
 
 @dataclass(frozen=True, slots=True)

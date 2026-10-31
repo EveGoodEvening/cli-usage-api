@@ -359,8 +359,13 @@ def test_exact_money_and_credits_text_round_half_even_for_display_only():
         MetricId.CODEX_CREDITS, "x", MetricState.READY, source, credits=Decimal("137.5")
     )
     assert metric_value(credits) == "137.50 credits"
-    assert metric_value(replace(credits, credits=Decimal("1E+3"))) == "1000.00 credits"
+    assert metric_value(replace(credits, credits=Decimal("1E+3"))) == "1,000.00 credits"
     assert metric_value(replace(credits, credits=Decimal("0.005"))) == "0.00 credits"
+    grouped = replace(credits, credits=Decimal("12345.5"))
+    assert metric_value(grouped) == "12,345.50 credits" and grouped.credits == Decimal("12345.5")
+    assert metric_value(
+        replace(exact, exact_balance=ExactMoney(Decimal("-1234567.891"), "USD"))
+    ) == ("-1,234,567.89 USD")
     # Unknown never renders a number.
     unknown = replace(exact, state=MetricState.UNKNOWN, exact_balance=None)
     assert metric_value(unknown) == "— 未知 / no data"
@@ -368,7 +373,7 @@ def test_exact_money_and_credits_text_round_half_even_for_display_only():
 
 def test_new_metric_ids_have_dashboard_labels():
     for metric_id, label in (
-        (MetricId.CLAUDE_CREDIT_BALANCE, "Claude 已购 credits 余额"),
+        (MetricId.CLAUDE_CREDIT_BALANCE, "Claude credits 余额"),
         (MetricId.OPENAI_AVAILABLE_BALANCE, "OpenAI 可用余额"),
         (MetricId.OPENAI_PAID_AVAILABLE_BALANCE, "OpenAI 付费余额"),
     ):

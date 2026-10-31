@@ -169,7 +169,7 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
             assert row.source.kind == SourceKind.OFFLINE_DEMO
             assert row.detail == "Fictional synthetic demonstration; not live account data."
         credits = rows[MetricId.CODEX_CREDITS]
-        assert credits.label == "Codex credits · SYNTHETIC"
+        assert credits.label == "Codex credits 余额 · SYNTHETIC"
         assert credits.credits == Decimal("137.5")
         assert str(credits.credits) == "137.5"
         assert credits.source.kind == SourceKind.OFFLINE_DEMO
@@ -181,7 +181,7 @@ async def test_healthy_values_balances_grants_and_fictional_codex_windows():
         assert credits.reset_at is None
         # Claude prepaid credits: an ordinary Money balance, distinct from Console.
         claude_credit = rows[MetricId.CLAUDE_CREDIT_BALANCE]
-        assert claude_credit.label == "Claude 已购 credits 余额 · SYNTHETIC"
+        assert claude_credit.label == "Claude credits 余额 · SYNTHETIC"
         assert claude_credit.balance.minor == 2500
         assert claude_credit.balance.currency == "USD"
         assert claude_credit.balance.exponent == 2
@@ -492,7 +492,7 @@ def _codex_fixture(tmp_path, monkeypatch, extra):
     fixture = json.loads(files("cli_usage_api").joinpath("fixtures/demo.json").read_text())
     metrics = fixture["providers"]["codex_subscription"]["metrics"]
     metrics[:] = [item for item in metrics if item["id"] != MetricId.CODEX_CREDITS]
-    metrics.append({"id": MetricId.CODEX_CREDITS.value, "label": "Codex credits · SYNTHETIC"})
+    metrics.append({"id": MetricId.CODEX_CREDITS.value, "label": "Codex credits 余额 · SYNTHETIC"})
     metrics[-1].update(extra)
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()

@@ -106,7 +106,7 @@ describe("credit amount text", () => {
   it("credits round half-even to two decimals, always two decimals", () => {
     expect(creditsText("7")).toBe("7.00 credits");
     expect(creditsText("137.5")).toBe("137.50 credits");
-    expect(creditsText("1E+3")).toBe("1000.00 credits");
+    expect(creditsText("1E+3")).toBe("1,000.00 credits");
     expect(creditsText("2.675")).toBe("2.68 credits");
     expect(creditsText("0.125")).toBe("0.12 credits");
     expect(creditsText("0.135")).toBe("0.14 credits");
@@ -116,8 +116,19 @@ describe("credit amount text", () => {
     // Python's Decimal.quantize keeps the sign of a tiny negative amount.
     expect(creditsText("-0.001")).toBe("-0.00 credits");
     expect(creditsText("1234567890123456789012345678901234567.895")).toBe(
-      "1234567890123456789012345678901234567.90 credits",
+      "1,234,567,890,123,456,789,012,345,678,901,234,567.90 credits",
     );
+  });
+
+  it("groups integer digits with commas, like domain.format_two_decimals", () => {
+    expect(creditsText("12345.5")).toBe("12,345.50 credits");
+    expect(creditsText("999.995")).toBe("1,000.00 credits");
+    expect(creditsText("1234567.891")).toBe("1,234,567.89 credits");
+    expect(creditsText("0.5")).toBe("0.50 credits");
+    expect(creditsText("999.99")).toBe("999.99 credits");
+    expect(creditsText("-1234.5")).toBe("-1,234.50 credits");
+    expect(creditsText("1E+21")).toBe("1,000,000,000,000,000,000,000.00 credits");
+    expect(roundTwoDecimals("12345.675")).toEqual({ text: "12,345.68", changed: true });
   });
 
   it("reports whether rounding changed the value", () => {
@@ -138,7 +149,7 @@ describe("credit amount text", () => {
 describe("Codex credits row", () => {
   it("shows the exact amount as a figure: no meter, no reset, not money", () => {
     const html = row(metric(CREDITS, { credits: "1E+3" }));
-    expect(text(html)).toContain("1000.00 credits");
+    expect(text(html)).toContain("1,000.00 credits");
     expect(html).not.toContain('class="meter');
     expect(html).not.toContain("重置");
     expect(html).not.toContain("USD");
@@ -188,7 +199,7 @@ describe("Codex credits row", () => {
     const credits = codex.snapshot?.metrics.find((m) => m.id === CREDITS);
     expect(credits?.source.kind).toBe("offline_demo");
     const html = board([codex]);
-    expect(text(html)).toContain("Codex credits");
+    expect(text(html)).toContain("Codex credits 余额");
     expect(text(html)).toContain("42.50 credits");
     // The data keeps the exact value; only the display rounds.
     expect(codex.snapshot?.metrics.find((m) => m.id === CREDITS)?.credits).toBe("42.5");
@@ -267,6 +278,8 @@ describe("OpenAI Platform exact money", () => {
     expect(exactMoneyCents(usd("0.125"))).toEqual({ text: "0.12 USD", changed: true });
     expect(exactMoneyCents(usd("-1.005"))).toEqual({ text: "-1.00 USD", changed: true });
     expect(exactMoneyText(usd("1.5E-7"))).toBe("0.00000015 USD");
+    expect(exactMoneyCents(usd("-1234567.891"))).toEqual({ text: "-1,234,567.89 USD", changed: true });
+    expect(exactMoneyText(usd("1234567890.005"))).toBe("1,234,567,890.005 USD");
     for (const junk of [null, usd("NaN"), usd("1e"), { amount: "1", currency: "usd" }]) {
       expect(exactMoneyCents(junk)).toBeNull();
       expect(exactMoneyText(junk)).toBe("—");
@@ -344,7 +357,7 @@ describe("Claude prepaid credits balance", () => {
     expect(REQUIRED_METRICS.claude_subscription).not.toContain(ID);
     expect(orderedMetrics(view).map((r) => r.id).at(-1)).toBe(ID);
     const html = board([view]);
-    expect(text(html)).toContain("Claude 已购 credits 余额");
+    expect(text(html)).toContain("Claude credits 余额");
     expect(text(html)).toContain("25.50 USD");
     expect(text(html)).toContain("auto-reload off");
     expect(tightestQuota([view])?.metric.id).toBe("claude.subscription.fable_weekly");

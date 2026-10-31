@@ -493,7 +493,20 @@ class Money:
         digits = str(abs(self.minor)).zfill(self.exponent + 1)
         if self.exponent:
             digits = digits[: -self.exponent] + "." + digits[-self.exponent :]
-        return f"{'-' if self.minor < 0 else ''}{digits} {self.currency}"
+        return f"{group_thousands(('-' if self.minor < 0 else '') + digits)} {self.currency}"
+
+
+def group_thousands(text: str) -> str:
+    """Comma-group the integer digits of plain fixed-point text (display only).
+
+    ``"-1234567.891"`` -> ``"-1,234,567.891"``; the sign and decimals are kept as
+    written. API JSON, snapshots and the debug log keep ungrouped exact values.
+    """
+    sign = "-" if text.startswith("-") else ""
+    whole, dot, fraction = text[len(sign) :].partition(".")
+    head = len(whole) % 3 or 3
+    groups = [whole[:head], *(whole[i : i + 3] for i in range(head, len(whole), 3))]
+    return sign + ",".join(groups) + dot + fraction
 
 
 _CENT = Decimal("0.01")
@@ -509,8 +522,8 @@ def round_to_cents(value: Decimal) -> Decimal:
 
 
 def format_two_decimals(value: Decimal) -> str:
-    """Half-even rounded, always two decimals, plain notation (e.g. ``137.50``)."""
-    return f"{round_to_cents(value):f}"
+    """Half-even rounded, always two decimals, grouped plain notation (``1,137.50``)."""
+    return group_thousands(f"{round_to_cents(value):f}")
 
 
 @dataclass(frozen=True, slots=True)

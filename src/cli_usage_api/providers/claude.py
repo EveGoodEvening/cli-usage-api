@@ -248,7 +248,7 @@ def _extra_usage(payload: dict) -> Metric | None:
 _CREDITS_SOURCE = SourceRef(
     SourceKind.PRIVATE_HTTP, "claude.oauth.prepaid.credits", version_sensitive=True
 )
-_CREDITS_LABEL = "Claude 已购 credits 余额"
+_CREDITS_LABEL = "Claude credits 余额"
 _CREDITS_RATE_LIMIT_COOLDOWN = timedelta(seconds=180)
 _CREDITS_FAILURES = MappingProxyType(
     {

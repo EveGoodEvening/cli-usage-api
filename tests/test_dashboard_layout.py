@@ -25,6 +25,7 @@ from cli_usage_api.domain import (
     Snapshot,
     SourceKind,
     SourceRef,
+    group_thousands,
 )
 
 BARS = ("█", "░", "▶")
@@ -297,7 +298,7 @@ async def test_balance_amount_whole_without_percent_and_expiry_is_not_reset(size
         )
         app.publish_snapshot(replace(snapshot, metrics=(metric, *snapshot.metrics[1:])))
         text = prompt(app, purchased)
-        assert "1234567.89 USD" in text and "到期" in text
+        assert "1,234,567.89 USD" in text and "到期" in text
         # Grant expiry is not a reset: no reset text and no countdown.
         assert "重置" not in text and "后" not in text and "%" not in text
         await pilot.press("q")
@@ -723,7 +724,7 @@ def codex_extra(app, **fields):
     metric = replace(
         app._metric(*weekly),
         id=MetricId.CODEX_CREDITS,
-        label="Codex credits",
+        label="Codex credits 余额",
         quota=None,
         reset_at=None,
         **fields,
@@ -740,8 +741,8 @@ async def test_codex_credits_and_unlimited_are_whole_values_not_unknown(size):
         await pilot.pause()
         for value, shown in (
             # Display rounds half-even to exactly two decimals; data stays exact.
-            (Decimal("1234567.0000001"), "1234567.00 credits"),
-            (Decimal("1E+5"), "100000.00 credits"),
+            (Decimal("1234567.0000001"), "1,234,567.00 credits"),
+            (Decimal("1E+5"), "100,000.00 credits"),
             (Decimal(0), "0.00 credits"),
             (Decimal("-2.50"), "-2.50 credits"),
             (Decimal("137.5"), "137.50 credits"),
@@ -753,7 +754,7 @@ async def test_codex_credits_and_unlimited_are_whole_values_not_unknown(size):
             account_rows = [r for r in app.rows if r[0] == target[0]]
             assert account_rows[-1] == target and len(account_rows) == 3
             text = prompt(app, target)
-            assert "Codex credits" in text and shown in text
+            assert "Codex credits 余额" in text and shown in text
             assert "未知" not in text and "no data" not in text
             assert "%" not in text and "USD" not in text and "重置" not in text
             assert "E+" not in text and lines_fit(app, text)
@@ -882,7 +883,7 @@ async def test_openai_exact_balance_rounds_to_cents_with_note_in_every_tier(size
             (Decimal("0.135"), "0.14 USD", True),
             (Decimal("-3.07"), "-3.07 USD", False),
             (Decimal(0), "0.00 USD", False),
-            (Decimal("1234567890.005"), "1234567890.00 USD", True),
+            (Decimal("1234567890.005"), "1,234,567,890.00 USD", True),
         ):
             app.publish_snapshot(openai_snapshot(available, Decimal("4.9")))
             await pilot.pause()
@@ -895,7 +896,7 @@ async def test_openai_exact_balance_rounds_to_cents_with_note_in_every_tier(size
             assert lines_fit(app, text)
             details = app.details(*target)
             assert shown in details and (ROUNDED in details) == rounded
-            assert f"精确金额 / exact: {available:f} USD" in details
+            assert f"精确金额 / exact: {group_thousands(f'{available:f}')} USD" in details
             # The snapshot keeps the exact amount; display alone rounds.
             assert app.snapshots[OPENAI.id].metrics[0].exact_balance.amount == available
             if size[0] < 72:
@@ -940,7 +941,7 @@ async def test_claude_credit_balance_row_follows_required_rows(size):
         credit = replace(
             app._metric(*weekly),
             id=MetricId.CLAUDE_CREDIT_BALANCE,
-            label="Claude 已购 credits 余额",
+            label="Claude credits 余额",
             quota=None,
             reset_at=None,
             balance=Money(123456789, "USD", 2),
@@ -952,9 +953,9 @@ async def test_claude_credit_balance_row_follows_required_rows(size):
         assert account_rows[-1] == MetricId.CLAUDE_CREDIT_BALANCE
         target = (account, MetricId.CLAUDE_CREDIT_BALANCE)
         text = prompt(app, target)
-        assert "1234567.89 USD" in text and "未知" not in text and "%" not in text
+        assert "1,234,567.89 USD" in text and "未知" not in text and "%" not in text
         assert "舍入" not in text and lines_fit(app, text)
-        assert "1234567.89 USD" in app.details(*target)
+        assert "1,234,567.89 USD" in app.details(*target)
         unknown = replace(
             credit, state=MetricState.UNKNOWN, balance=None, detail="Org not found; re-select."
         )

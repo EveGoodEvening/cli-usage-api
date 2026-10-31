@@ -2298,3 +2298,19 @@ Open decisions: whether to send `anthropic-client-platform: claude_code_cli`
 (currently omitted); whether to align Claude zero-decimal currencies with the
 official JPY/KRW/VND set; `ExactMoney` uses the `credit_amount()` bounds (40 digits,
 exponent ±40).
+
+## 21. User-requested credit label and thousands grouping — 2026-10-31
+
+The user asked for uniform credit wording and comma-grouped Codex credits.
+Display labels are now `Codex credits 余额` (`codex.subscription.credits`) and
+`Claude credits 余额` (`claude.subscription.credit_balance`); metric IDs, demo
+provenance suffixes and semantics are unchanged.
+
+Every displayed amount groups its integer digits with an ASCII comma every three
+digits: `domain.group_thousands` (Python) and `groupThousands` (web) feed
+`format_two_decimals`/`roundTwoDecimals` (Codex credits, cents-rounded exact money),
+`Money.format`/`formatMoney` (balances, grants, provider detail text) and the exact
+fixed-point detail (`精确金额`). Only the integer part is grouped; sign, decimals and
+half-even rounding are unchanged (`999.995` → `1,000.00`, `-0.001` → `-0.00`).
+None of these helpers feeds snapshots, API JSON, config or debug-log values, which
+stay exact and ungrouped. Offline gates only; no live acceptance is implied.

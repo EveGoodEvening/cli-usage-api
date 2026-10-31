@@ -588,11 +588,11 @@ async def test_real_codex_credits_shown_and_claude_extra_usage_parse_only():
         assert "额外用量" not in screen and "12.34" not in screen and "50.00" not in screen
         assert app.rows[-1] == (codex, MetricId.CODEX_CREDITS)
         credits_prompt = str(app.listing.get_option_at_index(app.option_index(app.rows[-1])).prompt)
-        assert "Codex credits" in credits_prompt and "1234.50 credits" in credits_prompt
+        assert "Codex credits 余额" in credits_prompt and "1,234.50 credits" in credits_prompt
         app.listing.highlighted = app.option_index(app.rows[-1])
         await pilot.press("enter")
         assert isinstance(app.screen, InformationScreen)
-        assert "1234.50 credits" in app.screen.content
+        assert "1,234.50 credits" in app.screen.content
         assert "codex.wham.usage.v1" in app.screen.content
         await pilot.press("escape")
         app.listing.focus()
@@ -718,7 +718,7 @@ async def test_real_claude_credits_and_openai_balance_rows_display_rounded_value
         credit = str(
             app.listing.get_option_at_index(app.option_index((claude, claude_rows[-1]))).prompt
         )
-        assert "Claude 已购 credits 余额" in credit and "1234.56 USD" in credit
+        assert "Claude credits 余额" in credit and "1,234.56 USD" in credit
         assert "未知" not in credit and "舍入" not in credit
 
         openai_rows = [m for a, m in app.rows if a == openai]

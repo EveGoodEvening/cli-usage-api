@@ -685,7 +685,7 @@ async def test_dashboard_publishes_optional_spend_and_credit_extras(token_store,
     )
     credits = Metric(
         id=MetricId.CODEX_CREDITS,
-        label="Codex credits",
+        label="Codex credits 余额",
         state=MetricState.READY,
         source=source,
         credits=Decimal("1.5E-7"),

@@ -53,9 +53,9 @@ theme produce a warning and fall back to nord; save failures are also reported.
 
 | Provider | Displayed metrics |
 |---|---|
-| Claude subscription | 5-hour, weekly, and model-scoped Fable weekly usage; optional prepaid credits balance (Claude 已购 credits 余额) when an organization is selected |
+| Claude subscription | 5-hour, weekly, and model-scoped Fable weekly usage; optional prepaid credits balance (Claude credits 余额) when an organization is selected |
 | Claude Platform | Purchased, promotional, and authoritative total credit balances; grant expiry |
-| Codex | Weekly (7-day) quota, plus reported optional windows such as 5-hour usage, and a Codex credits balance (or Unlimited) when reported |
+| Codex | Weekly (7-day) quota, plus reported optional windows such as 5-hour usage, and a Codex credits balance (Codex credits 余额, or Unlimited) when reported |
 | Grok | Shared-pool usage and GrokBuild / GrokChat consumption shares |
 | OpenAI Platform | Available prepaid credit balance, plus paid-available balance when reported |
 
@@ -70,8 +70,9 @@ shares need not sum to the aggregate. Codex hides `plan_type`, `allowed`, and
 `limit_reached`; quota percentages and reset times remain visible.
 
 Codex credits come from the same usage response: a non-currency amount shown as
-`<amount> credits` rounded half-even to two decimals (e.g. `137.50 credits`; the API
-JSON keeps the exact value; never converted to money or given an expiry), or
+`<amount> credits` rounded half-even to two decimals with comma-grouped thousands
+(e.g. `12,345.50 credits`; money amounts are grouped the same way; the API JSON keeps
+the exact ungrouped value; never converted to money or given an expiry), or
 `不限量` / Unlimited. Like the official client, no row appears when the account has no
 credits. Claude subscription extra usage (spend in the current billing period
 against an optional monthly cap) is parsed from the existing usage response into

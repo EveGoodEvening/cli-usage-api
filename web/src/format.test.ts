@@ -8,6 +8,7 @@ import {
   utcOffset,
   formatMoney,
   formatMoneyAmount,
+  groupThousands,
   overagePercent,
   parseDecimal,
   percentText,
@@ -24,9 +25,22 @@ describe("money", () => {
     expect(formatMoney({ minor: 5, currency: "USD", exponent: 2 })).toBe("0.05 USD");
     expect(formatMoney({ minor: 0, currency: "USD", exponent: 2 })).toBe("0.00 USD");
     expect(formatMoney({ minor: -1234, currency: "EUR", exponent: 2 })).toBe("-12.34 EUR");
-    expect(formatMoney({ minor: 1500, currency: "JPY", exponent: 0 })).toBe("1500 JPY");
+    expect(formatMoney({ minor: 1500, currency: "JPY", exponent: 0 })).toBe("1,500 JPY");
     expect(formatMoney({ minor: 12345, currency: "KWD", exponent: 3 })).toBe("12.345 KWD");
     expect(formatMoney({ minor: 7, currency: "USD", exponent: 4 })).toBe("0.0007 USD");
+  });
+
+  it("groups integer digits with commas, like domain.group_thousands", () => {
+    expect(formatMoney({ minor: -123450, currency: "USD", exponent: 2 })).toBe("-1,234.50 USD");
+    expect(formatMoney({ minor: 99999, currency: "USD", exponent: 2 })).toBe("999.99 USD");
+    expect(formatMoney({ minor: 1234567, currency: "JPY", exponent: 0 })).toBe("1,234,567 JPY");
+    expect(formatMoney({ minor: 1234567, currency: "BHD", exponent: 3 })).toBe("1,234.567 BHD");
+    expect(formatMoney({ minor: Number.MAX_SAFE_INTEGER, currency: "USD", exponent: 2 })).toBe(
+      "90,071,992,547,409.91 USD",
+    );
+    expect(formatMoneyAmount({ minor: -123456789, currency: "USD", exponent: 2 })).toBe("-1,234,567.89");
+    expect(groupThousands("-0.00")).toBe("-0.00");
+    expect(groupThousands("12345678901234567890.5")).toBe("12,345,678,901,234,567,890.5");
   });
 
   it("never invents a value for missing or malformed money", () => {

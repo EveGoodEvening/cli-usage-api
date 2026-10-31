@@ -381,7 +381,7 @@ def test_snapshot_summary_includes_spend_credits_and_unlimited(tmp_path):
                 Metric("test.unlimited", "u", MetricState.READY, source, unlimited=True),
                 Metric(
                     MetricId.CODEX_CREDITS,
-                    "Codex credits",
+                    "Codex credits 余额",
                     MetricState.READY,
                     source,
                     credits=Decimal("-0.50"),

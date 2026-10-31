@@ -312,7 +312,7 @@ describe("AccountForm: OpenAI Platform and Claude credits", () => {
 
   it("offers optional credits discovery for a Claude login and preselects nothing", () => {
     const fresh = form({ initialDraft: newDraft("claude_subscription", true) });
-    expect(text(fresh)).toContain("Claude 已购 credits 余额");
+    expect(text(fresh)).toContain("Claude credits 余额");
     expect(/name="credits"[^>]*checked/.test(fresh)).toBe(true);
     expect(text(fresh)).toContain("不读取 credits 余额");
     expect(text(fresh)).not.toContain("保留已保存的组织");
@@ -335,6 +335,6 @@ describe("AccountForm: OpenAI Platform and Claude credits", () => {
     expect(html).not.toContain(ORG_ID);
     // An API key source has no credits section.
     const key = withKind(newDraft("claude_subscription", true), "api_key", null);
-    expect(text(form({ initialDraft: key }))).not.toContain("Claude 已购 credits 余额");
+    expect(text(form({ initialDraft: key }))).not.toContain("Claude credits 余额");
   });
 });

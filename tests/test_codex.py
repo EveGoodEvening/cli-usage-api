@@ -612,7 +612,7 @@ async def test_unlimited_credits_win_over_other_fields(has_credits, balance):
     assert row.state == MetricState.READY
     assert row.unlimited is True
     assert row.credits is None and row.quota is None and row.balance is None
-    assert row.label == "Codex credits"
+    assert row.label == "Codex credits 余额"
     assert snapshot.fetch_state == FetchState.OK
     assert snapshot.diagnostic is None
     rows(snapshot)

@@ -2,6 +2,7 @@
 // stay strings, money stays integer minor units, unknown is "—". The only
 // display rounding is half-even to two places for Codex credits and OpenAI
 // exact money (user decision, PLAN.md); the data itself is never rounded.
+// Displayed amounts group integer digits with commas (domain.group_thousands).
 
 import type { ExactMoney, Money } from "./types";
 
@@ -76,6 +77,23 @@ export function overagePercent(used: string | null): string | null {
   return formatExact({ units: x - y, scale });
 }
 
+/**
+ * Comma-group the integer digits of plain fixed-point text, like the server's
+ * domain.group_thousands: "-1234567.891" -> "-1,234,567.891". Sign and decimals
+ * are kept as written. Display only: API JSON stays ungrouped.
+ */
+export function groupThousands(text: string): string {
+  const sign = text.startsWith("-") ? "-" : "";
+  const body = text.slice(sign.length);
+  const dot = body.indexOf(".");
+  const whole = dot < 0 ? body : body.slice(0, dot);
+  const rest = dot < 0 ? "" : body.slice(dot);
+  const head = whole.length % 3 || 3;
+  const groups = [whole.slice(0, head)];
+  for (let i = head; i < whole.length; i += 3) groups.push(whole.slice(i, i + 3));
+  return sign + groups.join(",") + rest;
+}
+
 const SIGNED_DECIMAL_RE = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
 
 /**
@@ -125,7 +143,7 @@ export function roundTwoDecimals(value: string | null | undefined): Rounded | nu
     const twice = remainder * 2n;
     if (twice > divisor || (twice === divisor && units % 2n === 1n)) units += 1n;
   }
-  const text = formatExact({ units, scale: 2 });
+  const text = groupThousands(formatExact({ units, scale: 2 }));
   return { text: match[1] ? `-${text}` : text, changed };
 }
 
@@ -153,7 +171,7 @@ export function exactMoneyCents(money: ExactMoney | null | undefined): Rounded |
 export function exactMoneyText(money: ExactMoney | null | undefined): string {
   if (!money || typeof money.currency !== "string" || !/^[A-Z]{3}$/.test(money.currency)) return UNKNOWN;
   const text = fixedPointText(money.amount);
-  return text === UNKNOWN ? UNKNOWN : `${text} ${money.currency}`;
+  return text === UNKNOWN ? UNKNOWN : `${groupThousands(text)} ${money.currency}`;
 }
 
 /** Display a percentage string verbatim with a % sign; never rounded or truncated. */
@@ -204,7 +222,7 @@ export function formatMoney(money: Money | null | undefined): string {
   const body = money.exponent
     ? `${digits.slice(0, -money.exponent)}.${digits.slice(-money.exponent)}`
     : digits;
-  return `${money.minor < 0 ? "-" : ""}${body} ${money.currency}`;
+  return `${groupThousands(`${money.minor < 0 ? "-" : ""}${body}`)} ${money.currency}`;
 }
 
 /** Amount without the currency, for large display; the currency is shown beside it. */

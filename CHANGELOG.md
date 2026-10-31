@@ -13,7 +13,7 @@ with `--read-only`; writes no longer return 405; custom login-file paths must en
   organization; it is never selected automatically). With an organization saved,
   each refresh reads usage first and, only after a successful usage response, makes
   one read-only `GET /api/oauth/organizations/{org}/prepaid/credits` request. The new
-  optional `claude.subscription.credit_balance` row ("Claude 已购 credits 余额") is a
+  optional `claude.subscription.credit_balance` row ("Claude credits 余额") is a
   regular money balance; auto-reload, expiry policy and promotional tranches appear
   only as detail. A failed credits request keeps the fresh usage rows, marks the
   credit row unknown and the account partial, and a 429 retry deadline is honored.
@@ -42,6 +42,12 @@ with `--read-only`; writes no longer return 405; custom login-file paths must en
 - Codex credits are now displayed rounded half-even to two decimals (`137.50
   credits`) in the TUI and web; the API JSON still carries the exact amount.
 - The scheduler treats `retry_at` on a partial snapshot as a retry embargo.
+- Credit rows share one naming pattern: `Codex credits 余额` (was `Codex credits`)
+  and `Claude credits 余额` (was `Claude 已购 credits 余额`); metric IDs are unchanged.
+- Displayed amounts group integer digits with commas in the TUI and web: Codex
+  credits (`12,345.50 credits`), cents-rounded and exact OpenAI money, and every
+  minor-unit money balance, grant and detail amount (`-1,234.50 USD`). Rounding is
+  unchanged; snapshots, the API JSON and the debug log keep exact ungrouped values.
 
 ### Added — Codex credits row and parse-only Claude extra usage
 

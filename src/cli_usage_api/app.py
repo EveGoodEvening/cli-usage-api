@@ -34,6 +34,7 @@ from cli_usage_api.domain import (
     ProviderId,
     Snapshot,
     format_two_decimals,
+    group_thousands,
     sanitize_text,
 )
 from cli_usage_api.providers.grok import MISSING_DETAIL as GROK_MISSING
@@ -49,8 +50,8 @@ METRIC_LABELS = {
     "claude.platform.total_balance": "Claude Platform 总余额",
     "codex.subscription.weekly": "Codex weekly (7d)",
     "codex.subscription.five_hour": "Codex 5h",
-    "codex.subscription.credits": "Codex credits",
-    "claude.subscription.credit_balance": "Claude 已购 credits 余额",
+    "codex.subscription.credits": "Codex credits 余额",
+    "claude.subscription.credit_balance": "Claude credits 余额",
     "openai.platform.available_balance": "OpenAI 可用余额",
     "openai.platform.paid_available_balance": "OpenAI 付费余额",
     "claude.subscription.extra_usage": "Claude 额外用量",
@@ -1267,7 +1268,9 @@ class UsageApp(App[None]):
             if metric.exact_balance is not None:
                 # The row shows cents; the exact server amount stays inspectable here.
                 exact = metric.exact_balance
-                lines.append(f"精确金额 / exact: {format(exact.amount, 'f')} {exact.currency}")
+                lines.append(
+                    f"精确金额 / exact: {group_thousands(format(exact.amount, 'f'))} {exact.currency}"
+                )
         if snapshot:
             lines.extend(
                 [
@@ -1378,7 +1381,7 @@ class UsageApp(App[None]):
         self.push_screen(
             InformationScreen(
                 "帮助 / Help",
-                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理（Shift+↑↓ 或拖动调整账号顺序）；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 主界面取消选择；弹窗返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。OpenAI Platform 金额按分显示（银行家舍入，舍入时注明）；Codex credits 显示两位小数；API/数据保留精确值。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
+                "q / Ctrl-C 退出（包括对话框）\nr 请求刷新；调度器合并并遵守重试期限\na 账号管理（Shift+↑↓ 或拖动调整账号顺序）；DEMO 只读\nTab / Shift-Tab 切换控件；↑↓ 选择并滚动；Enter 查看详情\nEscape 主界面取消选择；弹窗返回\n\n已用 / 剩余为数值，条形图仅绘图限制在 100%。\nSTALE / LAST KNOWN 为旧观察，不是当前实时额度。倒计时结束等待刷新，不会清零。\n余额有币种；赠款到期不等于周期重置。OpenAI Platform 金额按分显示（银行家舍入，舍入时注明）；Codex credits 余额显示两位小数；金额与 credits 按千位加逗号；API/数据保留精确值。GrokBuild / GrokChat 消耗同一共享池。\nCodex weekly (7d) 为七天窗口，不表示日历周；缺失时显示未知。Codex 5h 及其他时长/独立池仅在上游报告时显示，不相加。DEMO 是合成样例，不是实时额度证据。\n\n凭据过期请在官方客户端重新登录或在账号管理中替换；本程序不刷新上游令牌。",
             )
         )
 

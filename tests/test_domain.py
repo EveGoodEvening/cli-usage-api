@@ -34,6 +34,7 @@ from cli_usage_api.domain import (
     dumps,
     format_timestamp,
     format_two_decimals,
+    group_thousands,
     loads,
     new_account_id,
     openai_organization_id,
@@ -589,7 +590,9 @@ def extra(**changes):
 
 
 def credits_row(**changes):
-    return Metric(MetricId.CODEX_CREDITS, "Codex credits", MetricState.READY, SOURCE, **changes)
+    return Metric(
+        MetricId.CODEX_CREDITS, "Codex credits 余额", MetricState.READY, SOURCE, **changes
+    )
 
 
 def test_new_metric_fields_default_to_absent():
@@ -936,6 +939,39 @@ def test_organization_and_session_input_helpers():
             openai_session_key(value)
 
 
+@pytest.mark.parametrize(
+    ("text", "grouped"),
+    [
+        ("0", "0"),
+        ("999", "999"),
+        ("1000", "1,000"),
+        ("-0.00", "-0.00"),
+        ("1234567.891", "1,234,567.891"),
+        ("-1234.50", "-1,234.50"),
+        ("12345678901234567890.5", "12,345,678,901,234,567,890.5"),
+    ],
+)
+def test_group_thousands_groups_only_integer_digits(text, grouped):
+    assert group_thousands(text) == grouped
+
+
+def test_displayed_amounts_group_thousands_without_changing_rounding_or_data():
+    assert format_two_decimals(Decimal("999.995")) == "1,000.00"
+    assert format_two_decimals(Decimal("1234567.891")) == "1,234,567.89"
+    assert format_two_decimals(Decimal("0.5")) == "0.50"
+    assert format_two_decimals(Decimal("-0.001")) == "-0.00"
+    assert format_two_decimals(Decimal("1E+21")) == "1,000,000,000,000,000,000,000.00"
+    assert ExactMoney(Decimal("-1234.5"), "USD").format_cents() == "-1,234.50 USD"
+    value = ExactMoney(Decimal("12345.675"), "USD")
+    assert value.format_cents() == "12,345.68 USD" and value.amount == Decimal("12345.675")
+    assert Money(-123450, "USD", 2).format() == "-1,234.50 USD"
+    assert Money(-5, "USD", 2).format() == "-0.05 USD"
+    assert Money(1234567, "JPY", 0).format() == "1,234,567 JPY"
+    assert Money(1234567, "BHD", 3).format() == "1,234.567 BHD"
+    assert Money(999, "USD", 2).format() == "9.99 USD"
+    assert Money(10**18, "USD", 2).format() == "10,000,000,000,000,000.00 USD"
+
+
 def test_exact_money_bounds_rounding_and_round_trip():
     value = ExactMoney(Decimal("17.3715455"), "USD")
     assert value.rounded_to_cents() == (Decimal("17.37"), True)
@@ -945,7 +981,7 @@ def test_exact_money_bounds_rounding_and_round_trip():
     assert ExactMoney(Decimal("0.125"), "USD").format_cents() == "0.12 USD"
     assert ExactMoney(Decimal("0.135"), "USD").format_cents() == "0.14 USD"
     assert ExactMoney(Decimal("-3.075"), "USD").format_cents() == "-3.08 USD"
-    assert ExactMoney(Decimal("1E+3"), "USD").format_cents() == "1000.00 USD"
+    assert ExactMoney(Decimal("1E+3"), "USD").format_cents() == "1,000.00 USD"
     assert ExactMoney(5, "USD").amount == Decimal(5)
     assert format_two_decimals(Decimal("137.5")) == "137.50"
     assert format_two_decimals(Decimal("1E-30")) == "0.00"

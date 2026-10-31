@@ -62,7 +62,7 @@ export const OPENAI_SESSION_WARNING_ZH =
 
 /** The Claude subscription prepaid-credits read: optional, explicit, one extra request. */
 export const CREDITS_HELP =
-  "可选：读取 Claude 已购 credits 余额。“发现组织”只读取当前登录的资料（只读），不会自动选择；" +
+  "可选：读取 Claude credits 余额。“发现组织”只读取当前登录的资料（只读），不会自动选择；" +
   "明确选择组织后，每次刷新会多发一个只读请求。选择“不读取”则只读取用量。";
 
 /** Choice text: Grok scopes and nameless organizations are numbered, never named by id. */
@@ -685,7 +685,7 @@ export function AccountForm({
 
         {credits ? (
           <fieldset className="field">
-            <legend className="field__label">Claude 已购 credits 余额</legend>
+            <legend className="field__label">Claude credits 余额</legend>
             <p className="field__help">{CREDITS_HELP}</p>
             <label className="check">
               <input
