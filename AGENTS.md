@@ -432,3 +432,10 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   non-shrinking `.num`, lead ellipsizes, flex gap not a trailing space, `contain:
   inline-size` so it cannot widen the board-wide track) and the phone `row__sub` line,
   not a separate `row__detail`; a displaced expiry stays in the title, phone line, facts.
+- TUI header clocks (成功/尝试, retry) snap to one board-wide metric-grid column:
+  剩余, else 已用, else the bar column, sized by every account's widest-form reserve
+  so headers agree and ticks never move them. Amount rows (money, credits) start in
+  the 剩余 column with no `余额`/`credits` placeholder; narrow rows keep the bare
+  amount on the label line and drop an empty second line. Claude credits appear only
+  when the Claude subscription account has a saved organization; a web view that shows
+  them may be served by a different host/config than the local TUI.

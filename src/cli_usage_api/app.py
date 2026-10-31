@@ -786,36 +786,11 @@ class UsageApp(App[None]):
         snapshot = self.snapshots.get(account.id)
         now = self.now()
         chips = self._chips(account, tier, now)
-        times, later = Text(), Text()
-        reserves = [0, 0]
+        times, later, reserves = self._clocks(account, now)
         lines: list[Text] = []
         hoisted: str | None = None
         if account.enabled and snapshot is not None:
             code = str(snapshot.fetch_state)
-
-            def clock(value: datetime) -> str:
-                return short_local_time(value, now).removeprefix("今天 ")
-
-            times.style = "dim"
-            elapsed = "" if snapshot.fetched_at is None else age(snapshot.fetched_at, now)
-            times.append(
-                "成功 "
-                + (
-                    "—"
-                    if snapshot.fetched_at is None
-                    else f"{clock(snapshot.fetched_at)} ({elapsed})"
-                )
-            )
-            times.append(f" · 尝试 {clock(snapshot.attempted_at)}")
-            reserves[0] = times.cell_len + max(0, AGE_RESERVE - cell_len(elapsed))
-            if snapshot.retry_at:
-                remaining = relative_reset(snapshot.retry_at, now, precise=True)
-                later.append(
-                    f"重试 / retry {short_local_time(snapshot.retry_at, now, '%H:%M:%S').removeprefix('今天 ')} · "
-                    + remaining,
-                    style=self._color("warning"),
-                )
-                reserves[1] = later.cell_len + max(0, RETRY_RESERVE - cell_len(remaining))
             if snapshot.diagnostic:
                 lines.append(
                     Text(
@@ -834,24 +809,31 @@ class UsageApp(App[None]):
         segments = [chips, name] if chips_first else [name, chips]
         packed: list[Text] = []
         footprint = 0
-        for segment, reserve in [
-            *((s, 0) for s in segments),
-            (times, reserves[0]),
-            (later, reserves[1]),
+        # Clock segments share one board-wide metric-grid column when they fit there.
+        column = self._clock_column(tier, width, now)
+        for segment, reserve, anchored in [
+            *((s, 0, False) for s in segments),
+            (times, reserves[0], True),
+            (later, reserves[1], True),
         ]:
             if not segment.plain:
                 continue
             # Clock-driven text packs at its widest form so ticks never reflow lines.
             size = max(segment.cell_len, reserve)
+            start = column if anchored and column is not None and column + size <= width else None
             if not packed:
                 packed.append(Text("▌", style="bold").append_text(segment))
                 footprint = 1 + size
-            elif footprint + 3 + size <= width:
+            elif start is not None and footprint + 2 <= start:
+                packed[-1].append(" " * (start - footprint)).append_text(segment)
+                footprint = start + size
+            elif start is None and footprint + 3 + size <= width:
                 packed[-1].append("   ").append_text(segment)
                 footprint += 3 + size
             else:
-                packed.append(Text("  ").append_text(segment))
-                footprint = 2 + size
+                indent = 2 if start is None else start
+                packed.append(Text(" " * indent).append_text(segment))
+                footprint = indent + size
         result = Text(no_wrap=True, overflow="ellipsis")
         for index, line in enumerate(packed):
             result.append("\n" if index else "")
@@ -862,6 +844,44 @@ class UsageApp(App[None]):
         if hoisted:
             result.append_text(self._wrapped("ⓘ " + hoisted, width, "  ", "dim"))
         return result
+
+    def _clocks(self, account: Account, now: datetime) -> tuple[Text, Text, list[int]]:
+        """Header success/attempt and retry text, each with its widest clock-driven form."""
+        snapshot = self.snapshots.get(account.id)
+        times, later = Text(), Text()
+        reserves = [0, 0]
+        if not account.enabled or snapshot is None:
+            return times, later, reserves
+
+        def clock(value: datetime) -> str:
+            return short_local_time(value, now).removeprefix("今天 ")
+
+        times.style = "dim"
+        elapsed = "" if snapshot.fetched_at is None else age(snapshot.fetched_at, now)
+        times.append(
+            "成功 "
+            + ("—" if snapshot.fetched_at is None else f"{clock(snapshot.fetched_at)} ({elapsed})")
+        )
+        times.append(f" · 尝试 {clock(snapshot.attempted_at)}")
+        reserves[0] = times.cell_len + max(0, AGE_RESERVE - cell_len(elapsed))
+        if snapshot.retry_at:
+            remaining = relative_reset(snapshot.retry_at, now, precise=True)
+            later.append(
+                f"重试 / retry {short_local_time(snapshot.retry_at, now, '%H:%M:%S').removeprefix('今天 ')} · "
+                + remaining,
+                style=self._color("warning"),
+            )
+            reserves[1] = later.cell_len + max(0, RETRY_RESERVE - cell_len(remaining))
+        return times, later, reserves
+
+    def _clock_column(self, tier: str, width: int, now: datetime) -> int | None:
+        """One board-wide grid column for header clocks: 剩余, else 已用, else the bar.
+
+        Sized by every visible account's success/attempt text so all headers agree.
+        """
+        grid = self._grid(tier, width)
+        widest = max((self._clocks(account, now)[2][0] for account, _ in self._groups()), default=0)
+        return next((start for start in reversed(grid or ()) if start + widest <= width), None)
 
     def _chips(self, account: Account, tier: str, now: datetime) -> Text:
         chips = Text()
@@ -933,19 +953,7 @@ class UsageApp(App[None]):
         nest, last = self._nesting(account).get(metric_id, ("", False))
         prefix = "  " + (nest + " " if nest else "")
         name = self._label(account, metric_id) + (" ⟲" if dim else "")
-        used_w, rest_w = 12, 11
-        values_w = 1 + used_w + 1 + rest_w + 1
-        # Labels shrink only when the row (minimal bar plus a short reset) cannot fit.
-        label_w = min(self._label_cap(), max(20, width - 1 - (6 + 1) - values_w - 10))
-        spare = width - label_w - 2 - values_w
-        # Spare width grows the bar while the absolute reset time still fits.
-        bar_w = (
-            24
-            if tier == "wide"
-            else 8
-            if tier == "narrow"
-            else max(6, min(24, max(spare - 22, min(8, spare - 10))))
-        )
+        label_w, bar_w, used_w, rest_w = self._columns(tier, width)
         extra: list[str] = []
         notes: list[str] = []
         reset = Text()
@@ -1005,31 +1013,16 @@ class UsageApp(App[None]):
                 if metric_id == "claude.platform.total_balance"
                 else "bold",
             )
-            cells = [
-                cell(Text("余额", style="dim"), bar_w + 1),
-                cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
-            ]
             reset = Text("无周期重置", style="dim")
         elif (exact := exact_balance_text(metric)) is not None:
             # Exact server money shown at cents; the data keeps the exact amount.
             amount = Text(exact[0], style="bold")
-            cells = [
-                cell(Text("余额", style="dim"), bar_w + 1),
-                cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
-            ]
             reset = Text("无周期重置", style="dim")
             if exact[1]:
                 notes.append(ROUNDED_NOTE)
         elif metric.quota is None and (credits := credit_text(metric)) is not None:
             # Credits are not money and carry no inferred expiry or reset.
             amount = Text(credits, style="bold")
-            cells = [
-                cell(
-                    Text("余额" if metric.credits is not None else "credits", style="dim"),
-                    bar_w + 1,
-                ),
-                cell(amount, used_w + 1 + rest_w, justify="right", truncate=False),
-            ]
         elif metric.share_percent is not None:
             # A pool share draws bar + used only: no derived remaining, no reset.
             share = metric.share_percent
@@ -1088,6 +1081,9 @@ class UsageApp(App[None]):
                     cell(Text(f"已用 {parts[0]}", style="bold"), used_w, truncate=False),
                     cell(Text(f"剩余 {parts[2]}", style="bold"), rest_w, truncate=False),
                 ]
+        if amount is not None:
+            # Amounts start in the 剩余 column; the label already says it is a balance.
+            cells = [cell("", bar_w + 1), cell("", used_w), cell(amount, rest_w, truncate=False)]
         resets = [reset]
         if (
             metric is not None
@@ -1146,7 +1142,7 @@ class UsageApp(App[None]):
             value = None
             if amount is not None:
                 # The bare amount (not its wide padded cell) sits on the label line.
-                body.pop(1)
+                body = []
                 value = amount
             elif len(body) > 1 and body[1].plain.startswith(("已用", "—")):
                 value = body.pop(1)
@@ -1161,8 +1157,10 @@ class UsageApp(App[None]):
             line.append(("│ " if not last else "  ") if nest else "", style="dim")
             for part in body:
                 line.append_text(part).append(" ")
-            prompt.append("\n").append_text(line)
-            self._append_reset(prompt, resets, width, indent)
+            # An amount without a reset (credits) needs no empty second line.
+            if body or resets[0].plain:
+                prompt.append("\n").append_text(line)
+                self._append_reset(prompt, resets, width, indent)
         else:
             prompt.append_text(cell(prefix + middle(name, label_w - cell_len(prefix)), label_w))
             prompt.append(" ")
@@ -1177,6 +1175,35 @@ class UsageApp(App[None]):
         if detail:
             prompt.append_text(self._wrapped(detail, width, indent, "dim"))
         return prompt
+
+    def _columns(self, tier: str, width: int) -> tuple[int, int, int, int]:
+        """Metric row cell widths: label (with indent), bar, used and remaining."""
+        used_w, rest_w = 12, 11
+        values_w = 1 + used_w + 1 + rest_w + 1
+        # Labels shrink only when the row (minimal bar plus a short reset) cannot fit.
+        label_w = min(self._label_cap(), max(20, width - 1 - (6 + 1) - values_w - 10))
+        spare = width - label_w - 2 - values_w
+        # Spare width grows the bar while the absolute reset time still fits.
+        bar_w = (
+            24
+            if tier == "wide"
+            else 8
+            if tier == "narrow"
+            else max(6, min(24, max(spare - 22, min(8, spare - 10))))
+        )
+        return label_w, bar_w, used_w, rest_w
+
+    def _grid(self, tier: str, width: int) -> tuple[int, int, int] | None:
+        """Start columns of the bar, 已用 and 剩余 cells (amounts start at 剩余).
+
+        Narrow rows stack their cells, so they have no shared columns.
+        """
+        if tier == "narrow":
+            return None
+        label_w, bar_w, used_w, _ = self._columns(tier, width)
+        bar_at = label_w + 1
+        used_at = bar_at + bar_w + 1 + 1
+        return bar_at, used_at, used_at + used_w + 1
 
     def _label_cap(self) -> int:
         """26 cells, widened (to 30 at most) only when a visible known label needs it."""

@@ -564,7 +564,45 @@ async def test_narrow_balance_amount_sits_on_its_label_line(size):
             text = prompt(app, row(app, metric_id))
             first, second = text.split("\n")
             assert first.startswith("  Claude") and first.rstrip().endswith(amount)
-            assert second.startswith("  余额") and "无周期重置" in second
+            # No redundant 余额 placeholder: the label already names a balance.
+            assert second == "  无周期重置"
+            assert lines_fit(app, text)
+        await pilot.press("q")
+
+
+def column(line: str, token: str) -> int:
+    return cell_len(line[: line.index(token)])
+
+
+@pytest.mark.parametrize("width", [80, 90, 100, 110, 120, 140])
+async def test_header_clocks_and_amounts_share_metric_grid_columns(width):
+    app = UsageApp(mode="demo")
+    async with app.run_test(size=(width, 60)) as pilot:
+        await pilot.pause()
+        weekly = prompt(app, row(app, MetricId.CODEX_WEEKLY))
+        used, rest = column(weekly, "已用"), column(weekly, "剩余")
+        bar_at = column(weekly, next(char for char in weekly if char in BARS))
+        clocks = set()
+        for account in app.accounts:
+            line = next(x for x in header(app, account).split("\n") if "成功" in x)
+            clocks.add(column(line, "成功"))
+        # Every header's success/attempt text starts in the same grid column:
+        # 剩余 when it fits there (wide terminals), otherwise 已用, otherwise the bar.
+        assert len(clocks) == 1 and clocks.pop() in (rest, used, bar_at)
+        if width >= 120:
+            assert column(header(app, app.accounts[0]), "成功") == rest
+        # Amounts (money and credits) start in the 剩余 column, with no 余额 placeholder.
+        for metric_id, amount in (
+            (MetricId.CODEX_CREDITS, "137.50 credits"),
+            (MetricId.CLAUDE_CREDIT_BALANCE, "25.00 USD"),
+            (MetricId.CLAUDE_PURCHASED_BALANCE, "42.50 USD"),
+            (MetricId.CLAUDE_TOTAL_BALANCE, "55.00 USD"),
+            (MetricId.OPENAI_AVAILABLE_BALANCE, "4.90 USD"),
+        ):
+            text = prompt(app, row(app, metric_id)).split("\n")[0]
+            assert column(text, amount) == rest
+            label = app._label(*row(app, metric_id))
+            assert not text[text.index(label) + len(label) : text.index(amount)].strip()
             assert lines_fit(app, text)
         await pilot.press("q")
 
@@ -763,8 +801,8 @@ async def test_codex_credits_and_unlimited_are_whole_values_not_unknown(size):
             assert app.snapshots[target[0].id].metrics[-1].credits == value
             if size[0] < 72:
                 # Narrow: the bare amount sits on the label line.
-                first, second = text.split("\n")[:2]
-                assert first.rstrip().endswith(shown) and second.startswith("  余额")
+                # Narrow: the bare amount sits on the label line, with no reset line.
+                assert "\n" not in text and text.rstrip().endswith(shown)
 
         target = codex_extra(app, unlimited=True)
         text = prompt(app, target)
@@ -901,7 +939,7 @@ async def test_openai_exact_balance_rounds_to_cents_with_note_in_every_tier(size
             assert app.snapshots[OPENAI.id].metrics[0].exact_balance.amount == available
             if size[0] < 72:
                 first, second = text.split("\n")[:2]
-                assert first.rstrip().endswith(shown) and second.startswith("  余额")
+                assert first.rstrip().endswith(shown) and second == "  无周期重置"
             paid = prompt(app, (OPENAI, MetricId.OPENAI_PAID_AVAILABLE_BALANCE))
             assert "4.90 USD" in paid and "舍入" not in paid and lines_fit(app, paid)
             if size[0] >= 100:
