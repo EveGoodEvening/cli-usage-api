@@ -27,7 +27,7 @@ export interface MetricRowProps {
   muted?: boolean;
   /** The board note for this row (planRows), or null. */
   detail?: string | null;
-  /** The detail carries a balance mismatch difference. */
+  /** The detail is a balance mismatch difference: it takes the reset cell, not a line. */
   mismatch?: boolean;
   expanded?: boolean;
   onToggle?: () => void;
@@ -42,6 +42,8 @@ interface Timing {
   cell: ReactNode;
   /** Phone third-line fragment. */
   phone: ReactNode;
+  /** The cell's full time text, kept when another note takes the cell. */
+  title?: string;
 }
 
 function timing(metric: Metric | null, now: number, quotaLike: boolean): Timing {
@@ -61,6 +63,7 @@ function timing(metric: Metric | null, now: number, quotaLike: boolean): Timing 
           )}
         </time>
       ),
+      title: timeTitle(metric.reset_at, reset, "重置 "),
       phone: passed ? (
         <span className="is-warn">重置已过 · {rel}</span>
       ) : (
@@ -82,6 +85,7 @@ function timing(metric: Metric | null, now: number, quotaLike: boolean): Timing 
           到期 {shortLocal(expiry, now)}
         </time>
       ),
+      title: timeTitle(metric.expires_at, expiry, "到期 "),
     };
   }
   if (quotaLike) {
@@ -95,6 +99,29 @@ function timing(metric: Metric | null, now: number, quotaLike: boolean): Timing 
     };
   }
   return { cell: <span className="row__reset" />, phone: null };
+}
+
+/**
+ * A balance mismatch difference takes the total row's reset/expiry cell. The
+ * signed amount never truncates; only its "总额 − 明细合计 =" lead does.
+ */
+function mismatchCell(detail: string, time: Timing): ReactNode {
+  // The flex gap stands in for the space before the amount: a trailing space
+  // inside the nowrap lead would collapse at its line end.
+  const at = detail.lastIndexOf(" = ");
+  const title = time.title ? `${detail} · ${time.title}` : detail;
+  return (
+    <span className="row__reset row__reset--mismatch" title={title}>
+      {at < 0 ? (
+        <span className="row__reset-what">{detail}</span>
+      ) : (
+        <>
+          <span className="row__reset-what">{detail.slice(0, at + 2)}</span>
+          <span className="num">{detail.slice(at + 3)}</span>
+        </>
+      )}
+    </span>
+  );
 }
 
 function sourceText(metric: Metric): string {
@@ -262,6 +289,11 @@ export function MetricRow({
       );
     }
   }
+  const diff = mismatch && detail ? detail : null;
+  if (diff) {
+    time = { ...time, cell: mismatchCell(diff, time) };
+    sub.push(<span className="is-warn">{diff}</span>);
+  }
   sub = sub.filter(Boolean);
 
   return (
@@ -292,9 +324,7 @@ export function MetricRow({
         ) : null}
         {counts}
       </button>
-      {detail && !expanded ? (
-        <p className={`row__detail${mismatch ? " row__detail--mismatch" : ""}`}>{detail}</p>
-      ) : null}
+      {detail && !diff && !expanded ? <p className="row__detail">{detail}</p> : null}
       {expanded && metric ? <Facts className="row__facts" id={factsId} items={rowFacts(metric)} /> : null}
       {expanded && !metric ? (
         <Facts

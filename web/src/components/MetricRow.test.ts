@@ -121,3 +121,57 @@ describe("MetricRow overage", () => {
     }
   });
 });
+
+describe("MetricRow balance mismatch", () => {
+  const DIFF = "总额 − 明细合计 = -0.01 USD";
+  const total = (overrides: Partial<Metric> = {}) =>
+    metric({
+      id: "claude.platform.total_balance",
+      label: "Claude Platform 总余额",
+      shared_pool_id: null,
+      balance: { minor: 1451, currency: "USD", exponent: 2 },
+      detail: DIFF,
+      ...overrides,
+    });
+  const renderTotal = (m: Metric, expanded = false) =>
+    renderToStaticMarkup(createElement(MetricRow, { id: m.id, metric: m, now: NOW, detail: DIFF, mismatch: true, expanded }));
+  const cell = (html: string) => /<span class="row__reset row__reset--mismatch"[^>]*>(.*?)<\/span><span class="row__sub">/.exec(html);
+
+  it("puts the difference in the total row's reset cell, not a separate line", () => {
+    const html = renderTotal(total());
+    expect(html).not.toContain("row__detail");
+    const found = cell(html);
+    expect(found).not.toBeNull();
+    expect(html).toContain(`title="${DIFF}"`);
+    // The signed amount sits outside the ellipsizing lead; the flex gap supplies the space.
+    expect(found![1] ?? "").toBe(
+      '<span class="row__reset-what">总额 − 明细合计 =</span><span class="num">-0.01 USD</span>',
+    );
+    expect(html.split("row__sub")[1]).toContain(`<span class="is-warn">${DIFF}</span>`);
+  });
+
+  it("keeps a displaced expiry in the title, phone line and facts", () => {
+    const html = renderTotal(total({ expires_at: "2026-11-01T00:00:00Z" }));
+    expect(cell(html)).not.toBeNull();
+    expect(html).toMatch(new RegExp(`title="${DIFF} · 到期 [^"]+"`));
+    expect(text(html.split('class="row__sub"')[1] ?? "")).toContain("到期");
+    const open = renderTotal(total({ expires_at: "2026-11-01T00:00:00Z" }), true);
+    const facts = open.split('class="facts row__facts"')[1] ?? "";
+    expect(facts).toContain("2026-11-01T00:00:00Z");
+    expect(text(facts)).toContain(DIFF);
+  });
+
+  it("keeps the amount unclipped and the phone line visible in the stylesheet", () => {
+    expect(css).toMatch(/\.row__reset--mismatch \.num \{ flex: none; \}/);
+    expect(css).toMatch(/\.row__reset--mismatch \{[^}]*column-gap: 0\.25em;[^}]*contain: inline-size;/);
+    const phone = css.split("@media (max-width: 639px)")[1] ?? "";
+    expect(phone).toMatch(/\.row__sub \{ display: block;/);
+  });
+
+  it("leaves an ordinary row note as its own line", () => {
+    const m = total({ detail: "note" });
+    const html = renderToStaticMarkup(createElement(MetricRow, { id: m.id, metric: m, now: NOW, detail: "note" }));
+    expect(html).toContain('<p class="row__detail">note</p>');
+    expect(html).not.toContain("row__reset--mismatch");
+  });
+});

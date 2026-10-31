@@ -85,7 +85,11 @@ describe("Board", () => {
     expect(html).toContain('<p class="group__diag"><span class="is-warn">余额明细与总额不一致；差额见总余额详情。</span></p>');
     const plain = text(html);
     expect(plain.split("余额明细与总额不一致").length - 1).toBe(1);
-    expect(plain.split("总额 − 明细合计 = 0.01 USD").length - 1).toBe(1);
+    // Once per breakpoint: the desktop reset cell and the phone sub line, never an extra row.
+    expect(plain.split("总额 − 明细合计 = 0.01 USD").length - 1).toBe(2);
+    expect(html).toContain('class="row__reset row__reset--mismatch"');
+    expect(html).toContain('<span class="is-warn">总额 − 明细合计 = 0.01 USD</span>');
+    expect(html).not.toContain("row__detail");
   });
 
   it("keeps the label for a diagnostic message that does not repeat it", () => {

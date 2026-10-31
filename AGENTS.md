@@ -428,3 +428,7 @@ acceptance record. Keep implementation and authenticated/live acceptance separat
   provider detail text) group integer digits via `domain.group_thousands` / web
   `groupThousands`; keep Python and web text identical. Data/API JSON stays ungrouped.
   Credit row labels follow `<Provider> credits 余额`.
+- The web balance-mismatch difference lives in the total row's reset cell (amount in a
+  non-shrinking `.num`, lead ellipsizes, flex gap not a trailing space, `contain:
+  inline-size` so it cannot widen the board-wide track) and the phone `row__sub` line,
+  not a separate `row__detail`; a displaced expiry stays in the title, phone line, facts.

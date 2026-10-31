@@ -363,7 +363,10 @@ button:disabled { cursor: default; }
 .row__sub { display: none; }
 .row__detail { padding-bottom: 10px; }
 .row--nested .row__detail { padding-left: 16px; }
-.row__detail--mismatch { border-left: 2px solid var(--warn); padding-left: 8px; }
+/* Inline-size containment keeps the long difference from widening the board-wide reset track. */
+.row__reset--mismatch { display: flex; column-gap: 0.25em; color: var(--warn); contain: inline-size; }
+.row__reset-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.row__reset--mismatch .num { flex: none; }
 
 /* ---------------------------------------------------------------- meter */
 
